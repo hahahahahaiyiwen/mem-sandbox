@@ -119,9 +119,10 @@ workspace without introducing an agent-framework dependency.
   boundary, logical-sandbox security statement, current status, and development commands.
 - [x] **0.0.7** Move the approved Python design documents into `mem-sandbox/docs`,
   replace orchestration indexes with links, and mark retained copies as archival.
-- [ ] **0.0.8** Protect `main` with pull-request and required-check rules, adopt
-  short-lived issue branches, and retire the local `dev` branch after verifying it has no
-  unique commits.
+- [x] **0.0.8** Adopt short-lived issue branches, retire the local `dev` branch after
+  verifying it has no unique commits, and document the intended protected-`main`
+  workflow. Server-side enforcement is deferred while this private personal repository
+  is on a GitHub plan that does not provide branch protection.
 
 #### 0.1 Project decisions
 
@@ -186,15 +187,16 @@ workspace without introducing an agent-framework dependency.
 - `/workspace`, one-based inclusive text ranges, and serialized session operations.
 - Initial version `0.1.0` using semantic versioning.
 - Private repository visibility until a later explicit decision.
+- Server-side `main` protection deferred until the repository becomes public or its
+  GitHub plan supports protection for private repositories.
 - Frozen dataclasses or similarly immutable request/result models.
 - No production dependency beyond the standard library during the workspace milestone.
 
-All Milestone 0 decisions are resolved. Its remaining unchecked items are implementation
-and repository-configuration work.
+All Milestone 0 decisions are resolved.
 
 ### Exit criteria
 
-- [ ] **0.9.1** `uv sync --all-groups` and `uv build` succeed from a clean checkout.
+- [x] **0.9.1** `uv sync --all-groups` and `uv build` succeed from a clean checkout.
 - [x] **0.9.2** `uv run python -c "import mem_sandbox"` succeeds.
 - [x] **0.9.3** `uv run pytest tests/unit/foundation -q` passes.
 - [x] **0.9.4** `uv run ruff format --check src tests`, `uv run ruff check src tests`, and
@@ -206,10 +208,11 @@ and repository-configuration work.
   map resolves the same repository.
 - [x] **0.9.7** The repository contains its approved license and OSS contribution,
   conduct, security, and development documentation.
-- [ ] **0.9.8** Required GitHub checks pass on Windows and Ubuntu for Python 3.12 and
+- [x] **0.9.8** Required GitHub checks pass on Windows and Ubuntu for Python 3.12 and
   3.14.
-- [ ] **0.9.9** `main` requires pull requests and required checks, and no long-lived
-  `dev` branch remains.
+- [x] **0.9.9** No long-lived `dev` branch remains, and the pull-request-only workflow is
+  documented. GitHub enforcement is explicitly deferred under the private-repository
+  limitation recorded in `0.0.8`.
 
 ## 5. Milestone 1: workspace MVP
 
@@ -770,6 +773,7 @@ their referenced checklist task begins.
 | Workspace/session defaults | `/workspace`; one-based inclusive; serialized | `0.1.8` | Resolved |
 | Initial versioning | `0.1.0` with semantic versioning | `0.1.9` | Resolved |
 | Repository visibility | Remain private until a later explicit decision | `0.1.10` | Resolved |
+| Server-side branch protection | Defer while private plan lacks support | `0.0.8` | Deferred |
 | Patch format | One explicit context-aware format in core | `1.7.1` | Open |
 | Snapshot encoding | Deterministic, versioned, non-pickle | `1.8.1` | Open |
 | First command profile | Eight-command MVP listed above | `2.4.2` | Open |
