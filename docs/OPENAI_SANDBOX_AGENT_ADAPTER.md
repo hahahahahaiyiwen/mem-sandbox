@@ -48,9 +48,11 @@ and give `type` a non-empty string default, normally a `Literal`:
 class InMemorySandboxClientOptions(BaseSandboxClientOptions):
     type: Literal["in_memory"] = "in_memory"
     max_workspace_bytes: int = 16 * 1024 * 1024
+    max_stream_bytes: int = 32 * 1024 * 1024
 ```
 
 The model is frozen. The discriminator should equal the client's `backend_id`.
+`max_stream_bytes` bounds adapter-side buffering before data reaches the core.
 
 ### Session state
 
@@ -77,6 +79,7 @@ class InMemorySandboxSessionState(SandboxSessionState):
     type: Literal["in_memory"] = "in_memory"
     workspace_id: str
     max_workspace_bytes: int
+    max_stream_bytes: int
 ```
 
 ### Session
@@ -366,9 +369,42 @@ class SandboxCoreStore(Protocol):
     async def delete(self, workspace_id: str) -> None: ...
 
 
+def read_bounded_stream(
+    data: io.IOBase,
+    *,
+    max_bytes: int,
+    allow_text: bool,
+    description: str,
+) -> bytes:
+    if max_bytes <= 0:
+        raise ValueError("max_bytes must be positive")
+
+    chunks: list[bytes] = []
+    total = 0
+
+    while True:
+        chunk = data.read(min(64 * 1024, max_bytes - total + 1))
+        if chunk in (b"", ""):
+            return b"".join(chunks)
+        if isinstance(chunk, str):
+            if not allow_text:
+                raise TypeError(f"{description} stream must return bytes")
+            payload = chunk.encode("utf-8")
+        elif isinstance(chunk, bytes | bytearray):
+            payload = bytes(chunk)
+        else:
+            raise TypeError(f"{description} stream returned an unsupported value")
+
+        total += len(payload)
+        if total > max_bytes:
+            raise ValueError(f"{description} exceeds the {max_bytes}-byte input limit")
+        chunks.append(payload)
+
+
 class InMemorySandboxClientOptions(BaseSandboxClientOptions):
     type: Literal["in_memory"] = "in_memory"
     max_workspace_bytes: int = 16 * 1024 * 1024
+    max_stream_bytes: int = 32 * 1024 * 1024
     exposed_ports: tuple[int, ...] = ()
 
 
@@ -376,6 +412,7 @@ class InMemorySandboxSessionState(SandboxSessionState):
     type: Literal["in_memory"] = "in_memory"
     workspace_id: str
     max_workspace_bytes: int
+    max_stream_bytes: int
 
 
 class InMemorySandboxSession(BaseSandboxSession):
@@ -452,14 +489,18 @@ class InMemorySandboxSession(BaseSandboxSession):
         user: str | User | None = None,
     ) -> None:
         normalized = await self._validate_path_access(path, for_write=True)
-        payload = data.read()
-        if isinstance(payload, str):
-            payload = payload.encode("utf-8")
-        if not isinstance(payload, bytes | bytearray):
-            raise TypeError("sandbox write stream must return bytes or str")
+        payload = read_bounded_stream(
+            data,
+            max_bytes=min(
+                self.state.max_workspace_bytes,
+                self.state.max_stream_bytes,
+            ),
+            allow_text=True,
+            description="sandbox write",
+        )
         await self._core.write_bytes(
             sandbox_path_str(normalized),
-            bytes(payload),
+            payload,
             user=self._user_name(user),
         )
 
@@ -474,10 +515,13 @@ class InMemorySandboxSession(BaseSandboxSession):
         return io.BytesIO(payload)
 
     async def hydrate_workspace(self, data: io.IOBase) -> None:
-        payload = data.read()
-        if not isinstance(payload, bytes | bytearray):
-            raise TypeError("workspace archive stream must return bytes")
-        await self._core.import_workspace_tar(bytes(payload))
+        payload = read_bounded_stream(
+            data,
+            max_bytes=self.state.max_stream_bytes,
+            allow_text=False,
+            description="workspace archive",
+        )
+        await self._core.import_workspace_tar(payload)
 
     # Recommended for a native virtual filesystem. The inherited implementations
     # invoke POSIX ls, mkdir, and rm through _exec_internal().
@@ -590,6 +634,7 @@ class InMemorySandboxClient(
             session_id=session_id,
             workspace_id=workspace_id,
             max_workspace_bytes=resolved_options.max_workspace_bytes,
+            max_stream_bytes=resolved_options.max_stream_bytes,
             snapshot=resolve_snapshot(snapshot, str(session_id)),
             manifest=resolved_manifest,
             exposed_ports=resolved_options.exposed_ports,
@@ -639,6 +684,10 @@ class InMemorySandboxClient(
             InMemorySandboxSessionState,
         )
 ```
+
+The adapter input limit bounds compressed or raw bytes before buffering. The core archive
+decoder must independently enforce decompressed workspace bytes, entry count, path
+limits, and atomic restore.
 
 This is the adapter boundary, not the implementation of the virtual filesystem or shell.
 The project core should own path semantics, quotas, command policy, snapshots, and

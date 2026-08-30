@@ -8,18 +8,7 @@ from pathlib import Path
 
 from mem_sandbox import __version__
 
-FORBIDDEN_IMPORT_ROOTS = frozenset(
-    {
-        "agents",
-        "deepagents",
-        "langchain",
-        "langchain_core",
-        "langgraph",
-        "mcp",
-        "openai",
-        "pydantic_ai",
-    }
-)
+ALLOWED_CORE_IMPORT_ROOTS = frozenset(sys.stdlib_module_names) | {"mem_sandbox"}
 CORE_DIRECTORIES = (
     "core",
     "workspace",
@@ -42,6 +31,10 @@ def _absolute_import_roots(path: Path) -> set[str]:
             roots.add(node.module.partition(".")[0])
 
     return roots
+
+
+def _unexpected_core_import_roots(path: Path) -> set[str]:
+    return _absolute_import_roots(path) - ALLOWED_CORE_IMPORT_ROOTS
 
 
 def test_package_imports_in_an_isolated_interpreter() -> None:
@@ -70,7 +63,14 @@ def test_distribution_metadata_matches_the_public_package() -> None:
     assert metadata["Requires-Python"] == ">=3.12"
 
 
-def test_framework_imports_are_absent_from_core_modules() -> None:
+def test_import_guard_detects_any_third_party_package(tmp_path: Path) -> None:
+    source = tmp_path / "third_party_import.py"
+    source.write_text("import crewai\n", encoding="utf-8")
+
+    assert _unexpected_core_import_roots(source) == {"crewai"}
+
+
+def test_core_modules_import_only_stdlib_and_mem_sandbox() -> None:
     repository_root = Path(__file__).parents[3]
     package_root = repository_root / "src" / "mem_sandbox"
     source_files = [package_root / "__init__.py"]
@@ -80,12 +80,10 @@ def test_framework_imports_are_absent_from_core_modules() -> None:
         if directory.exists():
             source_files.extend(directory.rglob("*.py"))
 
-    violations = {
-        str(path.relative_to(repository_root)): sorted(
-            _absolute_import_roots(path) & FORBIDDEN_IMPORT_ROOTS
-        )
-        for path in source_files
-        if _absolute_import_roots(path) & FORBIDDEN_IMPORT_ROOTS
-    }
+    violations: dict[str, list[str]] = {}
+    for path in source_files:
+        unexpected = _unexpected_core_import_roots(path)
+        if unexpected:
+            violations[str(path.relative_to(repository_root))] = sorted(unexpected)
 
     assert violations == {}

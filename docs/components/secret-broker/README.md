@@ -35,8 +35,8 @@ class SecretRef:
 
 @dataclass(frozen=True)
 class SecretAccessRequest:
-    session_id: str
-    operation_id: str
+    session_id: SessionId
+    operation_id: OperationId
     secret_ref: SecretRef
     command_name: str | None
     destination: NetworkDestination | None
@@ -56,7 +56,8 @@ class SecretBroker(Protocol):
 ```
 
 `SecretValue` is a protected wrapper rather than a plain string. Conversion to bytes or
-text happens only at the command boundary that needs it.
+text happens only at the command boundary that needs it. `SessionId` and `OperationId`
+remain typed throughout policy and broker calls.
 
 ## Resolution flow
 

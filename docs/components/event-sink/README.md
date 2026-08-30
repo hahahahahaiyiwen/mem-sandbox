@@ -34,10 +34,10 @@ class SandboxEvent:
     event_id: str
     event_type: str
     occurred_at: datetime
-    session_id: str
+    session_id: SessionId
     sequence: int
-    operation_id: str | None
-    parent_operation_id: str | None
+    operation_id: OperationId | None
+    parent_operation_id: OperationId | None
     data: Mapping[str, EventValue]
 
 
@@ -47,7 +47,9 @@ class SandboxEventSink(Protocol):
     async def close(self) -> None: ...
 ```
 
-Events are immutable after construction.
+Events are immutable after construction. `SessionId` and `OperationId` remain typed
+inside the core; event exporters convert them to strings only when encoding an external
+event envelope.
 
 ## Event categories
 

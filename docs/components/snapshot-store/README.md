@@ -34,16 +34,16 @@ Snapshot storage is separate from the live workspace.
 ```python
 @dataclass(frozen=True)
 class SnapshotRef:
-    value: str
+    snapshot_id: SnapshotId
 
 
 @dataclass(frozen=True)
 class SandboxSnapshot:
-    snapshot_id: str
+    snapshot_id: SnapshotId
     schema_version: int
     created_at: datetime
-    source_session_id: str
-    workspace_revision: int
+    source_session_id: SessionId
+    workspace_revision: Revision
     content_hash: str
     payload: bytes
     metadata: SnapshotMetadata
@@ -54,6 +54,9 @@ class SnapshotStore(Protocol):
     async def load(self, snapshot_ref: SnapshotRef) -> SandboxSnapshot: ...
     async def delete(self, snapshot_ref: SnapshotRef) -> None: ...
 ```
+
+`SnapshotId`, `SessionId`, and `Revision` are core domain types. Snapshot codecs convert
+them to stable primitive representations only at the serialized envelope boundary.
 
 Listing snapshots is an optional host administration interface and not required by the
 session boundary.
