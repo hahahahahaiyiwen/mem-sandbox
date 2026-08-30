@@ -1,0 +1,99 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mem-sandbox"
+version = "0.1.0"
+description = "A deterministic in-memory workspace and command sandbox for AI agents"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+license-files = ["LICENSE"]
+keywords = [
+  "agents",
+  "ai",
+  "filesystem",
+  "sandbox",
+  "workspace",
+]
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "Intended Audience :: Developers",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Typing :: Typed",
+]
+dependencies = []
+
+[project.urls]
+Documentation = "https://github.com/hahahahahaiyiwen/mem-sandbox/tree/main/docs"
+Issues = "https://github.com/hahahahahaiyiwen/mem-sandbox/issues"
+Repository = "https://github.com/hahahahahaiyiwen/mem-sandbox"
+
+[dependency-groups]
+dev = [
+  "pyright>=1.1.400,<2",
+  "pytest>=8.3,<10",
+  "pytest-asyncio>=0.25,<2",
+  "ruff>=0.11,<1",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mem_sandbox"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/CODE_OF_CONDUCT.md",
+  "/CONTRIBUTING.md",
+  "/LICENSE",
+  "/README.md",
+  "/SECURITY.md",
+  "/docs",
+  "/src",
+  "/tests",
+]
+
+[tool.pytest.ini_options]
+addopts = [
+  "--strict-config",
+  "--strict-markers",
+  "-ra",
+]
+asyncio_default_fixture_loop_scope = "function"
+asyncio_mode = "strict"
+testpaths = ["tests"]
+
+[tool.pyright]
+include = ["src", "tests"]
+pythonPlatform = "All"
+pythonVersion = "3.12"
+typeCheckingMode = "strict"
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+target-version = "py312"
+
+[tool.ruff.format]
+docstring-code-format = true
+line-ending = "lf"
+
+[tool.ruff.lint]
+select = [
+  "B",
+  "E4",
+  "E7",
+  "E9",
+  "F",
+  "I",
+  "RUF",
+  "UP",
+]
+
+[tool.uv]
+default-groups = ["dev"]
