@@ -272,6 +272,7 @@ This skeleton shows the OpenAI-facing boundary. `SandboxCoreSession` and
 ```python
 from __future__ import annotations
 
+import asyncio
 import io
 import stat
 import uuid
@@ -626,21 +627,26 @@ class InMemorySandboxClient(
 
         session_id = uuid.uuid4()
         workspace_id = session_id.hex
-        core = await self._store.create(
-            workspace_id,
-            max_workspace_bytes=resolved_options.max_workspace_bytes,
-        )
+        resolved_snapshot = resolve_snapshot(snapshot, str(session_id))
         state = InMemorySandboxSessionState(
             session_id=session_id,
             workspace_id=workspace_id,
             max_workspace_bytes=resolved_options.max_workspace_bytes,
             max_stream_bytes=resolved_options.max_stream_bytes,
-            snapshot=resolve_snapshot(snapshot, str(session_id)),
+            snapshot=resolved_snapshot,
             manifest=resolved_manifest,
             exposed_ports=resolved_options.exposed_ports,
         )
-        inner = InMemorySandboxSession(state=state, core=core)
-        return self._wrap_session(inner)
+        core = await self._store.create(
+            workspace_id,
+            max_workspace_bytes=resolved_options.max_workspace_bytes,
+        )
+        try:
+            inner = InMemorySandboxSession(state=state, core=core)
+            return self._wrap_session(inner)
+        except Exception:
+            await asyncio.shield(self._store.delete(workspace_id))
+            raise
 
     async def resume(
         self,
@@ -684,6 +690,11 @@ class InMemorySandboxClient(
             InMemorySandboxSessionState,
         )
 ```
+
+Manifest, snapshot, option, and state validation occurs before the core workspace is
+allocated. There are no await points between successful allocation and ownership transfer
+to the wrapped session. If synchronous construction or wrapping fails, shielded cleanup
+deletes the newly allocated workspace before the original failure is propagated.
 
 The adapter input limit bounds compressed or raw bytes before buffering. The core archive
 decoder must independently enforce decompressed workspace bytes, entry count, path
