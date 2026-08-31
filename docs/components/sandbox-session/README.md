@@ -94,17 +94,17 @@ depend on one broad infrastructure interface.
 
 Every agent-facing operation follows the same ordered pipeline:
 
-1. Reject calls when the session state does not permit the operation.
-2. Validate request shape and limits.
-3. Normalize paths and command metadata.
-4. Create an operation identifier and emit `operation.started`.
-5. Ask the policy engine for an allow or deny decision.
-6. Acquire the required operation lane.
+1. Validate request shape and limits that do not depend on mutable session state.
+2. Acquire the session-wide operation gate.
+3. Reject calls when the session state does not permit the operation.
+4. Normalize paths and command metadata.
+5. Create an operation identifier and emit `operation.started`.
+6. Ask the policy engine for an allow or deny decision.
 7. Resolve approved secret references, if any.
 8. Invoke the workspace or command executor.
 9. Commit shell/session state changes only after successful execution.
 10. Emit a completion or failure event.
-11. Release secret leases and operation coordination.
+11. Release secret leases and the operation gate.
 12. Return a domain result or raise a stable domain error.
 
 Policy denial occurs before secret resolution and before workspace mutation.
@@ -131,22 +131,41 @@ Rules:
 - Resume constructs a new session from restored state rather than mutating a stopped
   instance from another process.
 
+  Two sessions resumed from the same snapshot are independent forks. They do not share a
+  live workspace, automatically merge changes, or report conflicts with one another.
+  Multiple callers that attach to the same live session share its operation gate and
+  workspace.
+
 ## Concurrency model
 
-The first version favors deterministic serialization:
+The first version permits one active public operation per session. Every public
+operation acquires one session-wide async operation gate and holds it through policy
+approval, collaborator invocation, state commit, and completion or failure event
+ordering.
 
 | Operation | Lane |
 |---|---|
-| Execute | Exclusive command lane |
-| Read file/range | Shared read lane, initially allowed to serialize |
-| Write file | Exclusive mutation lane |
-| Apply patch | Exclusive mutation lane |
-| Create snapshot | Consistent read boundary |
-| Restore snapshot | Global exclusive |
-| Close | Global exclusive |
+| Execute | Session-wide exclusive |
+| Read file/range | Session-wide exclusive |
+| Write file | Session-wide exclusive |
+| Apply patch | Session-wide exclusive |
+| Create snapshot | Session-wide exclusive |
+| Restore snapshot | Session-wide exclusive |
+| Close | Session-wide exclusive |
 
-An implementation may initially use one async lock for all operations. Later optimization
-may add concurrent reads, but observable results and event ordering must remain defined.
+There is no true operation concurrency inside one session in version 1. Independent
+sessions may execute concurrently because each owns its own operation gate and workspace.
+The session guarantee avoids a need for object- or file-level locks or MVCC in the
+workspace.
+
+The workspace still owns a coarse state lock as a separate invariant boundary. The lock
+order is always the session operation gate followed by the workspace state lock; the
+workspace never calls back into the session. Expected content hashes remain optional
+request preconditions for stale-write detection, not an internal optimistic-concurrency
+mechanism.
+
+Later optimization may introduce shared read lanes or revision-based immutable reads,
+but it must preserve defined results, real-time operation ordering, and event ordering.
 
 Timeout or cancellation must not leave a command mutating state after the operation has
 returned. Non-cooperative executors are rejected or quarantined until completion.
@@ -191,7 +210,10 @@ the primary operation error remains primary and cleanup details are attached saf
 - Policy-denied operations invoke no workspace, executor, or secret collaborator.
 - Dependency failures are surfaced with stable categories.
 - Timeout and cancellation produce no later mutation.
-- Concurrent mutations are serialized deterministically.
+- Concurrent calls on one session are serialized deterministically.
+- Independent sessions can make progress concurrently.
+- Cancellation while waiting for the operation gate performs no collaborator call or
+  mutation.
 - Reads honor range boundaries and content hashes.
 - Stale expected hashes reject writes and patches.
 - Snapshot creation is point-in-time consistent.

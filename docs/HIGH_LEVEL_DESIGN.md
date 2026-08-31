@@ -31,7 +31,9 @@ through its own APIs, but it is not an operating-system isolation boundary.
 - Use binary-safe internal filesystem APIs while retaining bounded text reads for models.
 - Make public orchestration and I/O boundaries async-first.
 - Preserve one logical owner per sandbox session.
-- Serialize mutations initially for deterministic behavior.
+- Serialize every public operation within a session initially for deterministic behavior.
+- Give each workspace one coarse state lock; do not use object-level locks or MVCC in
+  version 1.
 - Use snapshots as the explicit cross-session state-transfer mechanism.
 - Express every external dependency and cross-module collaboration through a narrow
   interface owned by the consuming module boundary.
@@ -274,8 +276,11 @@ Required invariants:
 
 - A closed or failed session rejects new mutations.
 - Session handles are opaque outside the core.
-- Mutating operations are serialized in the first version.
-- Reads may become concurrent only after consistent read semantics are implemented.
+- Every public operation within one session is serialized in the first version.
+- Workspace operations are independently linearizable under one coarse state lock.
+- Independent sessions may execute concurrently.
+- Reads may become concurrent only after revision-consistent immutable read semantics are
+  implemented without weakening observable ordering.
 - Snapshot restore is exclusive with every other operation.
 - Timeout or cancellation cannot leave an untracked mutation running.
 - Repeated close/delete calls are idempotent where practical.

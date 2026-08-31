@@ -103,9 +103,15 @@ Input:
 ```text
 path
 content
+write_condition
 expected_hash?
 create_parents?
 ```
+
+`write_condition` is one of `any_current_state`, `path_must_not_exist`, or
+`content_hash_must_equal`. `expected_hash` is required only for
+`content_hash_must_equal`; adapters should not infer unconditional overwrite from an
+omitted hash.
 
 Output:
 
