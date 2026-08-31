@@ -139,7 +139,9 @@ a registry entry.
 6. Register and return a new handle.
 
 Resume creates a new live session. It does not revive Python object identity from a prior
-process.
+process. Reusing one snapshot reference creates independent workspace forks; later writes
+do not merge or conflict unless a future shared-workspace capability explicitly provides
+that behavior.
 
 ### Delete
 

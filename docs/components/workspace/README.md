@@ -55,6 +55,15 @@ FileNode
 Version 1 does not support symbolic links, hard links, device nodes, sockets, or host
 mounts. Requests to create or import them fail with `UnsupportedNodeType`.
 
+Version 1 metadata is deliberately deterministic and minimal:
+
+- node kind
+- byte size for files
+- content hash for files and directories
+- observed workspace revision
+
+It does not include timestamps, permissions, owner, or group.
+
 ## Interface separation
 
 Avoid one global filesystem interface. Consumers use focused ports:
@@ -122,14 +131,26 @@ state.
 - Replacement accounts for the previous file size.
 - The content becomes visible atomically.
 - The result includes old and new content hashes.
+- Every write supplies one explicit precondition:
+  - `AnyCurrentState` for an intentional unconditional create or replacement
+  - `PathMustNotExist` for create-only behavior
+  - `ContentHashMustEqual` for compare-and-swap replacement
+- `ContentHashMustEqual` compares the current SHA-256 content hash while holding the
+  workspace lock and returns `StaleContent` on mismatch.
+- The caller sends the observed hash rather than resending the complete original file.
 
 ### Patch
 
 - Patch validation and application occur against one captured revision.
 - Optional `expected_hash` prevents stale updates.
 - A failed patch changes nothing.
-- Version 1 supports the selected project patch format only; adapters translate if a
-  framework uses another format.
+- Version 1 uses a constrained UTF-8 unified-diff format with `---`, `+++`, and `@@`
+  headers, context, removal, and addition lines.
+- Multiple file sections are applied atomically in one workspace mutation.
+- File creation, deletion, rename, binary patches, and special-file patches are not part
+  of the version 1 patch format.
+- Patched text is normalized to LF so results are host-independent.
+- Adapters translate if a framework uses another patch format.
 
 ### Copy and move
 
@@ -154,10 +175,26 @@ Required limits:
 - maximum path length
 - maximum segment length
 - maximum read response bytes
+- maximum lines per range read
 - maximum patch input bytes
+- maximum encoded snapshot bytes
 
 Checks and mutations occur under the same mutation boundary. Policy may deny an operation
 earlier, but workspace quotas remain authoritative.
+
+The default profile is configurable and starts with:
+
+| Limit | Default |
+|---|---:|
+| File bytes | 4 MiB |
+| Total workspace bytes | 16 MiB |
+| Node count, including root | 10,000 |
+| Normalized path bytes | 4,096 |
+| Path-segment bytes | 255 |
+| Model-facing range response | 256 KiB |
+| Lines per range response | 2,000 |
+| Patch input | 1 MiB |
+| Encoded snapshot | 32 MiB |
 
 ## Revisions and hashes
 
@@ -166,14 +203,68 @@ earlier, but workspace quotas remain authoritative.
 - Directory listings return a stable lexical order.
 - Mutation results include the resulting workspace revision.
 - Snapshot metadata records the revision and root hash.
+- Restore reinstates the revision recorded by the snapshot; subsequent mutations advance
+  from that restored revision. Revisions are therefore monotonic between restores, while
+  restore intentionally rewinds the complete workspace state.
 
-## Concurrency
+File hashes are SHA-256 over their exact bytes. Directory hashes use a domain-separated
+SHA-256 sequence over each lexically ordered child's node kind, UTF-8 name, and content
+hash. Host metadata and insertion order never participate.
 
-`SandboxSession` coordinates public operation lanes. The workspace still protects its own
-multi-step invariants so direct host-only calls cannot corrupt totals or tree structure.
+## Consistency and concurrency
 
-Version 1 may use one async-compatible mutation lock and immutable byte snapshots for
-reads. Lock implementation details must not leak into the public contract.
+One workspace method call is the version 1 transaction boundary. The workspace provides
+strict serializability and linearizability at that boundary:
+
+- Every operation appears to take effect atomically at one point between invocation and
+  completion.
+- Operations that do not overlap respect their real-time order.
+- Reads materialize their complete result from one committed revision.
+- Mutations never expose partially updated nodes, counters, hashes, or revisions.
+- Separate method calls do not form a transaction and do not receive repeatable-read
+  guarantees across calls.
+
+`SandboxSession` serializes complete public operations before invoking the workspace.
+The workspace independently protects its invariants so direct component calls cannot
+corrupt state. Independent sessions own independent workspaces and may execute
+concurrently.
+
+Version 1 uses one async-compatible workspace state lock. Every read, mutation, export,
+and restore acquires that lock. A mutation holds it while validating the current state,
+checking quotas and stale-content preconditions, constructing private candidate state,
+and publishing the complete candidate through one committed-state replacement. The
+revision increments exactly once at that replacement.
+
+This is equivalent to strict two-phase locking at coarse workspace granularity, but
+there are no object- or file-level locks, lock upgrades, or release-and-reacquire commit
+sequence. The workspace does not implement MVCC, retain addressable committed versions,
+or automatically retry conflicts.
+
+An optional `expected_hash` is an API precondition for detecting stale content. It is
+checked while holding the workspace lock and returns `StaleContent` on mismatch. It is
+not an internal optimistic-concurrency scheduler.
+
+Snapshot export may copy a complete immutable snapshot value while holding the lock and
+encode that captured value after releasing it. The export remains a point-in-time image
+of its recorded revision. Restore validates private candidate state before publishing it
+atomically under the lock and is globally exclusive when invoked through
+`SandboxSession`.
+
+The version 1 codec uses canonical UTF-8 JSON with sorted entries, base64 file content,
+and a SHA-256 integrity digest over the canonical payload. Decoding is bounded before
+allocation, rejects duplicate fields and malformed base64, recomputes all counters and
+hashes, and never uses pickle or executable object deserialization.
+
+The required lock order is:
+
+```text
+SandboxSession operation gate
+  -> Workspace state lock
+```
+
+The workspace never calls back into the session while holding its state lock. Future
+versions may allow concurrent reads from immutable committed state, but that optimization
+must preserve the same observable per-operation guarantees.
 
 ## Failure semantics
 
@@ -188,11 +279,17 @@ Stable workspace errors include:
 - `DirectoryNotEmpty`
 - `UnsupportedNodeType`
 - `FileEncodingError`
+- `InvalidRange`
+- `ReadLimitExceeded`
 - `StaleContent`
 - `InvalidPatch`
+- `PatchContextMismatch`
 - `FileSizeLimitExceeded`
 - `WorkspaceSizeLimitExceeded`
 - `NodeLimitExceeded`
+- `SnapshotTooLarge`
+- `SnapshotCorrupt`
+- `SnapshotIncompatible`
 
 ## Test expectations
 
@@ -205,6 +302,8 @@ Stable workspace errors include:
 - Verify stable listing order, revisions, and content hashes.
 - Run property tests over path normalization and random operation sequences.
 - Confirm failed mutations leave tree, counters, and revision unchanged.
+- Confirm concurrent callers are serialized, cancelled lock waiters do not mutate state,
+  and independent workspaces do not block one another.
 
 ## Maintenance rule
 

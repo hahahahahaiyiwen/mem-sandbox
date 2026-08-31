@@ -41,7 +41,10 @@ implementation becomes large.
 - Store files as bytes; add explicit UTF-8 text helpers.
 - Keep model-facing reads bounded even though internal binary reads are complete.
 - Reject unsupported behavior instead of using the host filesystem or shell.
-- Serialize mutations until a later issue explicitly introduces concurrent reads.
+- Serialize every public operation within a session and every direct workspace operation
+  until a later issue explicitly introduces concurrent reads.
+- Use one coarse workspace state lock in version 1; do not introduce object-level locks,
+  MVCC, or internal optimistic retries.
 - Preserve snapshot compatibility through explicit schema versions.
 - Keep MCP, remote transports, arbitrary Python execution, and full POSIX compatibility
   outside this plan.
@@ -225,79 +228,79 @@ agent scenario without reading from or writing to the host filesystem.
 
 #### 1.1 Path value object
 
-- [ ] **1.1.1** Write failing tests for POSIX normalization, the `/workspace` root,
+- [x] **1.1.1** Write failing tests for POSIX normalization, the `/workspace` root,
   relative resolution against a supplied cwd, and case-sensitive comparison.
-- [ ] **1.1.2** Implement `SandboxPath` without converting through host-native path
+- [x] **1.1.2** Implement `SandboxPath` without converting through host-native path
   rules.
-- [ ] **1.1.3** Add rejection tests and implementation for untrusted `..`, NUL, empty
+- [x] **1.1.3** Add rejection tests and implementation for untrusted `..`, NUL, empty
   paths, oversized paths, oversized segments, and invalid segments.
 - [ ] **1.1.4** Run the same path case table on Windows and non-Windows CI workers.
 
 #### 1.2 Node and metadata model
 
-- [ ] **1.2.1** Write tests for empty roots, nested directories, arbitrary file bytes,
+- [x] **1.2.1** Write tests for empty roots, nested directories, arbitrary file bytes,
   immutable metadata views, and rejected special node types.
-- [ ] **1.2.2** Implement `DirectoryNode` and `FileNode` with arbitrary byte content.
-- [ ] **1.2.3** Implement immutable metadata views, total byte accounting, node counting,
+- [x] **1.2.2** Implement `DirectoryNode` and `FileNode` with arbitrary byte content.
+- [x] **1.2.3** Implement immutable metadata views, total byte accounting, node counting,
   workspace revision, and content hashes.
-- [ ] **1.2.4** Reject symbolic links and all unsupported special node types explicitly.
+- [x] **1.2.4** Reject symbolic links and all unsupported special node types explicitly.
 
 #### 1.3 Read behavior
 
-- [ ] **1.3.1** Write tests for `stat`, stable lexical directory listing, complete binary
+- [x] **1.3.1** Write tests for `stat`, stable lexical directory listing, complete binary
   reads, and complete UTF-8 text reads.
-- [ ] **1.3.2** Implement `stat`, directory listing, and binary reads with deterministic
+- [x] **1.3.2** Implement `stat`, directory listing, and binary reads with deterministic
   ordering and typed errors.
-- [ ] **1.3.3** Implement UTF-8 text reads that fail explicitly on invalid UTF-8 without
+- [x] **1.3.3** Implement UTF-8 text reads that fail explicitly on invalid UTF-8 without
   affecting binary reads.
-- [ ] **1.3.4** Implement one-based inclusive line-range reads with response byte and
+- [x] **1.3.4** Implement one-based inclusive line-range reads with response byte and
   line limits.
 
 #### 1.4 Core mutation behavior
 
-- [ ] **1.4.1** Write atomicity tests proving failed mutations leave nodes, counters,
+- [x] **1.4.1** Write atomicity tests proving failed mutations leave nodes, counters,
   hashes, and revision unchanged.
-- [ ] **1.4.2** Implement create-directory behavior, including explicit parent handling
+- [x] **1.4.2** Implement create-directory behavior, including explicit parent handling
   and already-exists errors.
-- [ ] **1.4.3** Implement atomic complete-file writes for both create and replace paths.
-- [ ] **1.4.4** Implement file removal, empty-directory removal, and recursive-directory
+- [x] **1.4.3** Implement atomic complete-file writes for both create and replace paths.
+- [x] **1.4.4** Implement file removal, empty-directory removal, and recursive-directory
   removal.
 
 #### 1.5 Quotas, revisions, and hashes
 
-- [ ] **1.5.1** Write exact-minimum, exact-maximum, one-below, and one-above tests for
+- [x] **1.5.1** Write exact-minimum, exact-maximum, one-below, and one-above tests for
   file bytes, total bytes, node count, path length, segment length, and patch bytes.
-- [ ] **1.5.2** Enforce every quota under the same atomic mutation boundary.
-- [ ] **1.5.3** Increment the workspace revision exactly once for each successful
+- [x] **1.5.2** Enforce every quota under the same atomic mutation boundary.
+- [x] **1.5.3** Increment the workspace revision exactly once for each successful
   mutation and never for a failed mutation.
-- [ ] **1.5.4** Compute deterministic file, directory, and root hashes and test that
+- [x] **1.5.4** Compute deterministic file, directory, and root hashes and test that
   identical states produce identical hashes.
 
 #### 1.6 Copy and move
 
-- [ ] **1.6.1** Write tests for file and directory copy, overwrite conflicts, descendant
+- [x] **1.6.1** Write tests for file and directory copy, overwrite conflicts, descendant
   conflicts, quota failures, and source-equals-destination behavior.
-- [ ] **1.6.2** Implement atomic copy through workspace-owned operations.
-- [ ] **1.6.3** Implement atomic move without exposing an intermediate missing or
+- [x] **1.6.2** Implement atomic copy through workspace-owned operations.
+- [x] **1.6.3** Implement atomic move without exposing an intermediate missing or
   partially copied state.
 
 #### 1.7 Context-aware patching
 
-- [ ] **1.7.1** Select and document one explicit context-aware patch format for core.
-- [ ] **1.7.2** Write tests for successful patches, malformed patches, missing context,
+- [x] **1.7.1** Select and document one explicit context-aware patch format for core.
+- [x] **1.7.2** Write tests for successful patches, malformed patches, missing context,
   stale `expected_hash`, quota failure, and multi-file atomicity.
-- [ ] **1.7.3** Implement hash-guarded patching so every failed patch leaves the workspace
+- [x] **1.7.3** Implement hash-guarded patching so every failed patch leaves the workspace
   unchanged.
 
 #### 1.8 Workspace snapshot codec
 
-- [ ] **1.8.1** Select and document a deterministic, versioned, non-pickle workspace
+- [x] **1.8.1** Select and document a deterministic, versioned, non-pickle workspace
   snapshot encoding.
-- [ ] **1.8.2** Write tests for deterministic bytes, integrity failures, unsupported
+- [x] **1.8.2** Write tests for deterministic bytes, integrity failures, unsupported
   versions, bounded decode, malformed input, and atomic restore.
-- [ ] **1.8.3** Implement workspace export with an explicit schema version and integrity
+- [x] **1.8.3** Implement workspace export with an explicit schema version and integrity
   hash.
-- [ ] **1.8.4** Implement atomic restore with no shared mutable nodes between source and
+- [x] **1.8.4** Implement atomic restore with no shared mutable nodes between source and
   restored workspaces.
 
 ### Executable acceptance scenario
@@ -317,16 +320,16 @@ Implement `tests/integration/workspace/test_workspace_round_trip.py` with this s
 
 ### Exit criteria
 
-- [ ] **1.9.1** `python -m pytest tests/unit/workspace -q` passes.
-- [ ] **1.9.2** `python -m pytest tests/integration/workspace/test_workspace_round_trip.py -q`
+- [x] **1.9.1** `python -m pytest tests/unit/workspace -q` passes.
+- [x] **1.9.2** `python -m pytest tests/integration/workspace/test_workspace_round_trip.py -q`
   passes.
 - [ ] **1.9.3** The Windows and Linux path-test matrix passes with identical expected
   outcomes.
-- [ ] **1.9.4** Atomicity tests prove every failed write, remove, copy, move, patch, quota
+- [x] **1.9.4** Atomicity tests prove every failed write, remove, copy, move, patch, quota
   check, and restore preserves the complete prior state.
-- [ ] **1.9.5** Snapshot round-trip tests reproduce the same files, counters, root hash,
+- [x] **1.9.5** Snapshot round-trip tests reproduce the same files, counters, root hash,
   and revision state without shared mutable nodes.
-- [ ] **1.9.6** `docs/components/workspace/README.md` describes the implemented
+- [x] **1.9.6** `docs/components/workspace/README.md` describes the implemented
   paths, ranges, quotas, atomicity, hashing, and snapshot encoding.
 
 ## 6. Milestone 2: command executor MVP
@@ -771,11 +774,14 @@ their referenced checklist task begins.
 | CI support matrix | Windows and Ubuntu; Python 3.12 and 3.14 | `0.1.6` | Resolved |
 | Authoritative design location | `mem-sandbox/docs` | `0.1.7` | Resolved |
 | Workspace/session defaults | `/workspace`; one-based inclusive; serialized | `0.1.8` | Resolved |
+| Workspace consistency | Per-operation linearizability; one session gate and one coarse workspace state lock; no MVCC | `1.4` | Resolved |
+| Workspace metadata | Deterministic kind, size, hash, and revision only | `1.2` | Resolved |
+| Default workspace quotas | 4 MiB/file, 16 MiB total, 10,000 nodes, bounded paths, reads, patches, and snapshots | `1.5` | Resolved |
 | Initial versioning | `0.1.0` with semantic versioning | `0.1.9` | Resolved |
 | Repository visibility | Remain private until a later explicit decision | `0.1.10` | Resolved |
 | Server-side branch protection | Defer while private plan lacks support | `0.0.8` | Deferred |
-| Patch format | One explicit context-aware format in core | `1.7.1` | Open |
-| Snapshot encoding | Deterministic, versioned, non-pickle | `1.8.1` | Open |
+| Patch format | Constrained UTF-8 multi-file unified diff with atomic application | `1.7.1` | Resolved |
+| Snapshot encoding | Canonical UTF-8 JSON, sorted entries, base64 bytes, SHA-256 integrity | `1.8.1` | Resolved |
 | First command profile | Eight-command MVP listed above | `2.4.2` | Open |
 | First framework adapter | PydanticAI capability | `5.2.1` | Open |
 
