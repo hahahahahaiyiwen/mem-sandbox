@@ -543,8 +543,15 @@ including the remaining command profile, policy, events, snapshots, and secrets.
   requirement cannot use the existing operations efficiently.
 - [ ] **4.1.5** Reject unimplemented POSIX behavior explicitly rather than adding host
   fallbacks or partial emulation.
-- [ ] **4.1.6** Write tests and implement bounded sequential in-memory pipelines through
-  explicit command stdin and stage stdout, with no host process and no concurrent stage
+- [ ] **4.1.6** Write tests and implement the
+  [approved pipeline semantics](./components/command-executor/README.md#approved-milestone-4-pipeline-semantics):
+  parse higher-precedence `|` into immutable pipeline stages; admit only registered
+  pipeline-safe non-mutating commands; execute stages sequentially through bounded UTF-8
+  stdin and stdout; use the rightmost non-zero status; preserve stderr in stage order;
+  permit descriptor-approved redirection only on the final stage; and return a structured
+  non-zero pipeline-limit result rather than pass truncated intermediate data. Preserve
+  `;` and `&&` behavior around that result. Add explicit stage-count and
+  aggregate-materialization limits. Do not use host processes or concurrent stage
   execution.
 - [ ] **4.1.7** Run an executable multi-model command-usability evaluation before the
   first framework adapter, including acceptance, repair turns, tool calls, tokens,
@@ -612,6 +619,10 @@ including the remaining command profile, policy, events, snapshots, and secrets.
   without host fallback.
 - [ ] **4.9.7** The dependency-boundary test still proves no agent-framework dependency
   is present in core.
+- [ ] **4.9.8** Pipeline tests prove precedence, pipeline-safe producer/consumer
+  admission, fixed pipefail status, final-only stdout, ordered stderr,
+  descriptor-gated final-stage-only redirection, structured limit-failure sequencing,
+  and exact intermediate, aggregate, timeout, and cancellation boundaries.
 
 ## 9. Milestone 5: native integrations
 
@@ -821,6 +832,7 @@ their referenced checklist task begins.
 | Command redirection | Output-only commands; atomic replace and workspace-owned append | `2.5` | Resolved |
 | Command output | Independent 256 KiB stream caps with deterministic UTF-8 truncation | `2.6.5` | Resolved |
 | Timeout state | 30-second plan timeout; keep committed files and discard transient cwd/environment on timeout | `2.6` | Resolved |
+| Pipeline semantics | Bounded sequential UTF-8 transformations between registered pipeline-safe commands; fixed pipefail; final-stage-only redirection; no shell emulation | `4.1.6` | Resolved |
 | First framework adapter | PydanticAI capability | `5.2.1` | Open |
 | Workspace content offload | Revisit after Milestone 5 using measured workload and provisioning data | `6.2.3` | Deferred |
 
