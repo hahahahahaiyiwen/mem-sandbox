@@ -305,6 +305,12 @@ Stable workspace errors include:
 - Confirm concurrent callers are serialized, cancelled lock waiters do not mutate state,
   and independent workspaces do not block one another.
 
+## Deferred extensions
+
+[Workspace content offload](./content-offload/README.md) explores keeping the logical
+workspace tree in memory while optionally storing immutable file bytes through an
+external provider. It remains deferred until the post-Milestone 5 scalability review.
+
 ## Maintenance rule
 
 Changes to path behavior, node types, encoding, quotas, atomicity, or snapshot encoding

@@ -34,6 +34,12 @@ successor to the original .NET Agent Sandbox.
 - [Event sink](./components/event-sink/README.md)
 - [Snapshot store](./components/snapshot-store/README.md)
 
+## Deferred design explorations
+
+- [Workspace content offload](./components/workspace/content-offload/README.md) - keep
+  the workspace tree in memory while optionally externalizing immutable file bytes for
+  larger logical workspaces and lazy resume.
+
 ## Research references
 
 See [Python Agent Sandbox Integration Research](./AGENT_SANDBOX_INTEGRATION_RESEARCH.md)
