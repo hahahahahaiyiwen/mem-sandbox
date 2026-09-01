@@ -680,6 +680,25 @@ filesystem, command, policy, lifecycle, and snapshot behavior.
 - [ ] **5.5.2** Require a new approved design decision and support matrix before adding
   any deferred integration.
 
+#### 5.6 Product validation and benchmark baseline
+
+- [ ] **5.6.1** Implement the model-free
+  [stateful execution reference scenario](./product-validation/README.md#stateful-execution-conformance)
+  through a product-validation driver owned outside framework adapters.
+- [ ] **5.6.2** Run the same normalized create, mutate, snapshot, close, resume,
+  continue, fork, and delete scenario through the direct session and every supported
+  adapter.
+- [ ] **5.6.3** Implement versioned cold, warm, create-to-ready, first-operation,
+  snapshot, resume, burst, memory, and adapter-overhead benchmark cases without model or
+  provider network calls.
+- [ ] **5.6.4** Emit versioned machine-readable result artifacts containing raw samples,
+  environment fingerprints, workload dimensions, failures, statistics, and correctness
+  checksums.
+- [ ] **5.6.5** Capture the first controlled baseline and approve metric-specific
+  regression budgets only after measuring runner noise.
+- [ ] **5.6.6** Keep comparative benchmarks separate from CI regression gates and require
+  the documented methodology before publishing any "fastest provisioning" claim.
+
 ### Exit criteria
 
 - [ ] **5.9.1** `python -m pytest tests/conformance -q` passes for direct session and
@@ -691,6 +710,16 @@ filesystem, command, policy, lifecycle, and snapshot behavior.
 - [ ] **5.9.4** Adapter dependency tests prove framework packages are isolated from core.
 - [ ] **5.9.5** Each integration `README.md` records its pinned version, support matrix,
   ownership model, unsupported behavior, and conformance results.
+- [ ] **5.9.6** The stateful reference scenario produces equivalent normalized outcomes,
+  file hashes, revisions, snapshot root hashes, lifecycle rejection, restored state,
+  fork behavior, and cleanup through every supported driver.
+- [ ] **5.9.7** The benchmark suite reports cold and warm provisioning, first operation,
+  snapshot, resume, burst, memory, and adapter overhead with exact workload and
+  environment metadata.
+- [ ] **5.9.8** A controlled baseline, measured noise floor, and approved regression
+  budget exist for every required release-gating case.
+- [ ] **5.9.9** Product documentation uses only performance claims supported by current
+  artifacts; an unqualified "fastest sandbox" claim is prohibited.
 
 ## 10. Milestone 6: workspace scalability decision
 
@@ -707,9 +736,9 @@ priority of fastest provisioning.
 
 #### 6.1 Evidence and baseline
 
-- [ ] **6.1.1** Benchmark empty workspace creation, session creation, snapshot export and
-  restore, resident content memory, and mutation latency at representative workspace
-  sizes.
+- [ ] **6.1.1** Extend the Milestone 5 product-validation baseline only where additional
+  workspace-size profiles or mutation measurements are needed for the scalability
+  decision.
 - [ ] **6.1.2** Record representative workload distributions for logical workspace
   bytes, individual file bytes, node count, session lifetime, snapshot frequency, and
   file access patterns.
@@ -790,7 +819,20 @@ One behavior suite runs against:
 - Deep Agents backend
 - OpenAI sandbox adapter
 
-The expected workspace hashes and domain outcomes remain the same.
+The expected workspace hashes and domain outcomes remain the same. The complete
+create-through-resume lifecycle and normalized trace are defined in
+[Product Validation and Benchmark Design](./product-validation/README.md).
+
+### Product benchmarks
+
+The product benchmark suite measures provisioning separately from correctness:
+
+- shared CI runs conformance and benchmark smoke cases;
+- controlled runners establish release baselines and regression budgets;
+- comparative runs are required only for scoped market claims.
+
+No benchmark dependency is imported by the production package, and no required
+provisioning benchmark performs a model or provider network call.
 
 ### Property and state-machine tests
 
@@ -833,6 +875,7 @@ their referenced checklist task begins.
 | Command output | Independent 256 KiB stream caps with deterministic UTF-8 truncation | `2.6.5` | Resolved |
 | Timeout state | 30-second plan timeout; keep committed files and discard transient cwd/environment on timeout | `2.6` | Resolved |
 | Pipeline semantics | Bounded sequential UTF-8 transformations between registered pipeline-safe commands; fixed pipefail; final-stage-only redirection; no shell emulation | `4.1.6` | Resolved |
+| Product validation | Stateful cross-adapter conformance plus controlled provisioning baselines; comparative evidence required for a scoped "fastest" claim | `5.6` | Resolved |
 | First framework adapter | PydanticAI capability | `5.2.1` | Open |
 | Workspace content offload | Revisit after Milestone 5 using measured workload and provisioning data | `6.2.3` | Deferred |
 
@@ -849,5 +892,9 @@ The first usable release is complete when:
 - [ ] Policy denials and dependency failures produce stable domain errors.
 - [ ] Events contain no secret or unbounded content.
 - [ ] The PydanticAI capability passes the shared conformance scenario.
+- [ ] The stateful create, snapshot, resume, continue, fork, and cleanup scenario passes
+  through the direct session and supported adapters.
+- [ ] A controlled provisioning and adapter-overhead baseline is published with
+  documented regression budgets.
 - [ ] Core has no OpenAI, PydanticAI, LangChain, MCP, or other framework dependency.
 - [ ] Every implemented boundary is reflected in its component design document.

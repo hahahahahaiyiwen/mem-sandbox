@@ -33,6 +33,7 @@ successor to the original .NET Agent Sandbox.
 - [Secret broker](./components/secret-broker/README.md)
 - [Event sink](./components/event-sink/README.md)
 - [Snapshot store](./components/snapshot-store/README.md)
+- [Product validation and benchmarks](./product-validation/README.md)
 
 ## Deferred design explorations
 
