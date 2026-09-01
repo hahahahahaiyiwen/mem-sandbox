@@ -779,40 +779,7 @@ Use generated operation sequences for:
 - parser tokenization
 - deterministic execution
 
-## 13. Python practice track
-
-Complete these exercises before or alongside the related implementation.
-
-| Implementation area | Practice |
-|---|---|
-| Path normalization | LeetCode 71 - Simplify Path |
-| In-memory tree | LeetCode 588 - Design In-Memory File System |
-| Bounded caches later | LeetCode 146 - LRU Cache |
-| Versioned snapshots later | LeetCode 981 - Time Based Key-Value Store |
-
-Project-specific drafted exercises:
-
-1. **Atomic quota write**
-   Replace a file while enforcing file, total-byte, and node limits. Any failed check must
-   leave every counter and node unchanged.
-2. **One-based range read**
-   Return an inclusive line range, total line count, and content hash without returning
-   more than the configured byte limit.
-3. **Optimistic patch**
-   Apply a patch only when `expected_hash` matches. Two stale writers must receive the
-   same typed conflict.
-4. **Shell tokenizer**
-   Tokenize quotes, escapes, and environment expansion while rejecting incomplete input.
-5. **Execution-plan evaluator**
-   Evaluate `;`, `&&`, `>`, and `>>` without implementing a host shell.
-6. **Snapshot isolation**
-   Restore a snapshot and prove no mutable node is shared with either the source or the
-   previously live tree.
-7. **Cancellation-safe operation gate**
-   Cancel a task while it waits for the session lock and prove it neither leaks the lock
-   nor mutates state.
-
-## 14. Decision gates
+## 13. Decision gates
 
 Milestone 0 decisions are resolved. Later implementation decisions remain open until
 their referenced checklist task begins.
@@ -839,7 +806,7 @@ their referenced checklist task begins.
 | First framework adapter | PydanticAI capability | `5.2.1` | Open |
 | Workspace content offload | Revisit after Milestone 5 using measured workload and provisioning data | `6.2.3` | Deferred |
 
-## 15. Definition of first usable release
+## 14. Definition of first usable release
 
 The first usable release is complete when:
 
