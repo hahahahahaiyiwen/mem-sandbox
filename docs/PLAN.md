@@ -668,7 +668,60 @@ filesystem, command, policy, lifecycle, and snapshot behavior.
 - [ ] **5.9.5** Each integration `README.md` records its pinned version, support matrix,
   ownership model, unsupported behavior, and conformance results.
 
-## 10. Checklist execution rules
+## 10. Milestone 6: workspace scalability decision
+
+This milestone begins only after every Milestone 5 exit criterion is complete. It is a
+post-release decision checkpoint, not a commitment to implement content offload.
+
+### Goal
+
+Revisit [workspace content offload](./components/workspace/content-offload/README.md)
+using representative workload data and measured performance while preserving the product
+priority of fastest provisioning.
+
+### Work
+
+#### 6.1 Evidence and baseline
+
+- [ ] **6.1.1** Benchmark empty workspace creation, session creation, snapshot export and
+  restore, resident content memory, and mutation latency at representative workspace
+  sizes.
+- [ ] **6.1.2** Record representative workload distributions for logical workspace
+  bytes, individual file bytes, node count, session lifetime, snapshot frequency, and
+  file access patterns.
+- [ ] **6.1.3** Determine whether the primary scaling constraint is resident file bytes,
+  tree copying, hash recomputation, metadata volume, snapshot encoding, or another
+  measured cause.
+
+#### 6.2 Design review
+
+- [ ] **6.2.1** Review the deferred content-offload design against the implemented
+  workspace, session, command, policy, event, and snapshot-store boundaries.
+- [ ] **6.2.2** Compare content offload with simpler alternatives such as adjusted
+  quotas, lower process density, structural sharing, cached subtree hashes, and
+  incremental accounting.
+- [ ] **6.2.3** Decide to defer, prototype, or plan implementation and record the
+  evidence, product impact, compatibility constraints, and rationale in the workspace
+  design.
+
+#### 6.3 Follow-up planning
+
+- [ ] **6.3.1** If approved, create a separate implementation milestone and issue set
+  with explicit provisioning-latency, memory, correctness, and provider conformance
+  acceptance criteria.
+- [ ] **6.3.2** If deferred, record the measurable trigger and next review point rather
+  than leaving the decision open-ended.
+
+### Exit criteria
+
+- [ ] **6.9.1** Baseline measurements and representative workload assumptions are
+  documented.
+- [ ] **6.9.2** The content-offload decision and rationale are recorded in the workspace
+  documentation.
+- [ ] **6.9.3** No content-offload implementation starts without a separately approved
+  milestone based on the review evidence.
+
+## 11. Checklist execution rules
 
 - Checklist IDs use `milestone.area.task`; for example, `1.3.4` is milestone 1, workspace
   read area 3, task 4.
@@ -682,7 +735,7 @@ filesystem, command, policy, lifecycle, and snapshot behavior.
 - Mark a work item complete only when its tests pass and the affected component
   `README.md` reflects the behavior.
 
-## 11. Test strategy
+## 12. Test strategy
 
 ### Unit tests
 
@@ -726,7 +779,7 @@ Use generated operation sequences for:
 - parser tokenization
 - deterministic execution
 
-## 12. Python practice track
+## 13. Python practice track
 
 Complete these exercises before or alongside the related implementation.
 
@@ -759,7 +812,7 @@ Project-specific drafted exercises:
    Cancel a task while it waits for the session lock and prove it neither leaks the lock
    nor mutates state.
 
-## 13. Decision gates
+## 14. Decision gates
 
 Milestone 0 decisions are resolved. Later implementation decisions remain open until
 their referenced checklist task begins.
@@ -784,8 +837,9 @@ their referenced checklist task begins.
 | Snapshot encoding | Canonical UTF-8 JSON, sorted entries, base64 bytes, SHA-256 integrity | `1.8.1` | Resolved |
 | First command profile | Eight-command MVP listed above | `2.4.2` | Open |
 | First framework adapter | PydanticAI capability | `5.2.1` | Open |
+| Workspace content offload | Revisit after Milestone 5 using measured workload and provisioning data | `6.2.3` | Deferred |
 
-## 14. Definition of first usable release
+## 15. Definition of first usable release
 
 The first usable release is complete when:
 
