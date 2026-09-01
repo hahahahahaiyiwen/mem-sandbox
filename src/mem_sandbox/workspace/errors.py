@@ -145,3 +145,19 @@ class SnapshotIncompatibleError(UnsupportedOperationError):
     """The snapshot schema is not supported by this workspace."""
 
     code = "snapshot_incompatible"
+
+
+class PreparedRestoreInvalid(InvalidRequestError):
+    """A prepared restore candidate is malformed or cannot be published."""
+
+    code = "prepared_restore_invalid"
+
+
+class RestoreCandidateMismatch(ConflictError):
+    """A restore candidate belongs to a different workspace instance."""
+
+    code = "restore_candidate_mismatch"
+
+
+PreparedRestoreInvalidError = PreparedRestoreInvalid
+RestoreCandidateMismatchError = RestoreCandidateMismatch

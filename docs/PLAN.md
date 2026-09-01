@@ -448,49 +448,74 @@ agent-facing contract without exposing concrete core components.
 
 #### 3.1 Session lifecycle and coordination
 
-- [ ] **3.1.1** Write tests for created, running, closing, closed, and failed lifecycle
-  transitions.
-- [ ] **3.1.2** Implement session identity and explicit lifecycle-state enforcement.
-- [ ] **3.1.3** Write concurrency tests for queued operations, waiter cancellation, and
-  exclusive restore.
-- [ ] **3.1.4** Serialize operations behind one cancellation-safe async coordination
-  gate.
+- [x] **3.1.1** Write tests for explicit `CREATED`, `RUNNING`, `CLOSING`, `CLOSED`, and
+  `FAILED` lifecycle transitions, including no same-object restart.
+- [x] **3.1.2** Implement session identity and explicit lifecycle-state enforcement.
+- [x] **3.1.3** Write concurrency tests for close admission cutoff, queued-operation
+  timeout/cancellation, active-operation completion, and exclusive restore.
+- [x] **3.1.4** Serialize operations behind one cancellation-safe async coordination
+  gate with an end-to-end deadline covering queue wait through required terminal event
+  delivery. Requests default to 30 seconds and reserve one second for terminal delivery;
+  non-positive collaborator budget fails before invocation.
+- [x] **3.1.5** Define lifecycle event ordering and bounded, cancellation-resilient
+  `start()`/`close()` behavior, including exactly-once resource-scope cleanup and
+  `CLOSED` state after close-event, cleanup, or close-timeout failure. Waiting for the
+  active operation uses that operation's deadline; close's lifecycle budget begins after
+  gate acquisition.
+- [x] **3.1.6** Add `src/mem_sandbox/session/` to the dependency-boundary guard and keep
+  the session module free of agent-framework and infrastructure imports.
 
 #### 3.2 Agent-facing operations
 
-- [ ] **3.2.1** Define stable domain requests and results for `execute`, `read_file`,
-  `write_file`, and `apply_patch`.
-- [ ] **3.2.2** Write behavior tests for each operation through `SandboxSession` using
+- [x] **3.2.1** Define stable session-owned domain requests and results for `execute`,
+  `read_file`, `write_file`, and `apply_patch`, using explicit `SessionExecute*` names to
+  avoid collision with command-executor contracts. Add shared `OperationKind` and
+  `OperationLimits` data contracts under `mem_sandbox.core.operations`.
+- [x] **3.2.2** Write behavior tests for each operation through `SandboxSession` using
   fake collaborators.
-- [ ] **3.2.3** Implement the four operations by orchestrating constructor-injected
+- [x] **3.2.3** Implement the four operations by orchestrating constructor-injected
   workspace and command-executor interfaces.
-- [ ] **3.2.4** Add host-only binary read, binary write, stat, and list operations without
+- [x] **3.2.4** Add host-only binary read, binary write, stat, and list operations without
   exposing them in the default agent tool profile.
 
 #### 3.3 Explicit minimal collaborators
 
-- [ ] **3.3.1** Implement an allow-all policy engine whose decision is explicit and
-  observable.
-- [ ] **3.3.2** Implement a no-secret broker that rejects all secret resolution
+- [x] **3.3.1** Define the minimal `OperationKind`, policy request, decision, and
+  effective-limit contracts, then implement an allow-all engine whose decision is
+  explicit and observable.
+- [x] **3.3.2** Implement a no-secret broker that rejects all secret resolution
   explicitly.
-- [ ] **3.3.3** Implement a no-op event sink with a documented delivery contract.
-- [ ] **3.3.4** Inject all collaborators through constructor interfaces; do not use
-  `None` checks or catch-and-ignore behavior.
+- [x] **3.3.3** Implement a required-delivery no-op event sink that explicitly accepts
+  and discards events.
+- [x] **3.3.4** Inject borrowed behavior collaborators plus one session-owned
+  `SessionResourceScope`; do not use per-dependency ownership flags, `None` checks, or
+  catch-and-ignore behavior.
+- [x] **3.3.5** Define the minimal immutable Milestone 3 lifecycle, operation-start, and
+  terminal event envelope with explicit operation kind; assign monotonic sequence
+  numbers in the session and test required-delivery failures.
 
 #### 3.4 Session snapshots
 
-- [ ] **3.4.1** Define session snapshot state for workspace, cwd, approved environment,
-  and compatibility metadata.
-- [ ] **3.4.2** Implement an in-memory snapshot store and session snapshot creation.
-- [ ] **3.4.3** Implement exclusive session restore using the workspace codec.
-- [ ] **3.4.4** Write tests for ownership, missing snapshots, incompatible snapshots,
-  atomic restore failure, and successful round-trip.
+- [x] **3.4.1** Define deterministic session snapshot state for workspace, cwd, approved
+  environment, compatibility metadata, and source-session provenance; exclude random
+  snapshot identity and creation time from the state hash. Pin Milestone 3 session and
+  capability compatibility versions to `1`.
+- [x] **3.4.2** Implement the deterministic session snapshot codec, an in-memory snapshot
+  store, and session snapshot creation. Verify the session payload hash before restore
+  preparation and enforce the default 64 MiB session-payload bound.
+- [x] **3.4.3** Implement exclusive session restore through a workspace-prepared
+  immutable candidate that validates the required cwd before live state changes. Extend
+  the workspace snapshot port and owning workspace README with prepare/commit behavior.
+- [x] **3.4.4** Write tests for source-session provenance, opaque references, missing and
+  incompatible snapshots, atomic restore failure, and successful round-trip. Owner
+  authorization remains a future `SandboxService` responsibility. Cover duplicate
+  snapshot identifiers and explicit workspace-revision rewind across restore.
 
 #### 3.5 Vertical-slice conformance
 
-- [ ] **3.5.1** Build one framework-free scenario that uses only the public
+- [x] **3.5.1** Build one framework-free scenario that uses only the public
   `SandboxSession` interface.
-- [ ] **3.5.2** Assert files, cwd, approved environment, hashes, revisions, operation
+- [x] **3.5.2** Assert files, cwd, approved environment, hashes, revisions, operation
   ordering, snapshot restoration, and stable errors.
 
 The no-op collaborators are real implementations with explicit allow/no-secret/no-event
@@ -510,18 +535,20 @@ Implement `tests/integration/session/test_minimal_vertical_slice.py` to:
 
 ### Exit criteria
 
-- [ ] **3.9.1** `python -m pytest tests/unit/session -q` passes.
-- [ ] **3.9.2**
+- [x] **3.9.1** `python -m pytest tests/unit/session -q` passes.
+- [x] **3.9.2**
   `python -m pytest tests/integration/session/test_minimal_vertical_slice.py -q` passes.
-- [ ] **3.9.3** Public-session tests use no concrete workspace or executor types.
-- [ ] **3.9.4** Restore-concurrency tests prove that snapshot restore is exclusive and
-  failed restore leaves all session state unchanged.
-- [ ] **3.9.5** Timeout and cancellation tests prove no queued or later mutation leaks
-  past the terminal result.
-- [ ] **3.9.6** The vertical slice imports and runs without an LLM or agent-framework
+- [x] **3.9.3** Public-session tests use no concrete workspace or executor types.
+- [x] **3.9.4** Restore-concurrency tests prove that snapshot restore is exclusive,
+  validates cwd before publish, and leaves all session state unchanged on failure.
+- [x] **3.9.5** End-to-end timeout, cancellation, and close-cutoff tests prove no queued
+  or later mutation leaks past the terminal result.
+- [x] **3.9.6** The vertical slice imports and runs without an LLM or agent-framework
   dependency.
-- [ ] **3.9.7** `docs/components/sandbox-session/README.md` and
+- [x] **3.9.7** `docs/components/sandbox-session/README.md` and
   `docs/components/snapshot-store/README.md` match the implemented behavior.
+- [x] **3.9.8** Dependency-boundary tests cover `mem_sandbox.session` and prove the
+  vertical slice has no agent-framework dependency.
 
 ## 8. Milestone 4: complete core behavior
 
@@ -570,6 +597,8 @@ including the remaining command profile, policy, events, snapshots, and secrets.
 - [ ] **4.3.3** Implement the process-local event sink and emit events from the session
   orchestration boundary.
 - [ ] **4.3.4** Bound event payloads and reject secret or unbounded content.
+- [ ] **4.3.5** Implement explicit required/best-effort delivery selection and a
+  diagnostic failure handler for best-effort sink failures.
 
 #### 4.4 Snapshot store completion
 
@@ -597,6 +626,17 @@ including the remaining command profile, policy, events, snapshots, and secrets.
   mutation invariants, snapshots, parser tokenization, and deterministic execution.
 - [ ] **4.6.3** Update every affected component `README.md` in the same change as its
   behavior.
+
+#### 4.7 Sandbox service and session factory
+
+- [ ] **4.7.1** Write tests for owner-bound create, lookup, resume, delete, expiration,
+  and concurrent registry behavior.
+- [ ] **4.7.2** Implement the process-local `SandboxService`, session factory, opaque
+  handles, owner authorization, and exactly-once registry cleanup.
+- [ ] **4.7.3** Assemble borrowed shared collaborators and per-session
+  `SessionResourceScope` instances through the factory.
+- [ ] **4.7.4** Enforce snapshot owner authorization before loading or resuming while
+  preserving source-session provenance as non-authoritative metadata.
 
 ### Exit criteria
 

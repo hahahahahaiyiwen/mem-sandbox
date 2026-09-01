@@ -18,6 +18,7 @@ CORE_DIRECTORIES = (
     "secrets",
     "events",
     "snapshots",
+    "session",
 )
 
 

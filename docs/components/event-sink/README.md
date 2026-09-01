@@ -1,6 +1,6 @@
 # Event Sink Design
 
-**Status:** Proposed detailed design under the approved high-level architecture
+**Status:** Milestone 3 required-delivery envelope implemented; complete event system proposed
 
 ## Purpose
 
@@ -11,7 +11,8 @@ not depend on logging or telemetry vendors.
 ## Responsibilities
 
 - Define stable event envelopes and event kinds.
-- Assign session-local sequence numbers and operation correlation.
+- Accept session-local sequence numbers and operation correlation assigned by the
+  session or another per-session emitter.
 - Deliver events according to an explicit reliability mode.
 - Redact protected content before it reaches a sink.
 - Support process-local collection for tests and development.
@@ -38,6 +39,7 @@ class SandboxEvent:
     sequence: int
     operation_id: OperationId | None
     parent_operation_id: OperationId | None
+    operation_kind: OperationKind | None
     data: Mapping[str, EventValue]
 
 
@@ -57,8 +59,8 @@ Lifecycle:
 
 - `sandbox.created`
 - `sandbox.started`
-- `sandbox.stopping`
-- `sandbox.stopped`
+- `sandbox.closing`
+- `sandbox.closed`
 - `sandbox.failed`
 - `sandbox.deleted`
 
@@ -130,6 +132,29 @@ An explicit event payload policy may include bounded outputs after redaction.
 
 The configured mode and required event kinds are explicit. Broad exception swallowing is
 not allowed.
+
+### Milestone 3 selection
+
+The minimal `SandboxSession` vertical slice uses `REQUIRED` delivery. Its concrete
+`NoOpEventSink` is a real accept-and-discard implementation, not the absence of a sink.
+
+- Milestone 3 defines the minimal immutable event envelope needed for lifecycle,
+  operation-start, and terminal events.
+- That minimal envelope contains event type, UTC occurrence time, session sequence,
+  session ID, optional operation/parent IDs, optional operation kind, and bounded safe
+  data. A separately allocated `event_id` is deferred with the complete event system.
+- The session constructs events and assigns monotonic sequence numbers; the sink does not
+  maintain per-session counters.
+- Operation events carry an explicit `operation_kind`; lifecycle events use `None`.
+- The M3 `data` mapping is empty or contains only bounded non-sensitive identifiers and
+  result metadata required by the vertical-slice assertions.
+- Start-event failure prevents policy evaluation and mutation.
+- Terminal-event failure is surfaced explicitly.
+- Terminal-event failure does not roll back already committed workspace or session state.
+- `BEST_EFFORT` delivery is deferred until a diagnostic failure handler is implemented.
+
+Policy-decision, secret, dedicated snapshot, sensitivity-classification, redaction, and
+bounded in-memory collection behavior remain in Milestone 4.
 
 ## In-memory sink
 

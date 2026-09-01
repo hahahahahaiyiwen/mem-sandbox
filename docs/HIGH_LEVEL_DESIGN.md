@@ -173,9 +173,19 @@ The service is the host-facing lifecycle boundary:
 ```python
 class SandboxService:
     async def create(self, request: CreateSandboxRequest) -> SandboxHandle: ...
-    async def get_session(self, handle: SandboxHandle) -> SandboxSession: ...
+    async def get_session(
+        self,
+        handle: SandboxHandle,
+        *,
+        owner_id: str,
+    ) -> SandboxSession: ...
     async def resume(self, request: ResumeSandboxRequest) -> SandboxHandle: ...
-    async def delete(self, handle: SandboxHandle) -> None: ...
+    async def delete(
+        self,
+        handle: SandboxHandle,
+        *,
+        owner_id: str,
+    ) -> None: ...
 ```
 
 The concrete API may evolve, but lifecycle ownership must remain separate from
@@ -187,18 +197,27 @@ The session is the application-facing operation facade:
 
 ```python
 class SandboxSession:
-    async def execute(self, request: ExecuteRequest) -> ExecuteResult: ...
+    async def execute(
+        self,
+        request: SessionExecuteRequest,
+    ) -> SessionExecuteResult: ...
     async def read_file(self, request: ReadFileRequest) -> ReadFileResult: ...
     async def write_file(self, request: WriteFileRequest) -> FileMutationResult: ...
-    async def apply_patch(self, request: ApplyPatchRequest) -> FileMutationResult: ...
+    async def apply_patch(self, request: ApplyPatchRequest) -> PatchMutationResult: ...
 ```
+
+Session request/result types add operation metadata while composing the workspace and
+command-executor domain contracts. Explicit `SessionExecute*` names avoid ambiguity with
+the command executor's public `ExecuteRequest` and `ExecuteResult`.
 
 The session may also expose host-only lifecycle and binary APIs required by backend
 adapters:
 
 ```python
+async def start(...)
 async def read_bytes(...)
 async def write_bytes(...)
+async def stat(...)
 async def list_entries(...)
 async def create_snapshot(...)
 async def restore_snapshot(...)
@@ -235,8 +254,8 @@ session deletion remain host-controlled by default.
    snapshot state.
 7. `EventSink` observes completed decisions and operations; event failures follow an
    explicit delivery policy.
-8. `SnapshotStore` stores and retrieves snapshots; it does not decide when snapshots are
-   taken.
+8. `SnapshotStore` stores and retrieves snapshots and consumes workspace snapshot data
+   as an immutable contract; it does not mutate a workspace or decide snapshot timing.
 9. Adapters depend on service/session contracts only and contain no core policy.
 
 ## 11. Core lifecycle
@@ -248,6 +267,7 @@ host creates sandbox
   -> service validates options
   -> service constructs workspace and collaborators
   -> service constructs one session
+  -> service starts the session
   -> adapter binds session to framework
   -> model invokes tools
   -> session authorizes, executes, and emits events
@@ -263,42 +283,62 @@ host requests snapshot
   -> original session may be closed
 
 host resumes snapshot
+  -> service authorizes owner access to the reference
   -> snapshot store loads and validates snapshot
-  -> service creates a new session and workspace
-  -> session restores workspace, cwd, and approved environment state
+  -> service creates a new session identity
+  -> factory prepares and commits restored workspace, cwd, and environment while CREATED
+  -> service starts the new session
   -> adapter binds the resumed session
 ```
 
 Snapshots transfer sandbox state. Framework conversation state and workflow checkpoints
 remain separate concerns.
 
+Milestone 3 records source-session provenance without enforcing owner authorization in
+the session or minimal store. `SandboxService` owns authorization in the later lifecycle
+composition. Restore validates a workspace-prepared immutable candidate, including the
+required cwd, before publishing workspace and session state.
+
 ## 12. Session state and ownership
 
 A session has one logical owner and a state machine:
 
 ```text
-CREATED -> RUNNING -> STOPPING -> STOPPED
-                 \-> FAILED
-STOPPED -> RUNNING through explicit resume or restart rules
+CREATED -> RUNNING -> CLOSING -> CLOSED
+CREATED, RUNNING, or CLOSING -> FAILED
+FAILED -> CLOSING -> CLOSED
 ```
 
 Required invariants:
 
 - A closed or failed session rejects new mutations.
+- Construction produces `CREATED`; explicit `start()` is required to enter `RUNNING`.
+- A closed session is never restarted. Resume creates a new session object.
 - Session handles are opaque outside the core.
 - Every public operation within one session is serialized in the first version.
+- One end-to-end operation deadline includes gate wait, policy, collaborator execution,
+  state commit, and required terminal event delivery.
+- Every request defaults to a 30-second end-to-end timeout and reserves up to one second
+  explicitly for required terminal delivery before mutation begins.
+- Once close is requested, the active operation may finish while queued and new
+  operations are rejected.
 - Workspace operations are independently linearizable under one coarse state lock.
 - Independent sessions may execute concurrently.
 - Reads may become concurrent only after revision-consistent immutable read semantics are
   implemented without weakening observable ordering.
 - Snapshot restore is exclusive with every other operation.
 - Timeout or cancellation cannot leave an untracked mutation running.
+- Normal execute results commit returned cwd/environment even for non-zero command exits.
 - Repeated close/delete calls are idempotent where practical.
+- Behavior collaborators are borrowed; the session closes one owned resource scope that
+  contains only per-session closeable resources.
 
 ## 13. Data and error contracts
 
-Core boundaries use domain types rather than dictionaries. Each request carries explicit
-identity, path, limits, and optimistic concurrency information where applicable.
+Core boundaries use domain types rather than dictionaries. Core-internal requests carry
+explicit identity, path, limits, and optimistic concurrency information where
+applicable; public live-session requests rely on the session to attach identity after
+admission.
 
 Stable error categories include:
 

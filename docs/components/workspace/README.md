@@ -1,6 +1,6 @@
 # Workspace Design
 
-**Status:** Proposed detailed design under the approved high-level architecture
+**Status:** Workspace MVP and Milestone 3 prepared restore implemented; later extensions proposed
 
 ## Purpose
 
@@ -70,28 +70,61 @@ Avoid one global filesystem interface. Consumers use focused ports:
 
 ```python
 class WorkspaceReader(Protocol):
+    def resolve_path(
+        self,
+        value: str,
+        *,
+        cwd: SandboxPath | None = None,
+    ) -> SandboxPath: ...
+    async def stats(self) -> WorkspaceStats: ...
     async def stat(self, path: SandboxPath) -> WorkspaceEntry: ...
     async def list(self, path: SandboxPath) -> tuple[WorkspaceEntry, ...]: ...
-    async def read_bytes(self, path: SandboxPath) -> bytes: ...
-    async def read_range(self, request: WorkspaceReadRequest) -> WorkspaceReadResult: ...
+    async def read_bytes(self, path: SandboxPath) -> WorkspaceBinaryResult: ...
+    async def read_range(self, request: WorkspaceRangeRequest) -> WorkspaceRangeResult: ...
 
 
 class WorkspaceMutator(Protocol):
     async def mkdir(self, request: MakeDirectoryRequest) -> WorkspaceMutation: ...
     async def write(self, request: WorkspaceWriteRequest) -> WorkspaceMutation: ...
     async def append(self, request: WorkspaceAppendRequest) -> WorkspaceMutation: ...
-    async def patch(self, request: WorkspacePatchRequest) -> WorkspaceMutation: ...
+    async def patch(self, request: WorkspacePatchRequest) -> WorkspacePatchResult: ...
     async def remove(self, request: RemovePathRequest) -> WorkspaceMutation: ...
     async def copy(self, request: CopyPathRequest) -> WorkspaceMutation: ...
     async def move(self, request: MovePathRequest) -> WorkspaceMutation: ...
 
 
-class WorkspaceSnapshotCodec(Protocol):
+class WorkspaceSnapshotPort(Protocol):
     async def export(self) -> WorkspaceSnapshotData: ...
+    async def prepare_restore(
+        self,
+        data: WorkspaceSnapshotData,
+        *,
+        required_directory: SandboxPath,
+    ) -> PreparedWorkspaceRestore: ...
+    async def commit_restore(self, candidate: PreparedWorkspaceRestore) -> None: ...
     async def restore(self, data: WorkspaceSnapshotData) -> None: ...
 ```
 
 The in-memory workspace may implement all three protocols.
+
+`PreparedWorkspaceRestore` is an immutable, opaque candidate owned by the workspace
+module. Preparation decodes and verifies the complete tree, counters, hashes, limits,
+schema, and required directory without mutating live state. The candidate is bound to
+the workspace instance that prepared it and cannot be committed to another workspace.
+
+`commit_restore` publishes one validated candidate under the workspace state lock. It must
+remain cancellation-cooperative while waiting to publish; after publication it returns
+without another suspension point. This lets the session cancel a restore that exhausts
+its collaborator budget before any live state changes.
+`restore(data)` remains a convenience operation equivalent to
+`prepare_restore(data, required_directory=SandboxPath.root())` plus commit.
+`SandboxSession` uses prepare/commit with its restored cwd so cwd validity is proven
+before workspace and session state are published.
+
+Preparing or committing a malformed candidate raises `PreparedRestoreInvalid`, an
+`INVALID_REQUEST` error. Committing a candidate prepared by another workspace instance
+raises `RestoreCandidateMismatch`, a `CONFLICT` error. Both fail before live state
+publication.
 
 ## Path model
 

@@ -344,6 +344,22 @@ class WorkspaceSnapshotData:
         _require_content_hash("root_hash", self.root_hash)
 
 
+@dataclass(frozen=True, slots=True, repr=False)
+class PreparedWorkspaceRestore:
+    """Opaque workspace-bound state validated for one atomic restore commit."""
+
+    _workspace_token: object
+    _candidate_state: object
+
+    def belongs_to(self, workspace_token: object) -> bool:
+        """Return whether this candidate belongs to the supplied workspace token."""
+        return self._workspace_token is workspace_token
+
+    def prepared_state(self) -> object:
+        """Return opaque prepared state to the owning workspace implementation."""
+        return self._candidate_state
+
+
 def _require_text(name: str, value: object) -> str:
     if not isinstance(value, str):
         raise TypeError(f"{name} must be a string")

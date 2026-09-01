@@ -23,6 +23,7 @@ from mem_sandbox.core.identifiers import (
     UuidGenerator,
 )
 from mem_sandbox.core.models import OperationRequestMetadata, OperationResultMetadata
+from mem_sandbox.core.operations import OperationKind, OperationLimits
 
 __all__ = [
     "Clock",
@@ -33,6 +34,8 @@ __all__ = [
     "NotFoundError",
     "OperationCancelledError",
     "OperationId",
+    "OperationKind",
+    "OperationLimits",
     "OperationRequestMetadata",
     "OperationResultMetadata",
     "OperationTimeoutError",
