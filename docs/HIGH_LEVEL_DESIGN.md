@@ -34,6 +34,16 @@ through its own APIs, but it is not an operating-system isolation boundary.
 - Serialize every public operation within a session initially for deterministic behavior.
 - Give each workspace one coarse state lock; do not use object-level locks or MVCC in
   version 1.
+- Implement the first command executor as a constrained interpreter with exactly
+  `pwd`, `cd`, `ls`, `cat`, `echo`, `mkdir`, `touch`, and `rm`.
+- Keep first-wave command handlers stdin-aware through explicit contracts and metadata,
+  while deferring useful in-memory pipelines until the search and aggregation command
+  wave exists.
+- Treat unknown commands and expected command failures as structured non-zero results;
+  reserve exceptions for request, syntax, timeout, cancellation, policy, and internal
+  failures.
+- Restrict version 1 redirection to output-only commands and implement append through one
+  atomic workspace mutation.
 - Use snapshots as the explicit cross-session state-transfer mechanism.
 - Express every external dependency and cross-module collaboration through a narrow
   interface owned by the consuming module boundary.

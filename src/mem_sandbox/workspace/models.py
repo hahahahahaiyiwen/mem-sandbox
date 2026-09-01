@@ -207,6 +207,22 @@ class WorkspaceWriteRequest:
 
 
 @dataclass(frozen=True, slots=True)
+class WorkspaceAppendRequest:
+    """Atomically append bytes to one file, creating it when permitted."""
+
+    path: SandboxPath
+    content: bytes
+    precondition: WritePrecondition
+    create_parents: bool = False
+
+    def __post_init__(self) -> None:
+        _require_path("path", self.path)
+        _require_bytes("content", self.content)
+        _require_write_precondition(self.precondition)
+        _require_boolean("create_parents", self.create_parents)
+
+
+@dataclass(frozen=True, slots=True)
 class RemovePathRequest:
     """Remove a file or directory."""
 
