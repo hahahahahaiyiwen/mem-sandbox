@@ -194,6 +194,108 @@ The tokenizer recognizes `|` as an unsupported operator rather than treating it 
 argument. Later pipeline support will compose immutable command stages through explicit
 stdin and stdout; it will not invoke host processes or run stages concurrently.
 
+## Approved Milestone 4 pipeline semantics
+
+**Status:** Approved design for Milestone 4; not implemented in version 1.
+
+> Pipelines are bounded text transformations between registered virtual commands, not
+> shell emulation.
+
+Pipelines extend the constrained execution-plan grammar without introducing a host shell,
+host processes, or POSIX process semantics.
+
+### Grammar and plan structure
+
+- `|` binds more tightly than `&&` and `;`. Connectors evaluate the effective result of
+  the complete pipeline.
+- The parser validates the complete input before dispatch and represents a pipeline as
+  one immutable plan node containing immutable command stages.
+- A configurable maximum stage count is validated before execution.
+- One `>` or `>>` redirection may appear only after the final stage and applies to the
+  complete pipeline result. The final command descriptor must permit stdout redirection.
+  Redirection on an intermediate stage is rejected before dispatch.
+- Input redirection, heredocs, background jobs, command substitution, process
+  substitution, and implicit shell behavior remain unsupported.
+
+### Eligible commands and state
+
+The immutable command descriptor gains an explicit pipeline-safety declaration in
+addition to stdin acceptance. Before the first stage runs, the executor expands and
+resolves every stage against the current execution state and verifies that:
+
+- every command is registered and marked pipeline-safe;
+- every stage after the first accepts stdin;
+- expanded arguments satisfy their limits;
+- no stage changes cwd, environment, or workspace state;
+- a redirected final stage permits stdout redirection.
+
+Commands such as `cd`, `export`, `mkdir`, `touch`, `rm`, `cp`, and `mv` are not
+pipeline-safe. Stateful work uses `;` or `&&`, where ordered mutation is explicit.
+The initial pipeline roles are:
+
+| Role | Commands | Stdin behavior |
+|---|---|---|
+| Producer only | `pwd`, `ls`, `cat FILE...`, `echo`, `find` | May be the first stage; does not accept stdin |
+| Transformer or consumer | `grep`, `head`, `tail`, `sort`, `uniq`, `wc` | May accept stdin after the first stage |
+
+`cat` retains its version 1 requirement for one or more file arguments; pipeline support
+does not implicitly add a no-argument stdin-copy mode. A later command-specific decision
+may add that behavior if usability evidence justifies it.
+
+The executor-owned final stdout redirection is the only permitted workspace mutation in
+a pipeline. It remains one atomic workspace operation after the effective pipeline result
+is successful.
+
+This restriction avoids pretending that sequential stages have shell subprocess
+isolation. For example, a naive sequential `cd /workspace/project | pwd` would otherwise
+let `pwd` observe and potentially commit the earlier `cd`, while normal shell pipeline
+stages generally do not share cwd or environment changes.
+
+### Execution and output flow
+
+Stages run one at a time in memory:
+
+```text
+stage 1 stdout -> stage 2 stdin -> ... -> final stage stdout
+```
+
+- Pipeline stdin and stdout are UTF-8 text.
+- A stage runs to completion before the next stage begins.
+- The first stage receives explicit empty stdin.
+- Complete stage stdout becomes the next stage's explicit `CommandRequest.stdin`.
+- Intermediate stdout is consumed by the next stage and is not added to model-visible
+  aggregate stdout.
+- Final-stage stdout becomes the pipeline stdout.
+- Stderr from every executed stage remains separate from the pipe and is concatenated in
+  stage order.
+- A normal non-zero stage does not prevent later stages from consuming its stdout.
+- The effective pipeline status uses fixed pipefail behavior: the rightmost non-zero
+  stage status and failure code, or success when every stage succeeds.
+- Executor, timeout, cancellation, and dependency failures abort the pipeline and the
+  remaining execution plan immediately.
+
+### Bounds and failure behavior
+
+Pipelines add explicit limits for:
+
+- stages per pipeline;
+- complete bytes passed between any two stages;
+- aggregate intermediate bytes materialized across the pipeline.
+
+Intermediate output must be complete to preserve transformation correctness. If a stage
+exceeds an intermediate or aggregate pipeline limit, the pipeline fails before the next
+stage starts; truncated data is never supplied as stdin. This is a structured
+`PIPELINE_LIMIT_EXCEEDED` non-zero pipeline result, not an executor exception. A following
+`;` plan unit remains eligible, while a following `&&` plan unit is skipped.
+
+Final model-visible stdout and stderr retain the normal complete-plan output limits and
+observable truncation behavior. Final redirection still requires complete stdout and
+leaves the target unchanged when output is unavailable in full.
+
+The existing complete-plan timeout and cancellation scope covers every pipeline stage
+and redirection boundary. Sequential buffering deliberately avoids concurrent-stage
+backpressure, process cleanup, scheduling races, and unbounded queues.
+
 ## Initial command profile
 
 Milestone 2 implements exactly these eight commands:
@@ -220,7 +322,8 @@ support for commands that are not registered.
 Additional utilities such as `head`, `tail`, `cp`, `mv`, `grep`, `find`, `wc`, `sort`,
 `uniq`, `env`, `export`, `sh`, and `help` are deferred. The complete-core milestone adds
 the useful search and aggregation command wave together with bounded sequential
-in-memory pipelines, before the first framework adapter.
+in-memory pipelines under the approved semantics above, before the first framework
+adapter.
 
 OpenAI's default `SandboxAgent` shell sends `sh -lc` and expects additional Unix
 utilities. The first in-memory adapter should use a custom capability rather than adding
@@ -344,10 +447,13 @@ Normal command failures remain structured results:
 | Invalid option or argument | 2 |
 | Workspace operation failure | 1 |
 | Redirection or redirected-output-limit failure | 1 |
+| Pipeline intermediate or aggregate limit failure | 1 |
 
 The result includes a stable failure code in addition to deterministic stderr. This lets
 `;` and `&&` evaluate failures without exception-driven control flow. Policy denial is a
-session concern and occurs before invoking the executor.
+session concern and occurs before invoking the executor. Milestone 4 adds the stable
+`PIPELINE_LIMIT_EXCEEDED` failure code for a bounded pipeline that cannot retain complete
+intermediate data.
 
 ## Resource limits
 
@@ -379,6 +485,13 @@ non-finite, zero, or negative timeout and limit values are invalid requests.
 - Verify cwd and environment commit rules.
 - Verify append is one atomic workspace mutation rather than read-then-write.
 - Verify redirected output overflow and command failure leave the target unchanged.
+- For Milestone 4 pipelines, verify precedence, pipeline-safe command admission, fixed
+  pipefail status, producer and stdin-consumer roles, ordered stderr, final-only stdout,
+  descriptor-gated final-stage-only redirection, and exact intermediate and aggregate
+  byte boundaries.
+- Confirm an intermediate overflow never supplies truncated stdin or starts the next
+  stage, remains a structured non-zero result, permits following `;` execution, and
+  prevents following `&&` execution.
 - Run the same script before and after snapshot restore and compare results.
 - Verify duplicate and invalid command registrations fail fast.
 

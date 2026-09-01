@@ -1,6 +1,6 @@
 # Command Composition Usability Pilot
 
-**Status:** Directional design evidence
+**Status:** Directional design evidence; Milestone 4 direction and semantics approved
 
 ## Question
 
@@ -155,6 +155,34 @@ Do not add heredocs or arbitrary shell scripts merely for file creation. Keep
 `write_file` and `apply_patch` as the preferred exact-content operations. If multiline
 command sequencing is later supported, treat newlines as constrained plan separators,
 not as permission to emulate Bash.
+
+## Approved Milestone 4 semantics
+
+The recommendation is approved with one governing principle:
+
+> Pipelines are bounded text transformations between registered virtual commands, not
+> shell emulation.
+
+The authoritative contract is in
+[Command Executor Design](./README.md#approved-milestone-4-pipeline-semantics). In
+summary:
+
+- `|` binds more tightly than `&&` and `;`;
+- stages execute sequentially in memory through explicit UTF-8 stdin and stdout;
+- only registered pipeline-safe, non-mutating commands may participate;
+- producer-only commands may appear first, while every later stage must explicitly
+  accept stdin; the first stage receives empty stdin;
+- intermediate stdout is complete, bounded, and consumed rather than returned;
+- stderr remains outside the pipe and is retained in stage order;
+- the pipeline uses the rightmost non-zero status as fixed pipefail behavior;
+- only the final stage may redirect stdout, and its descriptor must permit redirection;
+- intermediate or aggregate overflow fails before truncated data reaches another stage;
+- pipeline overflow is a structured non-zero result, so `;` may continue while `&&`
+  skips its next unit;
+- timeout, cancellation, and infrastructure failures abort immediately.
+
+These semantics remain deferred until Milestone 4. Version 1 continues to reject `|`
+before dispatch.
 
 ## Required follow-up evaluation
 
