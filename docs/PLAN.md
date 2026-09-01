@@ -343,60 +343,64 @@ host shell, host executable lookup, or host filesystem access.
 
 #### 2.1 Execution contracts
 
-- [ ] **2.1.1** Write contract tests for `ExecuteRequest`, `ExecuteResult`,
+- [x] **2.1.1** Write contract tests for `ExecuteRequest`, `ExecuteResult`,
   `CommandRequest`, `CommandResult`, and `CommandExecutionContext`.
-- [ ] **2.1.2** Implement immutable execution models that distinguish normal non-zero
+- [x] **2.1.2** Implement immutable execution models that distinguish normal non-zero
   command exits from executor failures.
-- [ ] **2.1.3** Implement bounded stdout and stderr collectors with deterministic,
+- [x] **2.1.3** Implement bounded stdout and stderr collectors with deterministic,
   observable truncation.
+- [x] **2.1.4** Keep command requests explicitly stdin-aware, with empty stdin in the
+  first wave, so later bounded pipelines do not require a handler-contract rewrite.
 
 #### 2.2 Tokenizer and parser
 
-- [ ] **2.2.1** Write tokenizer tests for whitespace, single quotes, double quotes,
+- [x] **2.2.1** Write tokenizer tests for whitespace, single quotes, double quotes,
   escapes, argv construction, and approved environment expansion.
-- [ ] **2.2.2** Implement tokenization separately from parsing and execution-plan
+- [x] **2.2.2** Implement tokenization separately from parsing and execution-plan
   evaluation.
-- [ ] **2.2.3** Write parser tests for `;`, `&&`, `>`, and `>>`.
-- [ ] **2.2.4** Implement explicit parse errors for pipelines, `||`, input redirection,
+- [x] **2.2.3** Write parser tests for `;`, `&&`, `>`, and `>>`.
+- [x] **2.2.4** Implement explicit parse errors for pipelines, `||`, input redirection,
   heredocs, background jobs, command substitution, and incomplete input.
 
 #### 2.3 Command registry
 
-- [ ] **2.3.1** Write tests for deterministic lookup, explicit aliases, duplicate names,
+- [x] **2.3.1** Write tests for deterministic lookup, explicit aliases, duplicate names,
   and registry immutability after startup.
-- [ ] **2.3.2** Implement a constructor-injected registry of focused command handlers.
-- [ ] **2.3.3** Generate agent-facing command descriptions only from registered command
+- [x] **2.3.2** Implement a constructor-injected registry of focused command handlers.
+- [x] **2.3.3** Generate agent-facing command descriptions only from registered command
   metadata.
+- [x] **2.3.4** Include stdin acceptance in command metadata; every first-wave command
+  rejects non-empty stdin.
 
 #### 2.4 First command wave
 
-- [ ] **2.4.1** Define focused workspace reader and mutator ports owned by the command
+- [x] **2.4.1** Define focused workspace reader and mutator ports owned by the command
   executor module.
-- [ ] **2.4.2** Write behavior tests for `pwd`, `cd`, `ls`, and `cat`.
-- [ ] **2.4.3** Implement `pwd`, `cd`, `ls`, and `cat` through workspace ports.
-- [ ] **2.4.4** Write behavior tests for `echo`, `mkdir`, `touch`, and `rm`.
-- [ ] **2.4.5** Implement `echo`, `mkdir`, `touch`, and `rm` through workspace ports.
+- [x] **2.4.2** Write behavior tests for `pwd`, `cd`, `ls`, and `cat`.
+- [x] **2.4.3** Implement `pwd`, `cd`, `ls`, and `cat` through workspace ports.
+- [x] **2.4.4** Write behavior tests for `echo`, `mkdir`, `touch`, and `rm`.
+- [x] **2.4.5** Implement `echo`, `mkdir`, `touch`, and `rm` through workspace ports.
 
 #### 2.5 Sequencing and redirection
 
-- [ ] **2.5.1** Write execution-plan tests for unconditional `;` sequencing and
+- [x] **2.5.1** Write execution-plan tests for unconditional `;` sequencing and
   success-dependent `&&` sequencing.
-- [ ] **2.5.2** Implement sequencing with deterministic exit-code propagation.
-- [ ] **2.5.3** Write tests for create/truncate redirection with `>` and append
+- [x] **2.5.2** Implement sequencing with deterministic exit-code propagation.
+- [x] **2.5.3** Write tests for create/truncate redirection with `>` and append
   redirection with `>>`, including quota and target-type failures.
-- [ ] **2.5.4** Implement redirection as atomic workspace mutations.
+- [x] **2.5.4** Implement redirection as atomic workspace mutations.
 
 #### 2.6 State, timeout, cancellation, and output
 
-- [ ] **2.6.1** Write tests proving cwd and approved environment changes are returned
+- [x] **2.6.1** Write tests proving cwd and approved environment changes are returned
   explicitly rather than hidden inside command handlers.
-- [ ] **2.6.2** Implement execution-context state transitions for cwd and approved
+- [x] **2.6.2** Implement execution-context state transitions for cwd and approved
   environment variables.
-- [ ] **2.6.3** Write timeout and cancellation tests at command and complete-plan
+- [x] **2.6.3** Write timeout and cancellation tests at command and complete-plan
   boundaries.
-- [ ] **2.6.4** Implement cooperative cancellation and a complete-plan timeout that
+- [x] **2.6.4** Implement cooperative cancellation and a complete-plan timeout that
   prevents later mutations after timeout is reported.
-- [ ] **2.6.5** Write and implement exact-boundary output-limit behavior for stdout and
+- [x] **2.6.5** Write and implement exact-boundary output-limit behavior for stdout and
   stderr.
 
 ### Executable acceptance scenario
@@ -417,19 +421,21 @@ results, output, state transitions, workspace hashes, and final workspace state.
 
 ### Exit criteria
 
-- [ ] **2.9.1** `python -m pytest tests/unit/command_executor -q` passes.
-- [ ] **2.9.2**
+- [x] **2.9.1** `python -m pytest tests/unit/command_executor -q` passes.
+- [x] **2.9.2**
   `python -m pytest tests/integration/command_executor/test_first_command_wave.py -q`
   passes.
-- [ ] **2.9.3** Tests prove every first-wave command operates only through injected
+- [x] **2.9.3** Tests prove every first-wave command operates only through injected
   workspace ports.
-- [ ] **2.9.4** Every unsupported syntax family returns the documented typed error before
+- [x] **2.9.4** Every unsupported syntax family returns the documented typed error before
   mutation.
-- [ ] **2.9.5** Timeout and cancellation tests prove no later mutation occurs after the
+- [x] **2.9.5** Timeout and cancellation tests prove no later mutation occurs after the
   reported terminal result.
-- [ ] **2.9.6** `docs/components/command-executor/README.md` describes the
+- [x] **2.9.6** `docs/components/command-executor/README.md` describes the
   implemented grammar, commands, state transitions, timeout, cancellation, and output
   limits.
+- [x] **2.9.7** Tests prove command handlers receive explicit empty stdin while pipeline
+  syntax remains unsupported by the MVP parser.
 
 ## 7. Milestone 3: minimal `SandboxSession` vertical slice
 
@@ -528,7 +534,8 @@ including the remaining command profile, policy, events, snapshots, and secrets.
 
 #### 4.1 Workspace and command completion
 
-- [ ] **4.1.1** Write tests and implement `head`, `tail`, `grep`, `find`, and `wc`.
+- [ ] **4.1.1** Write tests and implement `head`, `tail`, `grep`, `find`, `wc`, `sort`,
+  and `uniq`.
 - [ ] **4.1.2** Write tests and implement `cp` and `mv` through existing workspace ports.
 - [ ] **4.1.3** Write tests and implement `env`, `export`, and scripts through the same
   parser and command registry.
@@ -536,6 +543,12 @@ including the remaining command profile, policy, events, snapshots, and secrets.
   requirement cannot use the existing operations efficiently.
 - [ ] **4.1.5** Reject unimplemented POSIX behavior explicitly rather than adding host
   fallbacks or partial emulation.
+- [ ] **4.1.6** Write tests and implement bounded sequential in-memory pipelines through
+  explicit command stdin and stage stdout, with no host process and no concurrent stage
+  execution.
+- [ ] **4.1.7** Run an executable multi-model command-usability evaluation before the
+  first framework adapter, including acceptance, repair turns, tool calls, tokens,
+  latency, output size, and truncation.
 
 #### 4.2 Policy engine
 
@@ -802,7 +815,12 @@ their referenced checklist task begins.
 | Server-side branch protection | Defer while private plan lacks support | `0.0.8` | Deferred |
 | Patch format | Constrained UTF-8 multi-file unified diff with atomic application | `1.7.1` | Resolved |
 | Snapshot encoding | Canonical UTF-8 JSON, sorted entries, base64 bytes, SHA-256 integrity | `1.8.1` | Resolved |
-| First command profile | Eight-command MVP listed above | `2.4.2` | Open |
+| First command profile | Exact `pwd`, `cd`, `ls`, `cat`, `echo`, `mkdir`, `touch`, and `rm` profile | `2.4.2` | Resolved |
+| Command grammar | Quote-aware `;`, `&&`, `>`, and `>>`; approved variable expansion; no implicit shell features | `2.2` | Resolved |
+| Command failures | Structured exit 127/2/1 results; exceptions reserved for executor failures | `2.1` | Resolved |
+| Command redirection | Output-only commands; atomic replace and workspace-owned append | `2.5` | Resolved |
+| Command output | Independent 256 KiB stream caps with deterministic UTF-8 truncation | `2.6.5` | Resolved |
+| Timeout state | 30-second plan timeout; keep committed files and discard transient cwd/environment on timeout | `2.6` | Resolved |
 | First framework adapter | PydanticAI capability | `5.2.1` | Open |
 | Workspace content offload | Revisit after Milestone 5 using measured workload and provisioning data | `6.2.3` | Deferred |
 

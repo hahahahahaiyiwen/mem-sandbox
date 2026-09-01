@@ -22,8 +22,11 @@ workspace state lock. Mutations build private candidate state and publish it onc
 all validation succeeds. There are no node-level locks, MVCC versions, or automatic
 optimistic retries.
 
-Writes require an explicit precondition: unconditional, path-must-not-exist, or
-content-hash-must-equal. Hash comparison happens inside the state lock.
+Writes and appends require an explicit precondition: unconditional,
+path-must-not-exist, or content-hash-must-equal. Hash comparison happens inside the
+state lock. Append is a single workspace-owned mutation that checks quotas against the
+complete resulting file and publishes content, hashes, counters, and one new revision
+atomically.
 
 ## Maintenance
 

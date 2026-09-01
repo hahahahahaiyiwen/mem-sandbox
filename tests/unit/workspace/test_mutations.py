@@ -20,6 +20,7 @@ from mem_sandbox.workspace import (
     RootModificationError,
     SandboxPath,
     StaleContentError,
+    WorkspaceAppendRequest,
     WorkspaceLimits,
     WorkspaceSizeLimitExceededError,
     WorkspaceWriteRequest,
@@ -85,6 +86,47 @@ async def test_write_preconditions_prevent_lost_updates() -> None:
     assert (await workspace.read_bytes(path)).content == b"second"
     assert replaced.previous_hash == created_hash
     assert (await workspace.stats()).revision.value == 2
+
+
+@pytest.mark.asyncio
+async def test_append_is_atomic_quota_aware_and_stale_safe() -> None:
+    workspace = MemoryWorkspace(WorkspaceLimits(max_file_bytes=5, max_total_bytes=5))
+    path = SandboxPath.resolve("/workspace/file.txt")
+    created = await workspace.append(WorkspaceAppendRequest(path, b"ab", PathMustNotExist()))
+    created_hash = created.current_hash
+    assert created_hash is not None
+
+    appended = await workspace.append(
+        WorkspaceAppendRequest(path, b"cd", ContentHashMustEqual(created_hash))
+    )
+
+    assert appended.previous_hash == created_hash
+    assert appended.stats.revision.value == 2
+    assert (await workspace.read_bytes(path)).content == b"abcd"
+
+    before = await workspace.stats()
+    with pytest.raises(StaleContentError):
+        await workspace.append(
+            WorkspaceAppendRequest(path, b"x", ContentHashMustEqual(created_hash))
+        )
+    with pytest.raises(FileSizeLimitExceededError):
+        await workspace.append(WorkspaceAppendRequest(path, b"xy", AnyCurrentState()))
+
+    assert await workspace.stats() == before
+    assert (await workspace.read_bytes(path)).content == b"abcd"
+
+
+@pytest.mark.asyncio
+async def test_append_rejects_directory_targets_without_mutation() -> None:
+    workspace = MemoryWorkspace()
+    directory = SandboxPath.resolve("/workspace/directory")
+    await workspace.mkdir(MakeDirectoryRequest(directory))
+    before = await workspace.stats()
+
+    with pytest.raises(NotAFileError):
+        await workspace.append(WorkspaceAppendRequest(directory, b"content", AnyCurrentState()))
+
+    assert await workspace.stats() == before
 
 
 @pytest.mark.asyncio

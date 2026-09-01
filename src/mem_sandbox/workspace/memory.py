@@ -38,6 +38,7 @@ from mem_sandbox.workspace.models import (
     PatchedFile,
     PathMustNotExist,
     RemovePathRequest,
+    WorkspaceAppendRequest,
     WorkspaceBinaryResult,
     WorkspaceEntry,
     WorkspaceLimits,
@@ -263,6 +264,40 @@ class MemoryWorkspace:
                 changed=True,
                 previous_hash=previous_hash,
                 current_hash=current_hash,
+                stats=next_state.stats,
+            )
+
+    async def append(self, request: WorkspaceAppendRequest) -> WorkspaceMutation:
+        """Append bytes through one atomic workspace mutation."""
+        self._validate_path(request.path)
+        if request.path.is_root:
+            raise NotAFileError(f"{request.path} is not a file")
+
+        async with self._state_lock:
+            existing = _try_get_node(self._state.root, request.path)
+            previous_hash = _validate_write_precondition(
+                request.path,
+                existing,
+                request.precondition,
+            )
+            previous_content = existing.content if isinstance(existing, _FileNode) else b""
+            content = previous_content + request.content
+            if len(content) > self._limits.max_file_bytes:
+                raise FileSizeLimitExceededError(
+                    f"file contains {len(content)} bytes; limit is "
+                    f"{self._limits.max_file_bytes} bytes"
+                )
+
+            root = copy.deepcopy(self._state.root)
+            parent = _ensure_parent(root, request.path, request.create_parents)
+            parent.children[request.path.name] = _FileNode(content=content)
+            next_state = self._commit(root)
+            return WorkspaceMutation(
+                path=request.path,
+                created=existing is None,
+                changed=True,
+                previous_hash=previous_hash,
+                current_hash=ContentHash.from_bytes(content),
                 stats=next_state.stats,
             )
 

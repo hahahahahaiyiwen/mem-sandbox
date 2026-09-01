@@ -12,6 +12,7 @@ ALLOWED_CORE_IMPORT_ROOTS = frozenset(sys.stdlib_module_names) | {"mem_sandbox"}
 CORE_DIRECTORIES = (
     "core",
     "workspace",
+    "command_executor",
     "commands",
     "policy",
     "secrets",

@@ -79,6 +79,7 @@ class WorkspaceReader(Protocol):
 class WorkspaceMutator(Protocol):
     async def mkdir(self, request: MakeDirectoryRequest) -> WorkspaceMutation: ...
     async def write(self, request: WorkspaceWriteRequest) -> WorkspaceMutation: ...
+    async def append(self, request: WorkspaceAppendRequest) -> WorkspaceMutation: ...
     async def patch(self, request: WorkspacePatchRequest) -> WorkspaceMutation: ...
     async def remove(self, request: RemovePathRequest) -> WorkspaceMutation: ...
     async def copy(self, request: CopyPathRequest) -> WorkspaceMutation: ...
@@ -138,6 +139,19 @@ state.
 - `ContentHashMustEqual` compares the current SHA-256 content hash while holding the
   workspace lock and returns `StaleContent` on mismatch.
 - The caller sends the observed hash rather than resending the complete original file.
+
+### Append
+
+- Append is one workspace-owned atomic mutation; callers never implement append as a
+  read followed by write.
+- The request uses the same explicit current-state preconditions as write.
+- A missing destination is created when its precondition permits creation.
+- File-size and total-workspace quotas are checked against the complete appended content
+  before publication.
+- Directory targets, stale hashes, and quota failures leave content, counters, hashes,
+  and revision unchanged.
+- A successful append increments the workspace revision exactly once and returns the
+  previous and current SHA-256 hashes.
 
 ### Patch
 
@@ -297,7 +311,7 @@ Stable workspace errors include:
 - Reject traversal, root deletion, and invalid segments.
 - Cover empty files, binary files, mixed line endings, and invalid UTF-8.
 - Verify exact one-based line-range boundaries.
-- Verify atomic write, patch, copy, move, and restore behavior.
+- Verify atomic write, append, patch, copy, move, and restore behavior.
 - Verify replacement quota accounting and max-boundary values.
 - Verify stable listing order, revisions, and content hashes.
 - Run property tests over path normalization and random operation sequences.

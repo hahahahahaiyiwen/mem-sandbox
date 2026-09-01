@@ -1,6 +1,6 @@
 # Command Executor Design
 
-**Status:** Proposed detailed design under the approved high-level architecture
+**Status:** Implemented in Milestone 2
 
 ## Purpose
 
@@ -9,6 +9,10 @@ workspace. It is not a wrapper around the host shell.
 
 The executor owns command parsing, dispatch, working-directory and environment behavior,
 timeouts, output limits, and command result semantics.
+
+The framework-neutral implementation is in `src/mem_sandbox/command_executor`. Its
+default factory constructor injects the workspace reader and mutator ports into the
+first-wave handlers and injects an immutable registry into the executor.
 
 ## Responsibilities
 
@@ -31,27 +35,44 @@ timeouts, output limits, and command result semantics.
 - Agent framework tools.
 - Full POSIX compatibility.
 
+The cross-model evidence and roadmap implications for pipelines, scripts, and structured
+file tools are recorded in
+[Command Composition Usability Pilot](./PIPELINE_EVALUATION.md).
+
 ## Public contract
 
 ```python
 @dataclass(frozen=True)
+class CommandLimits:
+    max_command_bytes: int = 32 * 1024
+    max_argv_entries: int = 256
+    max_argument_bytes: int = 8 * 1024
+    max_stdout_bytes: int = 256 * 1024
+    max_stderr_bytes: int = 256 * 1024
+    timeout_seconds: float = 30.0
+
+
+@dataclass(frozen=True)
 class ExecuteRequest:
     command: str
     cwd: SandboxPath
-    environment: Mapping[str, str]
-    timeout_seconds: float
-    max_output_bytes: int
+    environment: CommandEnvironment
+    limits: CommandLimits
 
 
 @dataclass(frozen=True)
 class ExecuteResult:
     exit_code: int
+    failure_code: CommandFailureCode | None
     stdout: str
     stderr: str
+    stdout_original_bytes: int
+    stderr_original_bytes: int
+    stdout_truncated: bool
+    stderr_truncated: bool
     duration_ms: float
-    output_truncated: bool
     resulting_cwd: SandboxPath
-    environment_changes: Mapping[str, str | None]
+    environment_changes: tuple[EnvironmentChange, ...]
 
 
 class CommandExecutor(Protocol):
@@ -62,17 +83,50 @@ class CommandExecutor(Protocol):
     ) -> ExecuteResult: ...
 ```
 
+`CommandEnvironment`, limits, requests, results, and environment changes are immutable
+domain values. Environment values, environment changes, stdout, and stderr must be valid
+UTF-8 text. Concrete dictionaries are not exposed across the executor boundary.
+
+The default complete-plan timeout is 30 seconds. All limits are configurable at executor
+construction or through a validated effective profile; workspace quotas remain
+independently authoritative.
+
 The session commits `resulting_cwd` and environment changes only when execution reaches a
 defined completion state.
+
+## Execution architecture
+
+The executor separates syntax, orchestration, and command behavior:
+
+1. Validate request text, starting state, and limits.
+2. Tokenize into quote-aware word fragments and operators.
+3. Parse the complete input into an immutable execution plan before dispatch.
+4. Start one complete-plan timeout scope.
+5. For each eligible simple command, expand approved variables against the current
+   execution state.
+6. Resolve the command from the immutable registry.
+7. Invoke the focused handler through command-owned workspace ports.
+8. Apply a permitted stdout redirection only after successful command completion.
+9. Advance explicit cwd or environment state and aggregate output.
+10. Return the last executed command status and final normal-completion state.
+
+Parsing the complete plan first ensures malformed or unsupported syntax cannot execute a
+prefix of the input.
 
 ## Command extension contract
 
 Each command has one responsibility:
 
 ```python
+@dataclass(frozen=True)
+class CommandRequest:
+    argv: tuple[str, ...]
+    stdin: str
+
+
 class VirtualCommand(Protocol):
     @property
-    def name(self) -> str: ...
+    def descriptor(self) -> CommandDescriptor: ...
 
     async def execute(
         self,
@@ -84,21 +138,42 @@ class VirtualCommand(Protocol):
 Commands receive only required capabilities, such as `CommandWorkspaceReader` or
 `CommandWorkspaceMutator`. They do not receive the concrete session or service.
 
-Duplicate command names fail executor construction.
+`CommandDescriptor` owns the case-sensitive name, explicit aliases, summary, usage, and
+whether the command permits stdout redirection or accepts stdin. Duplicate names or
+aliases fail executor construction. The registry is immutable after construction and is
+the only source for agent-facing command descriptions. The default profile defines no
+aliases.
+
+`stdin` is explicit but empty for every Milestone 2 dispatch. Every first-wave descriptor
+declares that it does not accept stdin, and handlers reject a non-empty value. This keeps
+the boundary ready for later bounded sequential pipelines without claiming pipeline
+support in the MVP. Stage stdout remains distinct from aggregate executor output for the
+same reason.
 
 ## Grammar
 
-Version 1 may support:
+Version 1 supports:
 
-- shell-style whitespace and quoting
-- environment expansion for approved variables
+- shell-style whitespace
+- literal single-quoted fragments
+- unquoted backslash escapes for the following character
+- double-quoted backslash escapes only for `$`, backtick, `"`, and `\`; before any other
+  character the backslash remains literal
+- `$NAME` and `${NAME}` expansion in unquoted and double-quoted fragments
 - command sequencing with `;`
 - success sequencing with `&&`
-- output replacement with `>`
-- output append with `>>`
-- script execution through the same parser and registry
+- one trailing stdout replacement with `>`
+- one trailing stdout append with `>>`
 
-Version 1 rejects:
+Operators are recognized only outside quotes. Empty quoted arguments are preserved.
+Expansion occurs immediately before each command is dispatched, so it observes the
+current explicit execution state. Undefined approved variables expand to an empty string.
+Expansion never causes word splitting, command lookup, or glob expansion.
+
+`PWD` is derived from the current execution cwd. Version 1 has no environment-mutating
+command, so returned environment changes are empty.
+
+Version 1 rejects or does not interpret:
 
 - pipelines
 - `||`
@@ -106,42 +181,76 @@ Version 1 rejects:
 - background jobs
 - command substitution
 - process substitution
+- multiline input
+- comments
+- globbing
+- tilde expansion
+- multiple or non-trailing redirects
 - host executable lookup
 - implicit fallback to `cmd.exe`, PowerShell, Bash, or `/bin/sh`
 
 Unsupported syntax returns `CommandSyntaxUnsupported`, not an approximation.
+The tokenizer recognizes `|` as an unsupported operator rather than treating it as an
+argument. Later pipeline support will compose immutable command stages through explicit
+stdin and stdout; it will not invoke host processes or run stages concurrently.
 
 ## Initial command profile
 
-The first useful profile should cover workspace manipulation and inspection:
+Milestone 2 implements exactly these eight commands:
 
-```text
-pwd, cd, ls
-cat, head, tail
-mkdir, touch, rm, cp, mv
-echo, grep, find, wc
-env, export
-sh, help
-```
+| Command | Version 1 behavior |
+|---|---|
+| `pwd` | Accept no arguments and emit the absolute cwd followed by LF |
+| `cd PATH` | Require exactly one existing directory and return the new cwd |
+| `ls [PATH]` | Accept zero or one path and emit stable lexical names, one per line |
+| `cat FILE...` | Concatenate one or more UTF-8 files exactly, without inserted separators |
+| `echo ARG...` | Join arguments with one space and append LF |
+| `mkdir [-p] PATH...` | Create one or more directories, optionally including parents |
+| `touch FILE...` | Create missing empty files; an existing file is a successful no-op |
+| `rm [-rR] [-f] PATH...` | Remove files or directories with explicit recursive/force behavior |
+
+`ls` does not hide dot-prefixed names or synthesize host metadata. `cat` fails normally
+on invalid UTF-8. `touch` rejects directories because version 1 has no timestamp mutation.
+Unknown options are argument failures. Multi-target commands fail fast; earlier successful
+workspace mutations remain committed.
 
 Commands are enabled through a capability profile. A framework adapter must not claim
 support for commands that are not registered.
 
+Additional utilities such as `head`, `tail`, `cp`, `mv`, `grep`, `find`, `wc`, `sort`,
+`uniq`, `env`, `export`, `sh`, and `help` are deferred. The complete-core milestone adds
+the useful search and aggregation command wave together with bounded sequential
+in-memory pipelines, before the first framework adapter.
+
 OpenAI's default `SandboxAgent` shell sends `sh -lc` and expects additional Unix
 utilities. The first in-memory adapter should use a custom capability rather than adding
 fake POSIX compatibility to this component.
+
+## Workspace ports
+
+The command-executor module owns focused reader and mutator protocols for only the
+operations used by registered commands. Handlers do not import or type against
+`MemoryWorkspace`.
+
+Append redirection requires one workspace-owned atomic append mutation. It must not be
+implemented as an unguarded read followed by write. The Workspace module will add the
+append request, quota, hash, revision, atomicity, and stale-state tests as part of issue
+#4, with corresponding Workspace README updates.
 
 ## Execution context
 
 The context contains:
 
 - focused workspace reader and mutator ports
-- normalized starting cwd
-- approved environment values
+- immutable current cwd and approved environment state
 - cancellation signal
-- output collector with hard limits
+- separate bounded stdout and stderr collectors
 - operation and session identity
 - approved secret leases, if required
+
+Handlers return state transitions; they do not mutate a shared cwd or environment
+dictionary. The executor applies successful transitions before evaluating the next
+command.
 
 Secret values are resolved before command dispatch by the session and are never added to
 history or result metadata.
@@ -149,58 +258,127 @@ history or result metadata.
 ## Timeout and cancellation
 
 - Timeout is measured over the complete execution plan.
-- Commands receive cooperative cancellation.
-- A timeout returns or raises one deterministic timeout outcome.
+- The default timeout is 30 seconds.
+- Commands receive cooperative cancellation and may not create detached work.
+- Cancellation is checked before and after each handler boundary.
+- The executor checks its monotonic deadline before and after each awaited command or
+  redirection boundary, so a handler that suppresses cancellation cannot return success
+  or allow a later command to start after the deadline.
+- Timeout raises `CommandTimeout`; cooperative request cancellation through
+  `CommandExecutionContext` raises `CommandCancelled`.
+- Native `asyncio` task cancellation propagates `asyncio.CancelledError` unchanged so
+  `TaskGroup`, `wait_for`, and outer timeout scopes retain standard Python semantics.
 - No command may continue mutating workspace state after timeout is reported.
 - If a command implementation cannot stop safely, it is not accepted into the in-memory
   executor.
+- The executor waits for cancellation cleanup before surfacing the terminal error.
 
 ## State mutation
 
 Command sequencing is one session operation. Workspace mutations made by earlier commands
 remain when a later command returns a normal non-zero exit code, matching documented
-shell-style behavior. Parser, policy, timeout, or internal failures before dispatch change
-nothing.
+shell-style behavior. `;` always evaluates the next command, while `&&` evaluates it only
+after exit code 0. The final result uses the status of the last command actually executed.
+
+Outputs are concatenated exactly in execution order without inserting separators.
+Commands emit their own conventional newlines.
+
+On normal completion, including a non-zero final status, the result returns the current
+cwd and environment changes for the session to commit. On timeout or cancellation, those
+transient state changes are discarded because no result is returned. Already committed
+workspace mutations remain, but no later command starts.
+
+Parser failures before dispatch change nothing. Unexpected executor or collaborator
+failures are surfaced explicitly and are never converted to successful-looking command
+results.
 
 The result clearly distinguishes command non-zero status from executor infrastructure
 failure.
 
+## Redirection
+
+Version 1 allows one trailing stdout redirection only for `pwd`, `ls`, `cat`, and `echo`.
+Restricting redirection to output-only commands prevents a redirect failure from being
+coupled to an earlier mutation by the same simple command.
+
+- `>` atomically creates or replaces the destination.
+- `>>` atomically appends and creates the destination when absent.
+- The destination resolves against the cwd active for that command.
+- A non-zero command result leaves the destination unchanged.
+- Successful redirection suppresses that command's stdout from the aggregate result.
+- stderr is never redirected.
+- If complete stdout was not retained because of the output limit, redirection fails
+  normally and leaves the destination unchanged.
+- Workspace path, target-type, quota, and append failures use exit code 1 with a
+  structured redirection failure code.
+
 ## Output behavior
 
-- Commands write bytes or text through a bounded collector.
-- Truncation is deterministic and recorded in the result.
+- stdout and stderr each have an independent 256 KiB default UTF-8 byte limit over the
+  complete execution plan.
+- Collectors preserve complete UTF-8 code points, retain the bounded prefix, count the
+  original emitted bytes, and record separate truncation flags.
+- Normal unredirected overflow does not change the command exit status.
+- Redirected stdout overflow fails instead of writing partial output.
 - Redaction occurs before model-visible output and events.
 - stdout and stderr remain separate domain fields.
 - Adapters decide how to format them for a framework.
 
 ## Failure semantics
 
-Stable errors include:
+Typed executor errors include:
 
 - `CommandEmpty`
 - `CommandTooLong`
 - `CommandSyntaxInvalid`
 - `CommandSyntaxUnsupported`
-- `CommandNotFound`
-- `CommandArgumentInvalid`
 - `CommandTimeout`
 - `CommandCancelled`
-- `CommandOutputLimitExceeded`
-- `CommandPolicyDenied`
 - `CommandInternalFailure`
 
-A normal command failure uses a non-zero exit code. Infrastructure and policy failures
-use domain errors.
+Normal command failures remain structured results:
+
+| Failure | Exit code |
+|---|---:|
+| Command not registered | 127 |
+| Invalid option or argument | 2 |
+| Workspace operation failure | 1 |
+| Redirection or redirected-output-limit failure | 1 |
+
+The result includes a stable failure code in addition to deterministic stderr. This lets
+`;` and `&&` evaluate failures without exception-driven control flow. Policy denial is a
+session concern and occurs before invoking the executor.
+
+## Resource limits
+
+The configurable default profile is:
+
+| Limit | Default |
+|---|---:|
+| Command text | 32 KiB UTF-8 |
+| argv entries per simple command | 256 |
+| Expanded argument | 8 KiB UTF-8 |
+| stdout | 256 KiB UTF-8 |
+| stderr | 256 KiB UTF-8 |
+| Complete execution plan | 30 seconds |
+
+The static argv-entry count is checked for the complete plan before dispatch because
+expansion never performs word splitting. Expanded UTF-8 argument and redirection-target
+sizes are checked immediately before each command and produce a structured invalid-
+argument result, allowing `;` and `&&` to retain normal sequencing semantics. Empty,
+non-finite, zero, or negative timeout and limit values are invalid requests.
 
 ## Test expectations
 
 - Parse quoting, expansion, sequencing, and redirection boundaries.
 - Reject every unsupported syntax family.
 - Verify each command through fake workspace ports.
-- Cover happy, non-zero, policy-blocked, timeout, and dependency-failure paths.
+- Cover happy, non-zero, timeout, cancellation, and dependency-failure paths.
 - Confirm no post-timeout mutations.
 - Confirm deterministic output truncation and redaction.
 - Verify cwd and environment commit rules.
+- Verify append is one atomic workspace mutation rather than read-then-write.
+- Verify redirected output overflow and command failure leave the target unchanged.
 - Run the same script before and after snapshot restore and compare results.
 - Verify duplicate and invalid command registrations fail fast.
 
