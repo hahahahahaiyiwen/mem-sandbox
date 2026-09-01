@@ -1,6 +1,6 @@
 # Secret Broker Design
 
-**Status:** Proposed detailed design under the approved high-level architecture
+**Status:** Milestone 3 no-secret broker implemented; secret leasing remains proposed
 
 ## Purpose
 
@@ -54,6 +54,10 @@ class SecretLease(Protocol):
 class SecretBroker(Protocol):
     async def lease(self, request: SecretAccessRequest) -> SecretLease: ...
 ```
+
+Milestone 3 provides `NoSecretBroker`, which implements this boundary by rejecting every
+lease request with the stable `SecretDenied` error. The public Milestone 3 session
+operations carry no secret references and therefore never invoke the injected broker.
 
 `SecretValue` is a protected wrapper rather than a plain string. Conversion to bytes or
 text happens only at the command boundary that needs it. `SessionId` and `OperationId`

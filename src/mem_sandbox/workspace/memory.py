@@ -19,7 +19,9 @@ from mem_sandbox.workspace.errors import (
     NotAFileError,
     PathAlreadyExistsError,
     PathNotFoundError,
+    PreparedRestoreInvalid,
     ReadLimitExceededError,
+    RestoreCandidateMismatch,
     RootModificationError,
     SamePathError,
     SnapshotCorruptError,
@@ -37,6 +39,7 @@ from mem_sandbox.workspace.models import (
     NodeKind,
     PatchedFile,
     PathMustNotExist,
+    PreparedWorkspaceRestore,
     RemovePathRequest,
     WorkspaceAppendRequest,
     WorkspaceBinaryResult,
@@ -88,6 +91,7 @@ class MemoryWorkspace:
         self._limits = limits or WorkspaceLimits()
         self._state_lock = asyncio.Lock()
         self._snapshot_codec = JsonWorkspaceSnapshotCodec()
+        self._restore_token = object()
         root = _DirectoryNode(children={})
         self._state = self._state_for_root(root, Revision.initial())
 
@@ -473,8 +477,14 @@ class MemoryWorkspace:
             stats = self._state.stats
         return self._snapshot_codec.encode(entries, stats, self._limits)
 
-    async def restore(self, data: WorkspaceSnapshotData) -> None:
-        """Validate and atomically replace workspace state from a snapshot."""
+    async def prepare_restore(
+        self,
+        data: WorkspaceSnapshotData,
+        *,
+        required_directory: SandboxPath,
+    ) -> PreparedWorkspaceRestore:
+        """Validate complete snapshot state without mutating the live workspace."""
+        required_directory = self._validate_path(required_directory)
         decoded = self._snapshot_codec.decode(
             data,
             self._limits,
@@ -486,8 +496,30 @@ class MemoryWorkspace:
             raise SnapshotCorruptError(
                 "snapshot counters or hashes do not match reconstructed state"
             )
+        required_node = _get_node(candidate.root, required_directory)
+        if not isinstance(required_node, _DirectoryNode):
+            raise NotADirectoryError(f"{required_directory} is not a directory")
+        return PreparedWorkspaceRestore(self._restore_token, candidate)
+
+    async def commit_restore(self, candidate: object) -> None:
+        """Publish one workspace-bound prepared candidate atomically."""
+        if not isinstance(candidate, PreparedWorkspaceRestore):
+            raise PreparedRestoreInvalid("candidate must be a PreparedWorkspaceRestore")
+        if not candidate.belongs_to(self._restore_token):
+            raise RestoreCandidateMismatch("restore candidate belongs to another workspace")
+        state = candidate.prepared_state()
+        if not isinstance(state, _WorkspaceState):
+            raise PreparedRestoreInvalid("restore candidate contains invalid workspace state")
         async with self._state_lock:
-            self._state = candidate
+            self._state = state
+
+    async def restore(self, data: WorkspaceSnapshotData) -> None:
+        """Prepare and atomically replace workspace state from a snapshot."""
+        candidate = await self.prepare_restore(
+            data,
+            required_directory=SandboxPath.root(),
+        )
+        await self.commit_restore(candidate)
 
     def _commit(self, root: _DirectoryNode) -> _WorkspaceState:
         next_state = self._state_for_root(root, self._state.stats.revision.next())

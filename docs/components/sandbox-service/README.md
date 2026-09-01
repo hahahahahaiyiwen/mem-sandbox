@@ -97,6 +97,12 @@ class SessionFactory(Protocol):
 The factory assembles concrete collaborators through constructor injection. The service
 must not use a global service locator or import agent SDKs.
 
+The factory also assembles one session-owned `SessionResourceScope`. Behavior ports
+remain borrowed by the session; the scope contains only per-session closeable resources
+and defines their reverse-construction cleanup order. Shared policy engines, secret
+brokers, event sinks, snapshot stores, clocks, and identifier generators are not placed
+in the scope.
+
 ## Registry model
 
 The in-memory service stores records shaped conceptually as:
@@ -126,22 +132,34 @@ other meaningful data.
 5. Register the session only after startup succeeds.
 6. Emit a creation event and return the handle.
 
-Startup failure closes all collaborators in reverse construction order and does not leave
-a registry entry.
+Startup failure closes the session resource scope in its factory-defined
+reverse-construction order and does not leave a registry entry. Borrowed shared
+collaborators are not closed.
 
 ### Resume
 
 1. Authorize access to the snapshot reference.
 2. Load and validate the snapshot.
 3. Apply only explicitly permitted option overrides.
-4. Construct a new session identity.
-5. Restore and start the session.
-6. Register and return a new handle.
+4. Construct a new session identity and pass validated `RestoredSandboxState` to the
+   factory.
+5. The factory prepares and commits initial workspace, cwd, and environment state while
+   the new session remains `CREATED`.
+6. Start the session.
+7. Register and return a new handle.
 
 Resume creates a new live session. It does not revive Python object identity from a prior
 process. Reusing one snapshot reference creates independent workspace forks; later writes
 do not merge or conflict unless a future shared-workspace capability explicitly provides
 that behavior.
+
+`source_session_id` in a snapshot is provenance only. Authorization uses service-owned
+owner/reference records rather than requiring the resumed session to equal the source
+session.
+
+The live-session `restore_snapshot()` host operation remains valid only for a `RUNNING`
+session. Service resume does not call that method; it seeds validated initial state before
+the new session starts.
 
 ### Delete
 

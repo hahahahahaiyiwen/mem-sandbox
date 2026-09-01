@@ -1,6 +1,6 @@
 # Policy Engine Design
 
-**Status:** Proposed detailed design under the approved high-level architecture
+**Status:** Milestone 3 minimal contract implemented; complete policy behavior proposed
 
 ## Purpose
 
@@ -54,6 +54,65 @@ class PolicyEngine(Protocol):
 
 The session must receive an explicit decision. `None`, exceptions interpreted as allow,
 or silent defaults are prohibited.
+
+## Milestone 3 minimal contract
+
+The minimal vertical slice defines the subset required for the explicit allow-all engine:
+
+```python
+class OperationKind(StrEnum):
+    EXECUTE = "execute"
+    READ_FILE = "read_file"
+    WRITE_FILE = "write_file"
+    APPLY_PATCH = "apply_patch"
+    READ_BYTES = "read_bytes"
+    WRITE_BYTES = "write_bytes"
+    STAT = "stat"
+    LIST_ENTRIES = "list_entries"
+    CREATE_SNAPSHOT = "create_snapshot"
+    RESTORE_SNAPSHOT = "restore_snapshot"
+
+
+@dataclass(frozen=True)
+class PolicyRequest:
+    session_id: SessionId
+    operation_id: OperationId
+    operation_kind: OperationKind
+    path: SandboxPath | None
+    command_name: str | None
+    requested_limits: OperationLimits
+
+
+@dataclass(frozen=True)
+class PolicyDecision:
+    allowed: bool
+    reason_code: str
+    effective_limits: OperationLimits
+```
+
+Lifecycle `start()` and `close()` are not policy operations and use no `OperationKind`.
+The Milestone 3 `AllowAllPolicyEngine` returns `allowed=True`, reason code `allow_all`,
+and unchanged effective limits. Milestone 4 extends these contracts additively with
+identity context, command descriptors, secret references, destinations, obligations, and
+additional effective resource limits.
+
+`OperationKind` and `OperationLimits` are shared data values owned by
+`mem_sandbox.core.operations`, avoiding a policy-to-session import cycle.
+
+For Milestone 3 execute requests, `path` and `command_name` are `None`; command parsing
+and descriptor-level authorization remain owned by the executor and the Milestone 4
+command policy.
+
+If policy narrows the timeout, the session recomputes the effective absolute deadline
+from the original operation start time, not from the decision time. If the narrowed
+deadline leaves no protected-operation budget, the session times out before invoking a
+protected collaborator. The caller's original terminal-event reserve remains available
+to emit the required timeout event.
+
+Milestone 3 policy may narrow only `timeout_seconds`.
+`terminal_event_reserve_seconds` must equal the requested value; a decision that changes
+it is invalid and fails before protected collaborator invocation. Milestone 4 may add an
+explicit reserve policy only together with terminal-delivery invariants.
 
 ## Focused policies
 
