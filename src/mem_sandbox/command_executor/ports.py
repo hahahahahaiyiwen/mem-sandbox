@@ -3,7 +3,9 @@
 from typing import Protocol
 
 from mem_sandbox.workspace import (
+    CopyPathRequest,
     MakeDirectoryRequest,
+    MovePathRequest,
     RemovePathRequest,
     SandboxPath,
     WorkspaceAppendRequest,
@@ -38,3 +40,7 @@ class CommandWorkspaceMutator(Protocol):
     async def append(self, request: WorkspaceAppendRequest) -> WorkspaceMutation: ...
 
     async def remove(self, request: RemovePathRequest) -> WorkspaceMutation: ...
+
+    async def copy(self, request: CopyPathRequest) -> WorkspaceMutation: ...
+
+    async def move(self, request: MovePathRequest) -> WorkspaceMutation: ...

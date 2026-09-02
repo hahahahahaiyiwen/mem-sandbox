@@ -49,3 +49,7 @@ for the evidence, tradeoffs, proposed interfaces, roadmap, and learning exercise
 See [OpenAI `SandboxAgent` Backend Contract](./OPENAI_SANDBOX_AGENT_ADAPTER.md) for the
 exact client, session, state, snapshot, and runtime wiring APIs required by an in-memory
 OpenAI Agents SDK adapter.
+
+See [OSS POSIX and Bash Parser Evaluation](./Python/POSIX_PARSER_EVALUATION.md) for the
+comparison of the MemSandbox parser with `shlex`, Parsify, `bashlex`, and
+`tree-sitter-bash`, plus the decision to continue with the constrained parser.

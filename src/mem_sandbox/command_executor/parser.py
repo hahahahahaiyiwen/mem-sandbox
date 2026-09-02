@@ -12,10 +12,11 @@ from mem_sandbox.command_executor.errors import (
 )
 from mem_sandbox.command_executor.models import (
     CommandEnvironment,
+    CommandStage,
     CommandWord,
     Connector,
     ExecutionPlan,
-    PlanCommand,
+    PlanUnit,
     RedirectionMode,
     StdoutRedirection,
     WordFragment,
@@ -26,6 +27,7 @@ from mem_sandbox.workspace import SandboxPath
 class _Operator(StrEnum):
     SEQUENCE = ";"
     AND = "&&"
+    PIPE = "|"
     REDIRECT = ">"
     APPEND = ">>"
 
@@ -126,7 +128,10 @@ def tokenize(command: str) -> tuple[_Token, ...]:
         if character == "<":
             raise CommandSyntaxUnsupported("input redirection is unsupported")
         if character == "|":
-            raise CommandSyntaxUnsupported("pipelines are unsupported")
+            flush_word()
+            tokens.append(_OperatorToken(_Operator.PIPE))
+            index += 1
+            continue
         if character == "&" and two != "&&":
             raise CommandSyntaxUnsupported("background jobs are unsupported")
 
@@ -176,20 +181,33 @@ def parse_execution_plan(command: str) -> ExecutionPlan:
     if not tokens:
         raise CommandEmpty("command text must contain a command")
 
-    commands: list[PlanCommand] = []
+    units: list[PlanUnit] = []
     index = 0
     connector = Connector.ALWAYS
     while index < len(tokens):
-        if not isinstance(tokens[index], CommandWord):
-            raise CommandSyntaxInvalid("expected a command word")
-        words: list[CommandWord] = []
-        while index < len(tokens) and isinstance(tokens[index], CommandWord):
+        stages: list[CommandStage] = []
+        while True:
+            if not isinstance(tokens[index], CommandWord):
+                raise CommandSyntaxInvalid("expected a command word")
+            words: list[CommandWord] = []
+            while index < len(tokens) and isinstance(tokens[index], CommandWord):
+                candidate = tokens[index]
+                assert isinstance(candidate, CommandWord)
+                word = candidate
+                _validate_word_expansions(word)
+                words.append(word)
+                index += 1
+            stages.append(CommandStage(tuple(words)))
+
+            if index >= len(tokens):
+                break
             candidate = tokens[index]
-            assert isinstance(candidate, CommandWord)
-            word = candidate
-            _validate_word_expansions(word)
-            words.append(word)
+            assert isinstance(candidate, _OperatorToken)
+            if candidate.value is not _Operator.PIPE:
+                break
             index += 1
+            if index >= len(tokens):
+                raise CommandSyntaxInvalid("pipeline requires a following command")
 
         redirection: StdoutRedirection | None = None
         if index < len(tokens):
@@ -209,6 +227,10 @@ def parse_execution_plan(command: str) -> ExecutionPlan:
                 if index < len(tokens) and isinstance(tokens[index], _OperatorToken):
                     candidate_operator = tokens[index]
                     assert isinstance(candidate_operator, _OperatorToken)
+                    if candidate_operator.value is _Operator.PIPE:
+                        raise CommandSyntaxInvalid(
+                            "stdout redirection is only allowed on the final pipeline stage"
+                        )
                     if candidate_operator.value in (_Operator.REDIRECT, _Operator.APPEND):
                         raise CommandSyntaxInvalid("only one stdout redirection is permitted")
                 redirection = StdoutRedirection(
@@ -218,7 +240,7 @@ def parse_execution_plan(command: str) -> ExecutionPlan:
                     destination,
                 )
 
-        commands.append(PlanCommand(connector, tuple(words), redirection))
+        units.append(PlanUnit(connector, tuple(stages), redirection))
         if index >= len(tokens):
             break
         separator = tokens[index]
@@ -232,7 +254,7 @@ def parse_execution_plan(command: str) -> ExecutionPlan:
         if index >= len(tokens):
             raise CommandSyntaxInvalid("input ends with an incomplete separator")
 
-    return ExecutionPlan(tuple(commands))
+    return ExecutionPlan(tuple(units))
 
 
 def expand_word(

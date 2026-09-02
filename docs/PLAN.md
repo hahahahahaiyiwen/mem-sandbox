@@ -561,25 +561,36 @@ including the remaining command profile, policy, events, snapshots, and secrets.
 
 #### 4.1 Workspace and command completion
 
-- [ ] **4.1.1** Write tests and implement `head`, `tail`, `grep`, `find`, `wc`, `sort`,
-  and `uniq`.
-- [ ] **4.1.2** Write tests and implement `cp` and `mv` through existing workspace ports.
-- [ ] **4.1.3** Write tests and implement `env`, `export`, and scripts through the same
-  parser and command registry.
-- [ ] **4.1.4** Add native file-info or search APIs only when an approved adapter
+- [x] **4.1.1** Write tests and implement POSIX-shaped `head`, `tail`, `grep`, `find`,
+  `wc`, `sort`, and `uniq`, including standard stdin/file operands, explicit `-`, common
+  approved options, recursive grep, deterministic path rendering, and stable normal
+  non-zero statuses.
+- [x] **4.1.2** Write tests and implement POSIX-shaped `cp` and `mv` through existing
+  workspace ports. Support multiple sources for an existing directory destination,
+  compatible file overwrite, and recursive directory copy while explicitly rejecting
+  directory-tree merge behavior the workspace cannot publish atomically.
+- [x] **4.1.3** Write tests and implement `env`, `export`, `unset`, and constrained
+  command expressions through the same parser and command registry. Also align touched
+  first-wave commands with approved common behavior, including `cat` stdin, `echo -n`,
+  and `ls -1`/`-a`/multiple paths. Do not add `sh`, script-file execution, multiline
+  shell input, heredocs, or arbitrary code execution.
+- [x] **4.1.4** Add native file-info or search APIs only when an approved adapter
   requirement cannot use the existing operations efficiently.
-- [ ] **4.1.5** Reject unimplemented POSIX behavior explicitly rather than adding host
-  fallbacks or partial emulation.
-- [ ] **4.1.6** Write tests and implement the
+- [x] **4.1.5** Treat familiar POSIX/Bash behavior as the default for each supported
+  command. Reject unimplemented behavior explicitly rather than adding host fallbacks,
+  misleading output, or undocumented partial emulation. Document and evaluate every
+  deliberate compatibility deviation.
+- [x] **4.1.6** Write tests and implement the
   [approved pipeline semantics](./components/command-executor/README.md#approved-milestone-4-pipeline-semantics):
   parse higher-precedence `|` into immutable pipeline stages; admit only registered
   pipeline-safe non-mutating commands; execute stages sequentially through bounded UTF-8
   stdin and stdout; use the rightmost non-zero status; preserve stderr in stage order;
-  permit descriptor-approved redirection only on the final stage; and return a structured
+  permit descriptor-approved redirection only on the final stage; apply that redirection
+  atomically for every normal result, including non-zero results; and return a structured
   non-zero pipeline-limit result rather than pass truncated intermediate data. Preserve
-  `;` and `&&` behavior around that result. Add explicit stage-count and
-  aggregate-materialization limits. Do not use host processes or concurrent stage
-  execution.
+  `;` and `&&` behavior around that result. Add an explicit stdin-connection marker,
+  stage-count limit, per-intermediate limit, and aggregate-materialization limit. Do not
+  use host processes or concurrent stage execution.
 - [ ] **4.1.7** Run an executable multi-model command-usability evaluation before the
   first framework adapter, including acceptance, repair turns, tool calls, tokens,
   latency, output size, and truncation.

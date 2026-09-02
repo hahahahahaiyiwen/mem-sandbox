@@ -36,14 +36,23 @@ through its own APIs, but it is not an operating-system isolation boundary.
   version 1.
 - Implement the first command executor as a constrained interpreter with exactly
   `pwd`, `cd`, `ls`, `cat`, `echo`, `mkdir`, `touch`, and `rm`.
+- Do not present the constrained interpreter as a complete POSIX shell, but make every
+  registered command follow familiar POSIX/Bash syntax, operand handling, output, and
+  exit-status behavior as closely as the deterministic in-memory model permits.
+- Require every command-level compatibility deviation to be explicit, documented in
+  command metadata, and justified by a concrete constraint such as bounded resources,
+  atomic publication, unavailable virtual metadata, or the absence of host processes.
 - Keep first-wave command handlers stdin-aware through explicit contracts and metadata,
   while deferring useful in-memory pipelines until the search and aggregation command
   wave exists.
 - Treat unknown commands and expected command failures as structured non-zero results;
   reserve exceptions for request, syntax, timeout, cancellation, policy, and internal
   failures.
-- Restrict version 1 redirection to output-only commands and implement append through one
-  atomic workspace mutation.
+- Restrict version 1 redirection to output-only commands and implement replacement and
+  append through one atomic workspace mutation. Milestone 4 applies final redirection to
+  every normal command or pipeline result, including a non-zero result, while timeout,
+  cancellation, infrastructure failure, invalid destinations, and resource-limit
+  failures leave the target unchanged.
 - Use snapshots as the explicit cross-session state-transfer mechanism.
 - Express every external dependency and cross-module collaboration through a narrow
   interface owned by the consuming module boundary.
@@ -67,7 +76,9 @@ through its own APIs, but it is not an operating-system isolation boundary.
 
 ## 4. Non-goals
 
-- Full POSIX or Linux compatibility in the first version.
+- Providing a complete POSIX/Linux shell, host process model, or every POSIX utility.
+  The supported command subset still targets familiar POSIX/Bash behavior to reduce
+  model repair turns.
 - Executing arbitrary Python safely in the application process.
 - Multi-owner collaborative mutation of one session.
 - Transparent access to the host filesystem, environment, processes, or network.
@@ -249,14 +260,35 @@ session deletion remain host-controlled by default.
 3. `Workspace` owns virtual filesystem semantics and never invokes the command executor.
 4. `CommandExecutor` may consume a narrow workspace port; it never reaches a concrete
    workspace implementation directly.
-5. `PolicyEngine` returns decisions and does not mutate workspace state.
-6. `SecretBroker` returns scoped leases and does not persist secrets in workspace or
+5. Command parsing is a stateless capability owned by the command-executor boundary.
+   A factory may share one immutable parser across executors, but `SandboxService` and
+   `SandboxSession` do not parse or reinterpret command language.
+6. `PolicyEngine` returns decisions and does not mutate workspace state.
+7. `SecretBroker` returns scoped leases and does not persist secrets in workspace or
    snapshot state.
-7. `EventSink` observes completed decisions and operations; event failures follow an
+8. `EventSink` observes completed decisions and operations; event failures follow an
    explicit delivery policy.
-8. `SnapshotStore` stores and retrieves snapshots and consumes workspace snapshot data
+9. `SnapshotStore` stores and retrieves snapshots and consumes workspace snapshot data
    as an immutable contract; it does not mutate a workspace or decide snapshot timing.
-9. Adapters depend on service/session contracts only and contain no core policy.
+10. Adapters depend on service/session contracts only and contain no core policy.
+
+### 10.1 Parser ownership and sharing
+
+The current parser is implemented as stateless tokenizer and parser functions inside
+`mem_sandbox.command_executor`. Each execute request is parsed independently, but no
+parser state is stored per sandbox session.
+
+Milestone 4 may wrap those pure functions in an immutable `CommandParser` dependency so
+one parser instance can be shared by every compatible executor assembled by a session
+factory. Sharing does not move language ownership to `SandboxService`: the service
+constructs sessions and collaborators but does not parse command text, inspect syntax, or
+apply command semantics.
+
+Registry lookup, capability-profile admission, environment expansion, pipeline-safety
+checks, and execution limits remain executor-owned because they can differ between
+executors even when the syntax parser is shared. Future command policy must consume an
+immutable prepared-plan summary exposed by the command-executor boundary rather than
+duplicating parsing in the session, service, or policy engine.
 
 ## 11. Core lifecycle
 

@@ -20,7 +20,9 @@ class CommandFailureCode(StrEnum):
 
     COMMAND_NOT_FOUND = "command_not_found"
     INVALID_ARGUMENT = "invalid_argument"
+    NO_MATCH = "no_match"
     WORKSPACE_FAILURE = "workspace_failure"
+    PIPELINE_LIMIT_EXCEEDED = "pipeline_limit_exceeded"
     REDIRECTION_FAILURE = "redirection_failure"
 
 
@@ -76,6 +78,9 @@ class CommandLimits:
     max_argument_bytes: int = 8 * 1024
     max_stdout_bytes: int = 256 * 1024
     max_stderr_bytes: int = 256 * 1024
+    max_pipeline_stages: int = 8
+    max_pipeline_intermediate_bytes: int = 256 * 1024
+    max_pipeline_aggregate_bytes: int = 1024 * 1024
     timeout_seconds: float = 30.0
 
     def __post_init__(self) -> None:
@@ -85,6 +90,9 @@ class CommandLimits:
             "max_argument_bytes",
             "max_stdout_bytes",
             "max_stderr_bytes",
+            "max_pipeline_stages",
+            "max_pipeline_intermediate_bytes",
+            "max_pipeline_aggregate_bytes",
         ):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int):
@@ -147,13 +155,15 @@ class CommandRequest:
     """One expanded simple-command request."""
 
     argv: tuple[str, ...]
-    stdin: str
+    stdin: str = ""
+    stdin_connected: bool = False
 
     def __post_init__(self) -> None:
         argv = _require_text_tuple("argv", self.argv)
         if not argv:
             raise ValueError("argv must not be empty")
         _require_text("stdin", self.stdin)
+        _require_boolean("stdin_connected", self.stdin_connected)
 
 
 @dataclass(frozen=True, slots=True)
@@ -227,6 +237,7 @@ class CommandDescriptor:
     usage: str
     permits_stdout_redirection: bool
     accepts_stdin: bool
+    pipeline_safe: bool = False
 
     def __post_init__(self) -> None:
         _require_command_name(self.name)
@@ -243,6 +254,7 @@ class CommandDescriptor:
             raise ValueError("usage must not be empty")
         _require_boolean("permits_stdout_redirection", self.permits_stdout_redirection)
         _require_boolean("accepts_stdin", self.accepts_stdin)
+        _require_boolean("pipeline_safe", self.pipeline_safe)
 
 
 class Connector(StrEnum):
@@ -283,19 +295,38 @@ class StdoutRedirection:
 
 
 @dataclass(frozen=True, slots=True)
-class PlanCommand:
-    """One immutable simple command in execution order."""
+class CommandStage:
+    """One immutable simple-command stage."""
+
+    words: tuple[CommandWord, ...]
+
+    def __post_init__(self) -> None:
+        if not self.words:
+            raise ValueError("command stage words must not be empty")
+
+
+@dataclass(frozen=True, slots=True)
+class PlanUnit:
+    """One command or pipeline with one eligibility connector."""
 
     connector: Connector
-    words: tuple[CommandWord, ...]
+    stages: tuple[CommandStage, ...]
     redirection: StdoutRedirection | None = None
+
+    def __post_init__(self) -> None:
+        if not self.stages:
+            raise ValueError("plan unit stages must not be empty")
 
 
 @dataclass(frozen=True, slots=True)
 class ExecutionPlan:
     """A fully parsed plan that is safe to dispatch."""
 
-    commands: tuple[PlanCommand, ...]
+    units: tuple[PlanUnit, ...]
+
+    def __post_init__(self) -> None:
+        if not self.units:
+            raise ValueError("execution plan units must not be empty")
 
 
 def _require_text(name: str, value: object) -> str:

@@ -17,7 +17,6 @@ from mem_sandbox.command_executor import (
     CommandRequest,
     CommandResult,
     CommandSyntaxInvalid,
-    CommandSyntaxUnsupported,
     CommandTimeout,
     CommandTooLong,
     EnvironmentChange,
@@ -64,6 +63,8 @@ def test_execution_models_are_immutable_and_limits_are_validated() -> None:
         EnvironmentChange("BAD", "\ud800")
     with pytest.raises(ValueError, match="UTF-8"):
         CommandResult.success(stdout="\ud800")
+    command_request = CommandRequest(("cat",), "", stdin_connected=True)
+    assert command_request.stdin_connected
 
 
 @pytest.mark.asyncio
@@ -97,17 +98,35 @@ async def test_double_quoted_backslashes_only_escape_supported_characters() -> N
 
 
 @pytest.mark.asyncio
-async def test_complete_plan_is_parsed_before_any_mutation() -> None:
+async def test_complete_pipeline_is_preflighted_before_any_dispatch() -> None:
     workspace = MemoryWorkspace()
-    executor = create_default_executor(workspace, workspace)
+    dispatched = False
 
-    with pytest.raises(CommandSyntaxUnsupported):
-        await executor.execute(
-            request("touch created | cat"),
-            CommandExecutionContext(),
-        )
+    class SourceCommand:
+        @property
+        def descriptor(self) -> CommandDescriptor:
+            return CommandDescriptor("source", (), "source", "source", True, False, True)
 
-    assert (await workspace.stats()).node_count == 1
+        async def execute(
+            self,
+            request: CommandRequest,
+            context: CommandContext,
+        ) -> CommandResult:
+            nonlocal dispatched
+            dispatched = True
+            return CommandResult.success(stdout="content\n")
+
+    result = await VirtualCommandExecutor(
+        CommandRegistry((SourceCommand(),)),
+        workspace,
+    ).execute(
+        request("source | missing"),
+        CommandExecutionContext(),
+    )
+
+    assert result.exit_code == 127
+    assert result.failure_code is CommandFailureCode.COMMAND_NOT_FOUND
+    assert not dispatched
 
 
 @pytest.mark.asyncio
@@ -260,6 +279,277 @@ async def test_redirection_replace_append_and_truncated_output_failure() -> None
     assert limited.failure_code is CommandFailureCode.REDIRECTION_FAILURE
     assert limited.stdout == ""
     assert "output limit" in limited.stderr
+
+
+@pytest.mark.asyncio
+async def test_redirection_applies_to_normal_nonzero_results_and_preserves_status() -> None:
+    workspace = MemoryWorkspace()
+
+    class FailingCommand:
+        @property
+        def descriptor(self) -> CommandDescriptor:
+            return CommandDescriptor("fail", (), "fail", "fail", True, False)
+
+        async def execute(
+            self,
+            request: CommandRequest,
+            context: CommandContext,
+        ) -> CommandResult:
+            return CommandResult(
+                1,
+                CommandFailureCode.NO_MATCH,
+                "partial\n",
+                "diagnostic\n",
+            )
+
+    result = await VirtualCommandExecutor(
+        CommandRegistry((FailingCommand(),)),
+        workspace,
+    ).execute(request("fail > result"), CommandExecutionContext())
+
+    assert result.exit_code == 1
+    assert result.failure_code is CommandFailureCode.NO_MATCH
+    assert result.stdout == ""
+    assert result.stderr == "diagnostic\n"
+    assert (
+        await workspace.read_text(SandboxPath.resolve("/workspace/result"))
+    ).content == "partial\n"
+
+
+@pytest.mark.asyncio
+async def test_pipeline_connects_complete_stdout_and_uses_fixed_pipefail() -> None:
+    workspace = MemoryWorkspace()
+    seen: list[tuple[str, bool]] = []
+
+    class StageCommand:
+        def __init__(
+            self,
+            name: str,
+            result: CommandResult,
+            *,
+            accepts_stdin: bool,
+        ) -> None:
+            self._descriptor = CommandDescriptor(
+                name,
+                (),
+                name,
+                name,
+                True,
+                accepts_stdin,
+                True,
+            )
+            self._result = result
+
+        @property
+        def descriptor(self) -> CommandDescriptor:
+            return self._descriptor
+
+        async def execute(
+            self,
+            request: CommandRequest,
+            context: CommandContext,
+        ) -> CommandResult:
+            seen.append((request.stdin, request.stdin_connected))
+            return self._result
+
+    executor = VirtualCommandExecutor(
+        CommandRegistry(
+            (
+                StageCommand(
+                    "first",
+                    CommandResult(
+                        3,
+                        CommandFailureCode.WORKSPACE_FAILURE,
+                        "",
+                        "first error\n",
+                    ),
+                    accepts_stdin=False,
+                ),
+                StageCommand(
+                    "second",
+                    CommandResult(
+                        2,
+                        CommandFailureCode.INVALID_ARGUMENT,
+                        "second output\n",
+                        "second error\n",
+                    ),
+                    accepts_stdin=True,
+                ),
+                StageCommand(
+                    "third",
+                    CommandResult.success(stdout="final\n", stderr="third note\n"),
+                    accepts_stdin=True,
+                ),
+            )
+        ),
+        workspace,
+    )
+
+    result = await executor.execute(
+        request("first | second | third"),
+        CommandExecutionContext(),
+    )
+
+    assert seen == [("", False), ("", True), ("second output\n", True)]
+    assert result.exit_code == 2
+    assert result.failure_code is CommandFailureCode.INVALID_ARGUMENT
+    assert result.stdout == "final\n"
+    assert result.stderr == "first error\nsecond error\nthird note\n"
+
+
+@pytest.mark.asyncio
+async def test_pipeline_limit_starts_no_following_stage_and_controls_connectors() -> None:
+    workspace = MemoryWorkspace()
+    downstream_calls = 0
+
+    class SourceCommand:
+        @property
+        def descriptor(self) -> CommandDescriptor:
+            return CommandDescriptor("source", (), "source", "source", True, False, True)
+
+        async def execute(
+            self,
+            request: CommandRequest,
+            context: CommandContext,
+        ) -> CommandResult:
+            return CommandResult.success(stdout="oversized")
+
+    class SinkCommand:
+        @property
+        def descriptor(self) -> CommandDescriptor:
+            return CommandDescriptor("sink", (), "sink", "sink", True, True, True)
+
+        async def execute(
+            self,
+            request: CommandRequest,
+            context: CommandContext,
+        ) -> CommandResult:
+            nonlocal downstream_calls
+            downstream_calls += 1
+            return CommandResult.success()
+
+    executor = VirtualCommandExecutor(
+        CommandRegistry(
+            (
+                SourceCommand(),
+                SinkCommand(),
+                *create_first_wave_commands(workspace, workspace),
+            )
+        ),
+        workspace,
+    )
+    result = await executor.execute(
+        request(
+            "source | sink && touch skipped; touch followed",
+            limits=CommandLimits(max_pipeline_intermediate_bytes=4),
+        ),
+        CommandExecutionContext(),
+    )
+
+    assert downstream_calls == 0
+    assert result.exit_code == 0
+    assert result.failure_code is None
+    with pytest.raises(PathNotFoundError):
+        await workspace.stat(SandboxPath.resolve("/workspace/skipped"))
+    await workspace.stat(SandboxPath.resolve("/workspace/followed"))
+
+
+@pytest.mark.asyncio
+async def test_pipeline_admission_and_stage_limits_prevent_all_dispatch() -> None:
+    workspace = MemoryWorkspace()
+    executor = create_default_executor(workspace, workspace)
+
+    unsafe = await executor.execute(
+        request("touch created | cat"),
+        CommandExecutionContext(),
+    )
+    assert unsafe.exit_code == 2
+    assert unsafe.failure_code is CommandFailureCode.INVALID_ARGUMENT
+    with pytest.raises(PathNotFoundError):
+        await workspace.stat(SandboxPath.resolve("/workspace/created"))
+
+    ineligible = await executor.execute(
+        request("echo content | pwd"),
+        CommandExecutionContext(),
+    )
+    assert ineligible.exit_code == 2
+    assert ineligible.failure_code is CommandFailureCode.INVALID_ARGUMENT
+
+    with pytest.raises(CommandSyntaxInvalid, match="stages"):
+        await executor.execute(
+            request(
+                "echo content | cat | cat",
+                limits=CommandLimits(max_pipeline_stages=2),
+            ),
+            CommandExecutionContext(),
+        )
+
+
+@pytest.mark.asyncio
+async def test_pipeline_aggregate_or_admission_failure_does_not_redirect() -> None:
+    workspace = MemoryWorkspace()
+    executor = create_default_executor(workspace, workspace)
+
+    aggregate = await executor.execute(
+        request(
+            "echo 123 | cat | cat > aggregate",
+            limits=CommandLimits(
+                max_pipeline_intermediate_bytes=10,
+                max_pipeline_aggregate_bytes=7,
+            ),
+        ),
+        CommandExecutionContext(),
+    )
+    assert aggregate.exit_code == 1
+    assert aggregate.failure_code is CommandFailureCode.PIPELINE_LIMIT_EXCEEDED
+
+    admission = await executor.execute(
+        request("missing | touch created > admission"),
+        CommandExecutionContext(),
+    )
+    assert admission.exit_code == 2
+    assert admission.failure_code is CommandFailureCode.INVALID_ARGUMENT
+
+    for path in ("aggregate", "admission", "created"):
+        with pytest.raises(PathNotFoundError):
+            await workspace.stat(SandboxPath.resolve(f"/workspace/{path}"))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "command",
+    (
+        "missing | cat > existing",
+        "cat source | missing > existing",
+    ),
+)
+async def test_pipeline_command_not_found_still_applies_normal_127_redirection(
+    command: str,
+) -> None:
+    workspace = MemoryWorkspace()
+    await workspace.write(
+        WorkspaceWriteRequest(
+            SandboxPath.resolve("/workspace/source"),
+            b"source\n",
+            AnyCurrentState(),
+        )
+    )
+    await workspace.write(
+        WorkspaceWriteRequest(
+            SandboxPath.resolve("/workspace/existing"),
+            b"previous\n",
+            AnyCurrentState(),
+        )
+    )
+
+    result = await create_default_executor(workspace, workspace).execute(
+        request(command),
+        CommandExecutionContext(),
+    )
+
+    assert result.exit_code == 127
+    assert result.failure_code is CommandFailureCode.COMMAND_NOT_FOUND
+    assert (await workspace.read_text(SandboxPath.resolve("/workspace/existing"))).content == ""
 
 
 @pytest.mark.asyncio
