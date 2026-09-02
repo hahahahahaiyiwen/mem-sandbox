@@ -6,7 +6,8 @@
 
 `SandboxSession` is the central application-facing facade. It exposes the small agent
 operation surface, owns lifecycle and operation ordering, and coordinates the workspace,
-command executor, policy engine, secret broker, event sink, and snapshot store.
+command executor, minimal policy-admission seam, no-secret broker, event sink, and
+snapshot store.
 
 The session contains orchestration logic. It does not contain concrete infrastructure.
 
@@ -16,7 +17,8 @@ The session contains orchestration logic. It does not contain concrete infrastru
 - Expose host-only binary, directory, snapshot, and lifecycle operations.
 - Enforce the session state machine.
 - Normalize requests and attach session identity.
-- Ask policy before invoking a collaborator.
+- Require an explicit admission decision before invoking a protected operation
+  collaborator.
 - Coordinate locks, timeout, and cancellation.
 - Resolve secrets only for approved operations.
 - Emit the approved structured lifecycle, operation-start, and terminal events.
@@ -179,15 +181,17 @@ except lifecycle methods where a step does not apply:
 4. Reject calls when the session state does not permit the operation.
 5. Normalize paths and command metadata.
 6. Create an operation identifier and emit the required `operation.started` event.
-7. Ask the policy engine for an allow or deny decision.
-8. Resolve approved secret references, if any.
+7. Ask the minimal policy-admission collaborator for an explicit decision.
+8. Resolve approved secret references only if a later approved design enables them.
 9. Invoke the workspace or command executor with the remaining deadline budget.
 10. Commit explicit session state from a normal result.
 11. Emit the required completion or failure event.
 12. Release secret leases and the operation gate.
 13. Return a domain result or raise a stable domain error.
 
-Policy denial occurs before secret resolution and before workspace mutation.
+Admission denial occurs before secret resolution and before workspace mutation. The
+current release retains the explicit allow-all seam but does not implement composed
+operation, path, command, argument, or resource policy.
 
 The deadline covers gate wait, policy, collaborator execution, session-state commit, and
 terminal event delivery. Cancellation or timeout while waiting for the gate creates no
@@ -389,9 +393,9 @@ The exact Milestone 3 event set is:
 - exactly one terminal event: `operation.completed`, `operation.failed`,
   `operation.cancelled`, or `operation.timed_out`.
 
-Policy-decision, secret, and dedicated snapshot events are deferred to Milestone 4.
-Snapshot operations are represented by their operation kind in the minimal event
-envelope.
+Policy-decision and secret events remain deferred with composed policy and functional
+secret resolution. Dedicated snapshot events may be added independently. Snapshot
+operations are represented by their operation kind in the minimal event envelope.
 
 For operation events, failure to deliver a required event emits no further event for that
 operation:
@@ -417,9 +421,11 @@ the error originated in the session or a collaborator:
 - every other error -> `operation.failed`;
 - a normal domain result, including a non-zero command exit, -> `operation.completed`.
 
-Milestone 3 execute policy requests use `path=None` and `command_name=None`. The session
-does not duplicate command-language parsing merely to populate policy metadata.
-Descriptor-level command policy is added in Milestone 4.
+Execute admission requests use `path=None` and `command_name=None`. The session does not
+duplicate command-language parsing merely to populate speculative policy metadata.
+Descriptor-level command authorization remains deferred until an adapter or service
+introduces a concrete trust boundary. Any future design must consume executor-owned
+prepared artifacts rather than reparse command text in the session.
 
 Session requests may carry an optional cooperative `CancellationSignal`. The session
 passes the same signal into `CommandExecutionContext`, while preserving native

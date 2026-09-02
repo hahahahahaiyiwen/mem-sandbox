@@ -1,78 +1,38 @@
-# Policy Engine Design
+# Policy Admission Design
 
-**Status:** Milestone 3 minimal contract implemented; complete policy behavior proposed
+**Status:** Minimal Milestone 3 admission seam implemented; composed policy engine deferred
 
-## Purpose
+## Decision
 
-The policy engine decides whether a requested sandbox operation is allowed and under what
-constraints. It is a deterministic decision component and does not perform the operation
-itself.
+MemSandbox will not implement the previously proposed composed policy engine in the
+current release path.
 
-## Responsibilities
+The in-memory sandbox currently has no caller or owner authorization context, functional
+secret resolution, network destination, host-process execution, or shared persistent
+backend. Without one of those trust boundaries, a general operation/path/command rule
+engine would add restrictions and cross-module coupling without providing meaningful
+security or product value.
 
-- Evaluate operation identity, owner, path, command, resource, secret, and destination
-  context.
-- Return explicit allow or deny decisions.
-- Narrow requested limits when policy requires stricter bounds.
-- Explain decisions with stable reason codes safe for events and errors.
-- Compose multiple focused policies with deterministic precedence.
-- Remain independent of agent frameworks and concrete infrastructure.
+The essential sandbox guarantees remain enforced by the modules that own them:
 
-## Out of scope
+- the workspace owns path confinement, quotas, atomic publication, and snapshot
+  validation;
+- the command executor owns its registry, accepted grammar, pipeline admission, command
+  and output limits, and prohibition of host-shell fallback;
+- the session owns lifecycle, serialization, deadlines, cancellation, and collaborator
+  ordering;
+- the current secret boundary rejects every request explicitly.
 
-- Mutating workspace state.
-- Executing commands.
-- Resolving secret values.
-- Formatting model-facing error messages.
-- Treating policy approval as operating-system isolation.
+These guarantees do not depend on a configurable policy engine and must not be weakened
+when policy is reconsidered.
 
-## Contract
+## Retained minimal seam
 
-```python
-@dataclass(frozen=True)
-class PolicyRequest:
-    session: SandboxIdentity
-    operation: OperationKind
-    path: SandboxPath | None
-    command: CommandDescriptor | None
-    secret_refs: tuple[SecretRef, ...]
-    destination: NetworkDestination | None
-    requested_limits: OperationLimits
-
-
-@dataclass(frozen=True)
-class PolicyDecision:
-    allowed: bool
-    reason_code: str
-    effective_limits: OperationLimits
-    obligations: tuple[PolicyObligation, ...] = ()
-
-
-class PolicyEngine(Protocol):
-    async def evaluate(self, request: PolicyRequest) -> PolicyDecision: ...
-```
-
-The session must receive an explicit decision. `None`, exceptions interpreted as allow,
-or silent defaults are prohibited.
-
-## Milestone 3 minimal contract
-
-The minimal vertical slice defines the subset required for the explicit allow-all engine:
+The existing `SessionPolicyEngine` port, `PolicyRequest`, `PolicyDecision`, and
+`AllowAllPolicyEngine` remain in place. The session continues to require an explicit
+decision before invoking its protected operation collaborator:
 
 ```python
-class OperationKind(StrEnum):
-    EXECUTE = "execute"
-    READ_FILE = "read_file"
-    WRITE_FILE = "write_file"
-    APPLY_PATCH = "apply_patch"
-    READ_BYTES = "read_bytes"
-    WRITE_BYTES = "write_bytes"
-    STAT = "stat"
-    LIST_ENTRIES = "list_entries"
-    CREATE_SNAPSHOT = "create_snapshot"
-    RESTORE_SNAPSHOT = "restore_snapshot"
-
-
 @dataclass(frozen=True)
 class PolicyRequest:
     session_id: SessionId
@@ -88,122 +48,91 @@ class PolicyDecision:
     allowed: bool
     reason_code: str
     effective_limits: OperationLimits
+
+
+class SessionPolicyEngine(Protocol):
+    async def evaluate(self, request: PolicyRequest) -> PolicyDecision: ...
 ```
 
-Lifecycle `start()` and `close()` are not policy operations and use no `OperationKind`.
-The Milestone 3 `AllowAllPolicyEngine` returns `allowed=True`, reason code `allow_all`,
-and unchanged effective limits. Milestone 4 extends these contracts additively with
-identity context, command descriptors, secret references, destinations, obligations, and
-additional effective resource limits.
+The explicit seam preserves dependency injection and fail-closed session ordering
+without committing the project to a speculative policy language. The current
+`AllowAllPolicyEngine` returns `allowed=True`, reason code `allow_all`, and unchanged
+effective limits.
 
-`OperationKind` and `OperationLimits` are shared data values owned by
-`mem_sandbox.core.operations`, avoiding a policy-to-session import cycle.
+Lifecycle `start()` and `close()` are not policy operations. A custom implementation may
+still deny an operation or narrow its timeout through the existing contract, but the
+project does not yet advertise a general authorization framework.
 
-For Milestone 3 execute requests, `path` and `command_name` are `None`; command parsing
-and descriptor-level authorization remain owned by the executor and the Milestone 4
-command policy.
+## Current invariants
 
-If policy narrows the timeout, the session recomputes the effective absolute deadline
-from the original operation start time, not from the decision time. If the narrowed
-deadline leaves no protected-operation budget, the session times out before invoking a
-protected collaborator. The caller's original terminal-event reserve remains available
-to emit the required timeout event.
+- The session must receive an explicit decision. `None`, exceptions interpreted as
+  allow, and silent defaults are prohibited.
+- A denial occurs before the workspace, command executor, snapshot store, or secret
+  broker operation.
+- Policy may narrow only `timeout_seconds`.
+- `terminal_event_reserve_seconds` remains session-owned and must be preserved.
+- A narrowed timeout is measured from the original operation start, not from completion
+  of policy evaluation.
+- The minimal seam is not an operating-system isolation boundary and does not make
+  same-process memory safe from arbitrary host code.
 
-Milestone 3 policy may narrow only `timeout_seconds`.
-`terminal_event_reserve_seconds` must equal the requested value; a decision that changes
-it is invalid and fails before protected collaborator invocation. Milestone 4 may add an
-explicit reserve policy only together with terminal-delivery invariants.
+## Why composed policy is deferred
 
-## Focused policies
+A correct composed engine would currently require abstractions that have no proven
+consumer:
 
-The default engine composes focused rules:
+- prepared command summaries that represent pipelines, filesystem effects, and arguments
+  whose values may change after earlier `cd` or `export` commands;
+- workspace-owned prepared patch artifacts so policy can observe every affected path
+  without duplicating patch parsing;
+- composite operation, command, workspace, file, pipeline, and secret-lease limit
+  propagation;
+- typed obligation enforcement and new policy-specific failure semantics;
+- deterministic precedence across operation, path, command, argument, secret, and
+  destination rules.
 
-- session ownership and lifecycle
-- allowed operation types
-- path read/write permissions
-- command allowlist and argument rules
-- maximum timeout and output size
-- workspace and file quotas
-- secret reference allowlist
-- secret age and lease duration
-- destination or egress restrictions
-- capability profile restrictions
+Building those boundaries before a real authorization requirement exists would constrain
+the workspace, executor, session, and adapter designs based on hypothetical use cases.
+The first framework adapter and `SandboxService` should provide evidence about where
+authorization belongs and what identity and resource facts are actually available.
 
-Workspace quota checks remain authoritative in the workspace because a concurrent or
-multi-step mutation may change actual usage after policy evaluation.
+## Re-evaluation triggers
 
-## Composition
+Open a new design issue before enabling any of the following:
 
-Recommended evaluation behavior:
+- multi-owner or multi-tenant `SandboxService` authorization;
+- functional secret resolution or secret leasing;
+- network destinations or egress-capable commands;
+- arbitrary host process, Python, container, or remote execution;
+- shared persistent workspaces or snapshots across authorization boundaries;
+- per-owner or per-tenant command capability profiles;
+- externally required audit, compliance, or approval obligations.
 
-1. Validate request shape.
-2. Evaluate mandatory security policies.
-3. Evaluate capability and operation policies.
-4. Intersect all effective limits.
-5. Collect obligations.
-6. Deny if any policy denies.
-7. Return one stable primary reason plus optional diagnostic reason chain.
+The re-evaluation must begin with concrete authorization questions, such as whether one
+owner may resume another owner's snapshot or whether a command may lease a named secret
+for a specific destination. It must not begin by assuming that a generic rule-composition
+framework is required.
 
-Deny overrides allow. An engine with no applicable policy uses an explicit configured
-default, which should be deny for secrets, egress, host access, and unsupported commands.
+## Requirements for a future policy design
 
-## Obligations
+If a trigger occurs, the design must:
 
-An allow decision may require obligations such as:
-
-- redact specified output tokens
-- cap timeout or output below the request
-- emit an audit-required event
-- restrict a secret lease to one command and destination
-- require an expected content hash
-- mark the operation as host-approval-required
-
-The session verifies that every obligation is supported before proceeding. Unsupported
-obligations cause denial.
-
-## Determinism
-
-Given the same normalized request and policy configuration, the engine returns the same
-decision. Time-dependent rules receive an injected clock and include the evaluated time
-in decision metadata.
-
-Policy configuration is immutable for a running operation. Host updates affect subsequent
-operations only.
-
-## Sensitive data
-
-- Requests contain secret references, never secret values.
-- Command descriptors may contain redacted argument forms.
-- Decision reasons must be safe for logs and model-visible errors.
-- Raw file content is not passed to policy unless a specific content policy owns that
-  requirement.
-
-## Failure semantics
-
-Stable outcomes include:
-
-- `PolicyAllowed`
-- `PolicyDenied`
-- `PolicyConfigurationInvalid`
-- `PolicyEvaluationFailed`
-- `PolicyObligationUnsupported`
-
-Engine failure is not an allow decision. The session surfaces a policy evaluation error
-and performs no protected operation.
-
-## Test expectations
-
-- Happy-path allows for every operation kind.
-- Deny paths call no workspace, executor, or secret dependency.
-- Deny precedence is independent of policy registration order.
-- Effective limits are the strictest intersection.
-- Boundary values cover path roots, timeouts, output limits, quotas, and lease ages.
-- Secret and destination policies evaluate together.
-- Injected-clock tests cover expiry exactly at boundaries.
-- Reasons and events contain no secret values or unredacted protected arguments.
-- Unsupported obligations deny before operation execution.
+1. Identify the authority and authenticated identity at the boundary where the decision
+   is made.
+2. Keep sandbox invariants in their owning modules rather than moving them into policy.
+3. Use prepared artifacts owned by the command executor or workspace instead of
+   duplicating parsers in the session or policy module.
+4. Define deterministic fail-closed behavior for invalid configuration, evaluation
+   failure, unsupported obligations, and missing facts.
+5. Prove that denials invoke no protected collaborator.
+6. Add happy, denied, dependency-failure, and exact-boundary tests for every enabled
+   policy-aware behavior.
+7. Keep secret values and unredacted protected data out of requests, decisions, events,
+   and model-visible errors.
 
 ## Maintenance rule
 
-New protected behavior requires a policy request field, focused rule, stable reason code,
-and tests before it is enabled.
+Do not expand the current policy contracts merely because a future feature might need
+authorization. First document the concrete trust boundary, identity, protected action,
+and enforcement point, then decide whether the minimal admission seam should be extended
+or authorization should live at `SandboxService` or another integration boundary.

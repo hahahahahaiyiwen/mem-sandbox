@@ -8,8 +8,8 @@ The framework-neutral core is divided into eight boundaries:
 | [Sandbox session](./sandbox-session/README.md) | Agent operations, lifecycle state, coordination, and collaborator composition |
 | [Workspace](./workspace/README.md) | Virtual filesystem, paths, bytes, metadata, quotas, and atomic mutations |
 | [Command executor](./command-executor/README.md) | Constrained command grammar, registry, dispatch, timeout, and output |
-| [Policy engine](./policy-engine/README.md) | Explicit operation admission decisions and effective limits |
-| [Secret broker](./secret-broker/README.md) | Approved reference resolution and operation-scoped leases |
+| [Policy admission](./policy-engine/README.md) | Minimal explicit operation admission seam; composed authorization is deferred |
+| [Secret broker](./secret-broker/README.md) | Explicit no-secret boundary; functional leases are deferred |
 | [Event sink](./event-sink/README.md) | Structured lifecycle, operation, decision, and audit events |
 | [Snapshot store](./snapshot-store/README.md) | Immutable versioned snapshot persistence and retrieval |
 
