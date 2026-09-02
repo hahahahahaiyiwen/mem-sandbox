@@ -1,6 +1,6 @@
 # Command Executor Design
 
-**Status:** Implemented in Milestone 2
+**Status:** Milestone 2 and issue #16 command completion implemented
 
 ## Purpose
 
@@ -12,7 +12,9 @@ timeouts, output limits, and command result semantics.
 
 The framework-neutral implementation is in `src/mem_sandbox/command_executor`. Its
 default factory constructor injects the workspace reader and mutator ports into the
-first-wave handlers and injects an immutable registry into the executor.
+complete command profile and injects an immutable registry into the executor. The
+historical `create_first_wave_commands()` factory remains limited to the original eight
+Milestone 2 commands; `create_command_profile()` constructs the complete profile.
 
 ## Responsibilities
 
@@ -25,6 +27,8 @@ first-wave handlers and injects an immutable registry into the executor.
 - Cooperate with cancellation.
 - Return structured stdout, stderr, exit code, duration, and truncation metadata.
 - Reject unsupported shell syntax explicitly.
+- Match familiar POSIX/Bash behavior for every supported command unless a documented
+  deterministic-sandbox constraint requires a deviation.
 
 ## Out of scope
 
@@ -33,11 +37,37 @@ first-wave handlers and injects an immutable registry into the executor.
 - Filesystem storage implementation.
 - Secret policy decisions.
 - Agent framework tools.
-- Full POSIX compatibility.
+- A complete POSIX shell, process model, or utility collection.
+
+## POSIX compatibility target
+
+The executor is not advertised as Bash, `/bin/sh`, or a complete POSIX environment.
+However, LLM agents are trained on standard terminal behavior, so every command that is
+registered should match familiar GNU/POSIX/Bash syntax, operand handling, output, and
+exit status as closely as the in-memory model permits.
+
+Deviations require a concrete reason and explicit documentation. Approved reasons
+include:
+
+- no host processes or concurrent pipeline stages;
+- deterministic behavior across Windows and Linux;
+- finite command, intermediate-output, aggregate-output, and timeout limits;
+- atomic virtual-workspace publication;
+- no mutation after timeout, cancellation, or infrastructure failure;
+- missing virtual metadata such as owners, permissions, links, and timestamps;
+- inability to provide atomic recursive directory merging.
+
+Capability descriptions must expose the supported subset and must not call it a generic
+shell. Compatibility-sensitive behavior is included in the executable multi-model
+evaluation before the first framework adapter.
 
 The cross-model evidence and roadmap implications for pipelines, scripts, and structured
 file tools are recorded in
 [Command Composition Usability Pilot](./PIPELINE_EVALUATION.md).
+
+The parser dependency comparison and decision to continue with the constrained parser
+are recorded in
+[OSS POSIX and Bash Parser Evaluation](../../Python/POSIX_PARSER_EVALUATION.md).
 
 ## Public contract
 
@@ -49,6 +79,9 @@ class CommandLimits:
     max_argument_bytes: int = 8 * 1024
     max_stdout_bytes: int = 256 * 1024
     max_stderr_bytes: int = 256 * 1024
+    max_pipeline_stages: int = 8
+    max_pipeline_intermediate_bytes: int = 256 * 1024
+    max_pipeline_aggregate_bytes: int = 1024 * 1024
     timeout_seconds: float = 30.0
 
 
@@ -100,18 +133,41 @@ The executor separates syntax, orchestration, and command behavior:
 
 1. Validate request text, starting state, and limits.
 2. Tokenize into quote-aware word fragments and operators.
-3. Parse the complete input into an immutable execution plan before dispatch.
+3. Parse the complete input into immutable plan units and stages before dispatch.
 4. Start one complete-plan timeout scope.
-5. For each eligible simple command, expand approved variables against the current
-   execution state.
-6. Resolve the command from the immutable registry.
-7. Invoke the focused handler through command-owned workspace ports.
-8. Apply a permitted stdout redirection only after successful command completion.
-9. Advance explicit cwd or environment state and aggregate output.
-10. Return the last executed command status and final normal-completion state.
+5. Before a pipeline starts, expand and validate all stages against the current
+   execution state, immutable registry, capability profile, and effective limits.
+6. Invoke each eligible focused handler through command-owned workspace ports.
+7. Pass complete bounded stdout between connected pipeline stages.
+8. Apply permitted final stdout redirection atomically after any normal command or
+   pipeline result, including a non-zero result.
+9. Advance explicit cwd or environment state for successful non-pipeline commands and
+   aggregate visible output.
+10. Return the effective unit status and final normal-completion state.
 
 Parsing the complete plan first ensures malformed or unsupported syntax cannot execute a
 prefix of the input.
+
+## Parser ownership
+
+Tokenization and syntax parsing are stateless capabilities owned by
+`mem_sandbox.command_executor`. The current implementation uses pure `tokenize()` and
+`parse_execution_plan()` functions, so no parser instance or mutable parser state exists
+inside `SandboxSession`.
+
+An immutable parser object may be constructor-injected and shared across many executors,
+but it remains a command-executor dependency. `SandboxService` may arrange that sharing
+through its session factory; it must not become the owner of command syntax or parse
+commands itself.
+
+Issue #16 continues with the current constrained parser and adds no runtime parser
+dependency. `tree-sitter-bash` remains the only candidate for a future measured spike if
+the accepted grammar or unsupported-syntax recognition burden expands materially.
+
+The parser recognizes syntax only. Registry resolution, capability-profile admission,
+environment expansion, pipeline-safety validation, and effective limits remain
+executor-owned. Future command policy consumes an immutable prepared-plan summary from
+the executor boundary so the session and policy engine do not reparse command text.
 
 ## Command extension contract
 
@@ -122,6 +178,7 @@ Each command has one responsibility:
 class CommandRequest:
     argv: tuple[str, ...]
     stdin: str
+    stdin_connected: bool = False
 
 
 class VirtualCommand(Protocol):
@@ -138,17 +195,21 @@ class VirtualCommand(Protocol):
 Commands receive only required capabilities, such as `CommandWorkspaceReader` or
 `CommandWorkspaceMutator`. They do not receive the concrete session or service.
 
-`CommandDescriptor` owns the case-sensitive name, explicit aliases, summary, usage, and
-whether the command permits stdout redirection or accepts stdin. Duplicate names or
-aliases fail executor construction. The registry is immutable after construction and is
-the only source for agent-facing command descriptions. The default profile defines no
-aliases.
+`CommandDescriptor` owns the case-sensitive name, explicit aliases, summary, usage,
+whether the command permits stdout redirection or accepts stdin, and an additive
+`pipeline_safe` flag that defaults to `False`. Duplicate names or aliases fail executor
+construction. The registry is immutable after construction and is the only source for
+agent-facing command descriptions. The default profile defines no aliases.
 
-`stdin` is explicit but empty for every Milestone 2 dispatch. Every first-wave descriptor
-declares that it does not accept stdin, and handlers reject a non-empty value. This keeps
-the boundary ready for later bounded sequential pipelines without claiming pipeline
-support in the MVP. Stage stdout remains distinct from aggregate executor output for the
-same reason.
+`stdin` is always explicit. `stdin_connected` distinguishes an unconnected command from a
+pipeline stage whose upstream command produced an empty string. Ordinary commands and
+first pipeline stages receive `stdin=""` and `stdin_connected=False`; later stages
+receive complete upstream stdout and `stdin_connected=True`.
+
+Commands use familiar operand behavior: no file operand consumes stdin, and `-`
+explicitly selects stdin among file operands. A pipeline-safe command may therefore
+consume connected stdin, named files, or an explicit `-` according to its documented
+POSIX-shaped contract.
 
 ## Grammar
 
@@ -162,6 +223,7 @@ Version 1 supports:
 - `$NAME` and `${NAME}` expansion in unquoted and double-quoted fragments
 - command sequencing with `;`
 - success sequencing with `&&`
+- higher-precedence bounded pipelines with `|`
 - one trailing stdout replacement with `>`
 - one trailing stdout append with `>>`
 
@@ -170,12 +232,11 @@ Expansion occurs immediately before each command is dispatched, so it observes t
 current explicit execution state. Undefined approved variables expand to an empty string.
 Expansion never causes word splitting, command lookup, or glob expansion.
 
-`PWD` is derived from the current execution cwd. Version 1 has no environment-mutating
-command, so returned environment changes are empty.
+`PWD` is derived from the current execution cwd. `export` and `unset` return explicit
+environment changes that the executor applies between eligible plan units.
 
 Version 1 rejects or does not interpret:
 
-- pipelines
 - `||`
 - input redirection and heredocs
 - background jobs
@@ -189,45 +250,47 @@ Version 1 rejects or does not interpret:
 - host executable lookup
 - implicit fallback to `cmd.exe`, PowerShell, Bash, or `/bin/sh`
 
-Unsupported syntax returns `CommandSyntaxUnsupported`, not an approximation.
-The tokenizer recognizes `|` as an unsupported operator rather than treating it as an
-argument. Later pipeline support will compose immutable command stages through explicit
-stdin and stdout; it will not invoke host processes or run stages concurrently.
+Unsupported syntax returns `CommandSyntaxUnsupported`, not an approximation. Pipeline
+syntax composes immutable command stages through explicit stdin and stdout; it does not
+invoke host processes or run stages concurrently.
 
 ## Approved Milestone 4 pipeline semantics
 
-**Status:** Approved design for Milestone 4; not implemented in version 1.
+**Status:** Implemented by issue #16.
 
 > Pipelines are bounded text transformations between registered virtual commands, not
-> shell emulation.
+> host-shell execution.
 
 Pipelines extend the constrained execution-plan grammar without introducing a host shell,
-host processes, or POSIX process semantics.
+host processes, or POSIX process scheduling. Their user-visible command behavior remains
+POSIX-shaped where the sequential in-memory model can reproduce it.
 
 ### Grammar and plan structure
 
 - `|` binds more tightly than `&&` and `;`. Connectors evaluate the effective result of
   the complete pipeline.
-- The parser validates the complete input before dispatch and represents a pipeline as
-  one immutable plan node containing immutable command stages.
-- A configurable maximum stage count is validated before execution.
+- Syntax parsing produces immutable `CommandStage`, `PlanUnit`, and `ExecutionPlan`
+  values. A simple command is a one-stage plan unit.
+- The executor validates the parsed plan against the registry, capability profile, and
+  effective limits before dispatch. A configurable maximum stage count is validated
+  before any stage runs.
 - One `>` or `>>` redirection may appear only after the final stage and applies to the
-  complete pipeline result. The final command descriptor must permit stdout redirection.
-  Redirection on an intermediate stage is rejected before dispatch.
+  complete pipeline result. A resolved final command descriptor must permit stdout
+  redirection; normal command-not-found status is the documented descriptor-free
+  exception. Redirection on an intermediate stage is rejected before dispatch.
 - Input redirection, heredocs, background jobs, command substitution, process
   substitution, and implicit shell behavior remain unsupported.
 
 ### Eligible commands and state
 
-The immutable command descriptor gains an explicit pipeline-safety declaration in
-addition to stdin acceptance. Before the first stage runs, the executor expands and
-resolves every stage against the current execution state and verifies that:
+The immutable command descriptor gains an explicit `pipeline_safe` declaration, default
+`False`, in addition to stdin acceptance. Before the first stage runs, the executor
+expands and resolves every stage against the current execution state and verifies that:
 
 - every command is registered and marked pipeline-safe;
 - every stage after the first accepts stdin;
 - expanded arguments satisfy their limits;
-- no stage changes cwd, environment, or workspace state;
-- a redirected final stage permits stdout redirection.
+- a resolved redirected final stage permits stdout redirection.
 
 Commands such as `cd`, `export`, `mkdir`, `touch`, `rm`, `cp`, and `mv` are not
 pipeline-safe. Stateful work uses `;` or `&&`, where ordered mutation is explicit.
@@ -235,21 +298,31 @@ The initial pipeline roles are:
 
 | Role | Commands | Stdin behavior |
 |---|---|---|
-| Producer only | `pwd`, `ls`, `cat FILE...`, `echo`, `find` | May be the first stage; does not accept stdin |
-| Transformer or consumer | `grep`, `head`, `tail`, `sort`, `uniq`, `wc` | May accept stdin after the first stage |
+| Producer only | `pwd`, `ls`, `echo`, `find` | May be the first stage; does not accept connected stdin |
+| File/stdin producer or transformer | `cat`, `grep`, `head`, `tail`, `sort`, `uniq`, `wc` | Uses named operands, explicit `-`, or connected stdin according to its command contract |
+| Environment producer | `env` | May be the first stage and does not accept connected stdin |
 
-`cat` retains its version 1 requirement for one or more file arguments; pipeline support
-does not implicitly add a no-argument stdin-copy mode. A later command-specific decision
-may add that behavior if usability evidence justifies it.
+`cat` with no file operands consumes stdin. An explicit `-` selects stdin among file
+operands for commands that support file input. `stdin_connected` remains true even when
+an upstream stage emitted no bytes, avoiding ambiguity between no pipe and an empty pipe.
 
 The executor-owned final stdout redirection is the only permitted workspace mutation in
-a pipeline. It remains one atomic workspace operation after the effective pipeline result
-is successful.
+a pipeline. It remains one atomic workspace operation after the pipeline reaches any
+normal result, including a non-zero result. The effective pipeline exit status is
+preserved after successful redirection. Timeout, cancellation, infrastructure failure,
+incomplete output, invalid destinations, and resource-limit failures leave the target
+unchanged.
 
 This restriction avoids pretending that sequential stages have shell subprocess
 isolation. For example, a naive sequential `cd /workspace/project | pwd` would otherwise
 let `pwd` observe and potentially commit the earlier `cd`, while normal shell pipeline
 stages generally do not share cwd or environment changes.
+
+`pipeline_safe` is a trusted extension assertion. Default safe commands receive only
+read-only or no workspace ports. The executor treats an unexpected cwd or environment
+change from a safe handler as `CommandInternalFailure`. A custom handler that falsely
+declares itself safe and mutates through an undeclared external capability violates the
+extension contract; the executor cannot roll back behavior outside its ports.
 
 ### Execution and output flow
 
@@ -261,8 +334,10 @@ stage 1 stdout -> stage 2 stdin -> ... -> final stage stdout
 
 - Pipeline stdin and stdout are UTF-8 text.
 - A stage runs to completion before the next stage begins.
-- The first stage receives explicit empty stdin.
+- The first stage receives `stdin=""` with `stdin_connected=False`.
 - Complete stage stdout becomes the next stage's explicit `CommandRequest.stdin`.
+- Every later stage receives `stdin_connected=True`, including when upstream stdout is
+  empty.
 - Intermediate stdout is consumed by the next stage and is not added to model-visible
   aggregate stdout.
 - Final-stage stdout becomes the pipeline stdout.
@@ -273,14 +348,16 @@ stage 1 stdout -> stage 2 stdin -> ... -> final stage stdout
   stage status and failure code, or success when every stage succeeds.
 - Executor, timeout, cancellation, and dependency failures abort the pipeline and the
   remaining execution plan immediately.
+- Final redirection uses the final stage stdout for every normal pipeline status. A
+  redirection failure becomes the effective unit failure.
 
 ### Bounds and failure behavior
 
 Pipelines add explicit limits for:
 
-- stages per pipeline;
-- complete bytes passed between any two stages;
-- aggregate intermediate bytes materialized across the pipeline.
+- stages per pipeline, default 8;
+- complete bytes passed between any two stages, default 256 KiB;
+- aggregate intermediate bytes materialized across the pipeline, default 1 MiB.
 
 Intermediate output must be complete to preserve transformation correctness. If a stage
 exceeds an intermediate or aggregate pipeline limit, the pipeline fails before the next
@@ -288,9 +365,11 @@ stage starts; truncated data is never supplied as stdin. This is a structured
 `PIPELINE_LIMIT_EXCEEDED` non-zero pipeline result, not an executor exception. A following
 `;` plan unit remains eligible, while a following `&&` plan unit is skipped.
 
-Final model-visible stdout and stderr retain the normal complete-plan output limits and
-observable truncation behavior. Final redirection still requires complete stdout and
-leaves the target unchanged when output is unavailable in full.
+Aggregate intermediate bytes are the sum of every complete inter-stage stdout payload;
+final stdout and stderr are excluded. Final model-visible stdout and stderr retain the
+normal complete-plan output limits and observable truncation behavior. Final redirection
+still requires complete stdout and leaves the target unchanged when output is unavailable
+in full.
 
 The existing complete-plan timeout and cancellation scope covers every pipeline stage
 and redirection boundary. Sequential buffering deliberately avoids concurrent-stage
@@ -319,15 +398,48 @@ workspace mutations remain committed.
 Commands are enabled through a capability profile. A framework adapter must not claim
 support for commands that are not registered.
 
-Additional utilities such as `head`, `tail`, `cp`, `mv`, `grep`, `find`, `wc`, `sort`,
-`uniq`, `env`, `export`, `sh`, and `help` are deferred. The complete-core milestone adds
-the useful search and aggregation command wave together with bounded sequential
-in-memory pipelines under the approved semantics above, before the first framework
-adapter.
+## Milestone 4 command profile
+
+Supported commands follow their familiar POSIX-shaped operand behavior within this
+explicit subset:
+
+| Command | Approved behavior |
+|---|---|
+| `cat [FILE...]` | Concatenate UTF-8 files; no operands consume stdin; `-` selects stdin |
+| `echo [-n] [ARG...]` | Join arguments with spaces and optionally omit trailing LF |
+| `ls [-1a] [PATH...]` | List one or more paths; `-1` is the stable one-entry-per-line form and `-a` is accepted because dot names are never hidden |
+| `head [-n COUNT] [FILE...]` | Emit leading LF-delimited records; no files consume stdin and `-` selects stdin |
+| `tail [-n COUNT] [FILE...]` | Emit trailing LF-delimited records; no files consume stdin and `-` selects stdin |
+| `grep [-FEivnlrR] PATTERN [FILE...]` | Search Python regular expressions or fixed text; recursive mode defaults to cwd; no files consume stdin; no match is exit 1 with `NO_MATCH` |
+| `find [PATH] [-type f\|d] [-name GLOB] [-maxdepth N]` | Stable lexical depth-first traversal; `fnmatch.fnmatchcase` basename matching; output follows the supplied relative or absolute path style |
+| `wc [-clw] [FILE...]` | Count exact UTF-8 bytes, LF characters, and words; no files consume stdin and `-` selects stdin |
+| `sort [-nru] [FILE...]` | Stable locale-independent line sorting with numeric, reverse, and unique modes |
+| `uniq [-c] [FILE]` | Filter adjacent equal lines and optionally prefix counts |
+| `cp [-fRr] SOURCE... DEST` | Copy one or more sources; directory sources require recursion; existing directory destinations append basenames; compatible files overwrite atomically; `-f` is accepted because compatible overwrite is already the default |
+| `mv [-f] SOURCE... DEST` | Move one or more sources; existing directory destinations append basenames; compatible files overwrite atomically; `-f` is accepted because compatible overwrite is already the default |
+| `env` | Emit the sorted approved environment plus derived `PWD` |
+| `export NAME=VALUE...` | Return persistent environment assignments for the current execution plan |
+| `unset NAME...` | Return persistent environment removals; derived `PWD` cannot be unset |
+
+Commands with options accept `--` where needed to terminate option parsing. `head` and
+`tail` default to ten records. LF is the record delimiter; CR bytes and missing final
+newlines are preserved where the corresponding utility normally preserves input.
+`wc -l` counts LF characters and `wc -c` counts exact UTF-8 bytes.
+
+Multiple source or file operands follow familiar order and fail-fast behavior. Earlier
+successful workspace mutations remain committed. `cp` and `mv` do not create missing
+parents. Recursive copy into an already-existing destination subtree is rejected because
+the workspace does not currently expose an atomic POSIX directory-merge operation.
+
+`ls -l` is explicitly unsupported because the virtual workspace has no meaningful owner,
+group, permission, link-count, or timestamp fields. `env NAME=VALUE COMMAND`, full shell
+assignment prefixes, POSIX BRE, locale-dependent sorting, shell glob expansion, and
+script-file execution remain outside this milestone. `env` command invocation may be
+revisited with the operation-local environment-overlay boundary used by secret leasing.
 
 OpenAI's default `SandboxAgent` shell sends `sh -lc` and expects additional Unix
 utilities. The first in-memory adapter should use a custom capability rather than adding
-fake POSIX compatibility to this component.
+host-shell behavior to this component.
 
 ## Workspace ports
 
@@ -335,10 +447,10 @@ The command-executor module owns focused reader and mutator protocols for only t
 operations used by registered commands. Handlers do not import or type against
 `MemoryWorkspace`.
 
-Append redirection requires one workspace-owned atomic append mutation. It must not be
-implemented as an unguarded read followed by write. The Workspace module will add the
-append request, quota, hash, revision, atomicity, and stale-state tests as part of issue
-#4, with corresponding Workspace README updates.
+Append redirection uses the workspace-owned atomic append mutation and must never become
+an unguarded read followed by write. The mutator port includes the workspace-owned atomic
+copy and move operations; command handlers retain ownership only of POSIX-shaped operand
+and destination interpretation.
 
 ## Execution context
 
@@ -400,20 +512,32 @@ failure.
 
 ## Redirection
 
-Version 1 allows one trailing stdout redirection only for `pwd`, `ls`, `cat`, and `echo`.
-Restricting redirection to output-only commands prevents a redirect failure from being
+Milestone 2 allowed one trailing stdout redirection only for `pwd`, `ls`, `cat`, and
+`echo`. The current profile also permits standalone and final-pipeline-stage redirection
+for the non-mutating output commands `head`, `tail`, `grep`, `find`, `wc`, `sort`,
+`uniq`, and `env`. Mutating commands remain ineligible so a redirect failure cannot be
 coupled to an earlier mutation by the same simple command.
 
 - `>` atomically creates or replaces the destination.
 - `>>` atomically appends and creates the destination when absent.
 - The destination resolves against the cwd active for that command.
-- A non-zero command result leaves the destination unchanged.
-- Successful redirection suppresses that command's stdout from the aggregate result.
+- Every normal command or pipeline result, including exit codes 1, 2, and 127, redirects
+  its captured stdout while retaining the original status when the write succeeds. This
+  intentionally supersedes the Milestone 2 exit-code-zero-only rule.
+- Command lookup failure is a normal exit-127 result. When the final command has no
+  descriptor because it is unknown, that result remains redirection-eligible as the
+  POSIX-shaped exception to descriptor gating; the atomic redirect publishes empty
+  stdout after pipeline preflight returns without dispatching any stage.
+- Completed redirection suppresses that command or pipeline stdout from the aggregate
+  result.
 - stderr is never redirected.
 - If complete stdout was not retained because of the output limit, redirection fails
   normally and leaves the destination unchanged.
 - Workspace path, target-type, quota, and append failures use exit code 1 with a
   structured redirection failure code.
+- Syntax errors, timeout, cancellation, and infrastructure failures occur outside normal
+  command completion and leave the destination unchanged. This is an intentional atomic
+  safety deviation from a host shell opening the target before process execution.
 
 ## Output behavior
 
@@ -445,6 +569,7 @@ Normal command failures remain structured results:
 |---|---:|
 | Command not registered | 127 |
 | Invalid option or argument | 2 |
+| `grep` found no matching input | 1 |
 | Workspace operation failure | 1 |
 | Redirection or redirected-output-limit failure | 1 |
 | Pipeline intermediate or aggregate limit failure | 1 |
@@ -452,8 +577,8 @@ Normal command failures remain structured results:
 The result includes a stable failure code in addition to deterministic stderr. This lets
 `;` and `&&` evaluate failures without exception-driven control flow. Policy denial is a
 session concern and occurs before invoking the executor. Milestone 4 adds the stable
-`PIPELINE_LIMIT_EXCEEDED` failure code for a bounded pipeline that cannot retain complete
-intermediate data.
+`NO_MATCH` code for normal grep no-match results and `PIPELINE_LIMIT_EXCEEDED` for a
+bounded pipeline that cannot retain complete intermediate data.
 
 ## Resource limits
 
@@ -466,6 +591,9 @@ The configurable default profile is:
 | Expanded argument | 8 KiB UTF-8 |
 | stdout | 256 KiB UTF-8 |
 | stderr | 256 KiB UTF-8 |
+| Pipeline stages | 8 |
+| Intermediate pipeline payload | 256 KiB UTF-8 |
+| Aggregate intermediate materialization | 1 MiB UTF-8 |
 | Complete execution plan | 30 seconds |
 
 The static argv-entry count is checked for the complete plan before dispatch because
@@ -484,7 +612,10 @@ non-finite, zero, or negative timeout and limit values are invalid requests.
 - Confirm deterministic output truncation and redaction.
 - Verify cwd and environment commit rules.
 - Verify append is one atomic workspace mutation rather than read-then-write.
-- Verify redirected output overflow and command failure leave the target unchanged.
+- Verify normal non-zero command and pipeline results redirect captured stdout while
+  preserving their non-zero status.
+- Verify timeout, cancellation, infrastructure failure, invalid destination, quota
+  failure, and redirected-output overflow leave the target unchanged.
 - For Milestone 4 pipelines, verify precedence, pipeline-safe command admission, fixed
   pipefail status, producer and stdin-consumer roles, ordered stderr, final-only stdout,
   descriptor-gated final-stage-only redirection, and exact intermediate and aggregate
@@ -494,6 +625,8 @@ non-finite, zero, or negative timeout and limit values are invalid requests.
   prevents following `&&` execution.
 - Run the same script before and after snapshot restore and compare results.
 - Verify duplicate and invalid command registrations fail fast.
+- Compare supported command behavior with POSIX-shaped golden cases and document every
+  intentional compatibility deviation.
 
 ## Maintenance rule
 

@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import time
+from dataclasses import dataclass
 from typing import Protocol
 
-from mem_sandbox.command_executor.commands import create_first_wave_commands
+from mem_sandbox.command_executor.commands import create_command_profile
 from mem_sandbox.command_executor.errors import (
     CommandCancelled,
     CommandInternalFailure,
@@ -25,13 +26,13 @@ from mem_sandbox.command_executor.models import (
     EnvironmentValue,
     ExecuteRequest,
     ExecuteResult,
-    PlanCommand,
+    PlanUnit,
     RedirectionMode,
 )
 from mem_sandbox.command_executor.output import BoundedOutputCollector, bound_text
 from mem_sandbox.command_executor.parser import expand_word, parse_execution_plan
 from mem_sandbox.command_executor.ports import CommandWorkspaceMutator, CommandWorkspaceReader
-from mem_sandbox.command_executor.registry import CommandRegistry
+from mem_sandbox.command_executor.registry import CommandRegistry, VirtualCommand
 from mem_sandbox.core.errors import (
     ConflictError,
     InvalidRequestError,
@@ -66,6 +67,20 @@ class CommandExecutor(Protocol):
     ) -> ExecuteResult: ...
 
 
+@dataclass(frozen=True, slots=True)
+class _PreparedStage:
+    argv: tuple[str, ...]
+    command: VirtualCommand
+
+
+@dataclass(frozen=True, slots=True)
+class _PreparedUnit:
+    stages: tuple[_PreparedStage, ...]
+    destination: str | None
+    failure: CommandResult | None = None
+    redirection_admitted: bool = True
+
+
 class VirtualCommandExecutor:
     """Execute immutable plans through an injected command registry and workspace port."""
 
@@ -98,12 +113,12 @@ class VirtualCommandExecutor:
                 f"{request.limits.max_command_bytes} bytes"
             )
         plan = parse_execution_plan(request.command)
-        self._validate_plan_argument_counts(plan.commands, request)
+        self._validate_plan_structure(plan.units, request)
         started = time.perf_counter()
         deadline = asyncio.get_running_loop().time() + request.limits.timeout_seconds
         try:
             async with asyncio.timeout_at(deadline):
-                result = await self._execute_plan(request, context, plan.commands, deadline)
+                result = await self._execute_plan(request, context, plan.units, deadline)
         except TimeoutError as error:
             raise CommandTimeout("command execution exceeded the complete-plan timeout") from error
         duration_ms = (time.perf_counter() - started) * 1000
@@ -125,7 +140,7 @@ class VirtualCommandExecutor:
         self,
         request: ExecuteRequest,
         execution_context: CommandExecutionContext,
-        commands: tuple[PlanCommand, ...],
+        units: tuple[PlanUnit, ...],
         deadline: float,
     ) -> ExecuteResult:
         stdout = BoundedOutputCollector(request.limits.max_stdout_bytes)
@@ -137,66 +152,36 @@ class VirtualCommandExecutor:
         last_exit = 0
         executed = False
 
-        for item in commands:
+        for item in units:
             if item.connector.value == "on_success" and last_exit != 0:
                 continue
             self._check_execution_state(execution_context, deadline)
-            argv = tuple(expand_word(word, environment, cwd) for word in item.words)
-            destination = (
-                expand_word(item.redirection.destination, environment, cwd)
-                if item.redirection is not None
-                else None
-            )
-            argument_error = self._expanded_argument_error(argv, destination, request)
-            if argument_error is not None:
-                stage = CommandResult(
-                    2,
-                    CommandFailureCode.INVALID_ARGUMENT,
-                    "",
-                    f"{self._diagnostic_command_name(argv[0])}: {argument_error}\n",
-                )
+            prepared = self._prepare_unit(item, request, environment, cwd)
+            if prepared.failure is not None:
+                stage = prepared.failure
             else:
-                command = self._registry.resolve(argv[0])
-                if command is None:
-                    stage = CommandResult(
-                        127,
-                        CommandFailureCode.COMMAND_NOT_FOUND,
-                        "",
-                        f"{argv[0]}: command not found\n",
-                    )
-                elif (
-                    item.redirection is not None
-                    and not command.descriptor.permits_stdout_redirection
-                ):
-                    stage = CommandResult(
-                        2,
-                        CommandFailureCode.INVALID_ARGUMENT,
-                        "",
-                        f"{argv[0]}: stdout redirection is not permitted\n",
-                    )
-                else:
-                    command_context = CommandContext(
-                        cwd,
-                        environment,
-                        execution_context.cancellation,
-                        execution_context.session_id,
-                        execution_context.operation_id,
-                    )
-                    try:
-                        stage = await command.execute(CommandRequest(argv, ""), command_context)
-                    except SandboxError:
-                        raise
-                    except Exception as error:
-                        raise CommandInternalFailure(
-                            f"command handler {command.descriptor.name} failed unexpectedly"
-                        ) from error
+                stage = await self._execute_unit(
+                    prepared,
+                    request,
+                    execution_context,
+                    environment,
+                    cwd,
+                    deadline,
+                )
             self._check_execution_state(execution_context, deadline)
 
-            if item.redirection is not None:
-                assert destination is not None
+            if (
+                item.redirection is not None
+                and prepared.redirection_admitted
+                and stage.failure_code is not CommandFailureCode.PIPELINE_LIMIT_EXCEEDED
+            ):
+                assert prepared.destination is not None
+                command_name = self._diagnostic_command_name(
+                    expand_word(item.stages[-1].words[0], environment, cwd)
+                )
                 stage = await self._apply_redirection(
-                    argv[0],
-                    destination,
+                    command_name,
+                    prepared.destination,
                     item.redirection.mode,
                     cwd,
                     stage,
@@ -234,6 +219,199 @@ class VirtualCommandExecutor:
             tuple(all_changes),
         )
 
+    def _prepare_unit(
+        self,
+        item: PlanUnit,
+        request: ExecuteRequest,
+        environment: CommandEnvironment,
+        cwd: SandboxPath,
+    ) -> _PreparedUnit:
+        destination = (
+            expand_word(item.redirection.destination, environment, cwd)
+            if item.redirection is not None
+            else None
+        )
+        prepared: list[_PreparedStage] = []
+        first_failure: CommandResult | None = None
+        final_command: VirtualCommand | None = None
+        final_argv: tuple[str, ...] | None = None
+        redirection_admitted = True
+        is_pipeline = len(item.stages) > 1
+        for index, stage in enumerate(item.stages):
+            argv = tuple(expand_word(word, environment, cwd) for word in stage.words)
+            if index == len(item.stages) - 1:
+                final_argv = argv
+            argument_error = self._expanded_argument_error(
+                argv,
+                destination if index == len(item.stages) - 1 else None,
+                request,
+            )
+            if argument_error is not None:
+                redirection_admitted = False
+                if first_failure is None:
+                    first_failure = CommandResult(
+                        2,
+                        CommandFailureCode.INVALID_ARGUMENT,
+                        "",
+                        f"{self._diagnostic_command_name(argv[0])}: {argument_error}\n",
+                    )
+            command = self._registry.resolve(argv[0])
+            if command is None:
+                if first_failure is None:
+                    first_failure = CommandResult(
+                        127,
+                        CommandFailureCode.COMMAND_NOT_FOUND,
+                        "",
+                        f"{argv[0]}: command not found\n",
+                    )
+                continue
+            if index == len(item.stages) - 1:
+                final_command = command
+            if is_pipeline and not command.descriptor.pipeline_safe:
+                if first_failure is None:
+                    first_failure = CommandResult(
+                        2,
+                        CommandFailureCode.INVALID_ARGUMENT,
+                        "",
+                        f"{argv[0]}: command is not permitted in pipelines\n",
+                    )
+                redirection_admitted = False
+            if index > 0 and not command.descriptor.accepts_stdin:
+                if first_failure is None:
+                    first_failure = CommandResult(
+                        2,
+                        CommandFailureCode.INVALID_ARGUMENT,
+                        "",
+                        f"{argv[0]}: command does not accept pipeline input\n",
+                    )
+                redirection_admitted = False
+            prepared.append(_PreparedStage(argv, command))
+
+        if (
+            item.redirection is not None
+            and final_command is not None
+            and not final_command.descriptor.permits_stdout_redirection
+        ):
+            assert final_argv is not None
+            return _PreparedUnit(
+                tuple(prepared),
+                destination,
+                CommandResult(
+                    2,
+                    CommandFailureCode.INVALID_ARGUMENT,
+                    "",
+                    f"{final_argv[0]}: stdout redirection is not permitted\n",
+                ),
+                False,
+            )
+        return _PreparedUnit(
+            tuple(prepared),
+            destination,
+            first_failure,
+            redirection_admitted,
+        )
+
+    async def _execute_unit(
+        self,
+        prepared: _PreparedUnit,
+        request: ExecuteRequest,
+        execution_context: CommandExecutionContext,
+        environment: CommandEnvironment,
+        cwd: SandboxPath,
+        deadline: float,
+    ) -> CommandResult:
+        if len(prepared.stages) == 1:
+            stage = prepared.stages[0]
+            return await self._dispatch(
+                stage,
+                "",
+                False,
+                environment,
+                cwd,
+                execution_context,
+            )
+
+        intermediate_bytes = 0
+        previous_stdout = ""
+        combined_stderr: list[str] = []
+        effective_exit = 0
+        effective_failure: CommandFailureCode | None = None
+        final_stdout = ""
+        for index, prepared_stage in enumerate(prepared.stages):
+            self._check_execution_state(execution_context, deadline)
+            result = await self._dispatch(
+                prepared_stage,
+                previous_stdout if index > 0 else "",
+                index > 0,
+                environment,
+                cwd,
+                execution_context,
+            )
+            self._check_execution_state(execution_context, deadline)
+            if result.resulting_cwd is not None or result.environment_changes:
+                raise CommandInternalFailure(
+                    f"pipeline-safe command {prepared_stage.command.descriptor.name} "
+                    "attempted to change execution state"
+                )
+            combined_stderr.append(result.stderr)
+            if result.exit_code != 0:
+                effective_exit = result.exit_code
+                effective_failure = result.failure_code
+            if index == len(prepared.stages) - 1:
+                final_stdout = result.stdout
+                continue
+            stage_bytes = len(result.stdout.encode("utf-8"))
+            intermediate_bytes += stage_bytes
+            if (
+                stage_bytes > request.limits.max_pipeline_intermediate_bytes
+                or intermediate_bytes > request.limits.max_pipeline_aggregate_bytes
+            ):
+                combined_stderr.append(
+                    f"{prepared_stage.argv[0]}: pipeline intermediate output exceeds "
+                    "the configured limit\n"
+                )
+                return CommandResult(
+                    1,
+                    CommandFailureCode.PIPELINE_LIMIT_EXCEEDED,
+                    "",
+                    "".join(combined_stderr),
+                )
+            previous_stdout = result.stdout
+        return CommandResult(
+            effective_exit,
+            effective_failure,
+            final_stdout,
+            "".join(combined_stderr),
+        )
+
+    async def _dispatch(
+        self,
+        prepared: _PreparedStage,
+        stdin: str,
+        stdin_connected: bool,
+        environment: CommandEnvironment,
+        cwd: SandboxPath,
+        execution_context: CommandExecutionContext,
+    ) -> CommandResult:
+        command_context = CommandContext(
+            cwd,
+            environment,
+            execution_context.cancellation,
+            execution_context.session_id,
+            execution_context.operation_id,
+        )
+        try:
+            return await prepared.command.execute(
+                CommandRequest(prepared.argv, stdin, stdin_connected),
+                command_context,
+            )
+        except SandboxError:
+            raise
+        except Exception as error:
+            raise CommandInternalFailure(
+                f"command handler {prepared.command.descriptor.name} failed unexpectedly"
+            ) from error
+
     async def _apply_redirection(
         self,
         command_name: str,
@@ -243,15 +421,6 @@ class VirtualCommandExecutor:
         stage: CommandResult,
         request: ExecuteRequest,
     ) -> CommandResult:
-        if stage.exit_code != 0:
-            return CommandResult(
-                stage.exit_code,
-                stage.failure_code,
-                "",
-                stage.stderr,
-                stage.resulting_cwd,
-                stage.environment_changes,
-            )
         bounded = bound_text(stage.stdout, request.limits.max_stdout_bytes)
         if bounded.truncated:
             return CommandResult(
@@ -283,8 +452,8 @@ class VirtualCommandExecutor:
         except Exception as error:
             raise CommandInternalFailure("stdout redirection failed unexpectedly") from error
         return CommandResult(
-            0,
-            None,
+            stage.exit_code,
+            stage.failure_code,
             "",
             stage.stderr,
             stage.resulting_cwd,
@@ -306,16 +475,22 @@ class VirtualCommandExecutor:
         VirtualCommandExecutor._check_cancelled(context)
 
     @staticmethod
-    def _validate_plan_argument_counts(
-        commands: tuple[PlanCommand, ...],
+    def _validate_plan_structure(
+        units: tuple[PlanUnit, ...],
         request: ExecuteRequest,
     ) -> None:
-        for command in commands:
-            if len(command.words) > request.limits.max_argv_entries:
+        for unit in units:
+            if len(unit.stages) > request.limits.max_pipeline_stages:
                 raise CommandSyntaxInvalid(
-                    f"command has {len(command.words)} argv entries; limit is "
-                    f"{request.limits.max_argv_entries}"
+                    f"pipeline has {len(unit.stages)} stages; limit is "
+                    f"{request.limits.max_pipeline_stages}"
                 )
+            for stage in unit.stages:
+                if len(stage.words) > request.limits.max_argv_entries:
+                    raise CommandSyntaxInvalid(
+                        f"command has {len(stage.words)} argv entries; limit is "
+                        f"{request.limits.max_argv_entries}"
+                    )
 
     @staticmethod
     def _expanded_argument_error(
@@ -348,9 +523,9 @@ def create_default_executor(
     reader: CommandWorkspaceReader,
     mutator: CommandWorkspaceMutator,
 ) -> VirtualCommandExecutor:
-    """Construct the exact approved first-wave profile."""
+    """Construct the complete approved command profile."""
     return VirtualCommandExecutor(
-        CommandRegistry(create_first_wave_commands(reader, mutator)),
+        CommandRegistry(create_command_profile(reader, mutator)),
         mutator,
     )
 
