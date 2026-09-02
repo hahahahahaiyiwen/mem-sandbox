@@ -153,8 +153,9 @@ The minimal `SandboxSession` vertical slice uses `REQUIRED` delivery. Its concre
 - Terminal-event failure does not roll back already committed workspace or session state.
 - `BEST_EFFORT` delivery is deferred until a diagnostic failure handler is implemented.
 
-Policy-decision, secret, dedicated snapshot, sensitivity-classification, redaction, and
-bounded in-memory collection behavior remain in Milestone 4.
+Dedicated snapshot, sensitivity-classification, redaction, and bounded in-memory
+collection behavior remain in Milestone 4. Policy-decision and secret events are deferred
+with composed policy and functional secret resolution.
 
 ## In-memory sink
 

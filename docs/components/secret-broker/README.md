@@ -1,14 +1,14 @@
 # Secret Broker Design
 
-**Status:** Milestone 3 no-secret broker implemented; secret leasing remains proposed
+**Status:** Milestone 3 no-secret broker implemented; functional secret leasing deferred
 
 ## Purpose
 
-The secret broker resolves opaque secret references into short-lived, operation-scoped
-leases after policy approval. It prevents agent-visible requests, workspace state,
-snapshots, errors, and events from carrying durable secret values.
+The current secret boundary rejects every lease request explicitly. A future secret
+broker may resolve opaque references into short-lived, operation-scoped leases only
+after a concrete authorization boundary, identity model, and redaction flow are approved.
 
-## Responsibilities
+## Deferred responsibilities
 
 - Resolve approved `SecretRef` values through an injected source.
 - Bind each lease to a session, operation, command, and optional destination.
@@ -63,7 +63,9 @@ operations carry no secret references and therefore never invoke the injected br
 text happens only at the command boundary that needs it. `SessionId` and `OperationId`
 remain typed throughout policy and broker calls.
 
-## Resolution flow
+## Deferred resolution flow
+
+The following flow is a future requirement, not current release behavior:
 
 1. The session parses secret references without resolving them.
 2. The policy engine evaluates reference, command, destination, and requested duration.
@@ -73,7 +75,14 @@ remain typed throughout policy and broker calls.
 6. The command receives only the required lease.
 7. The lease closes in `finally`, including timeout and cancellation paths.
 
-Secret lookup never occurs before policy approval.
+Secret lookup must never occur before explicit authorization. Functional resolution is
+deferred with the composed-policy decision because the current sandbox has no caller
+identity, destination, or command-bound lease requirement.
+
+Re-evaluate this component only when an adapter or `SandboxService` use case identifies
+the caller identity, protected secret reference, permitted command, optional destination,
+and required lease lifetime. The current `NoSecretBroker` remains the authoritative
+default until that design is approved.
 
 ## Secret references
 

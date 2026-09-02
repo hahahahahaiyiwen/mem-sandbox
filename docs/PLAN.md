@@ -17,8 +17,9 @@ domain foundations
   -> command executor MVP
   -> minimal SandboxSession vertical slice
   -> complete workspace/executor behavior
-  -> policy, snapshots, secrets, and events
+  -> snapshots, events, and SandboxService
   -> framework adapters
+  -> policy and secret re-evaluation when a concrete trust boundary exists
 ```
 
 The workspace is the state model and consistency boundary. The command executor consumes
@@ -555,7 +556,9 @@ Implement `tests/integration/session/test_minimal_vertical_slice.py` to:
 ### Goal
 
 Complete the framework-neutral core after the vertical slice has proved its boundaries,
-including the remaining command profile, policy, events, snapshots, and secrets.
+including the remaining command profile, events, snapshots, and process-local service
+behavior. Composed policy and functional secrets are deferred until a concrete trust
+boundary exists.
 
 ### Work
 
@@ -595,16 +598,19 @@ including the remaining command profile, policy, events, snapshots, and secrets.
   first framework adapter, including acceptance, repair turns, tool calls, tokens,
   latency, output size, and truncation.
 
-#### 4.2 Policy engine
+#### 4.2 Policy admission decision
 
-- [ ] **4.2.1** Define typed policy requests, decisions, denial reasons, effective
-  limits, and obligations.
-- [ ] **4.2.2** Write happy, denied, failure, and boundary tests for operation admission
-  and path read/write rules.
-- [ ] **4.2.3** Implement operation, path, command, and argument policy evaluation.
-- [ ] **4.2.4** Implement effective timeout, output, and quota limit composition.
-- [ ] **4.2.5** Implement secret-reference and destination rules before enabling secret
-  resolution.
+- [x] **4.2.1** Retain the explicit Milestone 3 `SessionPolicyEngine` seam,
+  `PolicyRequest`, `PolicyDecision`, and `AllowAllPolicyEngine`.
+- [x] **4.2.2** Defer composed operation, path, command, argument, limit, obligation,
+  secret-reference, and destination policy until a concrete authorization boundary
+  exists.
+- [x] **4.2.3** Document that workspace, command, lifecycle, deadline, and no-host-
+  fallback guarantees remain authoritative invariants in their owning modules rather
+  than configurable policy rules.
+- [x] **4.2.4** Record the re-evaluation triggers and require a new approved design issue
+  before enabling multi-owner authorization, secrets, network access, host execution, or
+  shared persistent state.
 
 #### 4.3 Event sink
 
@@ -626,16 +632,15 @@ including the remaining command profile, policy, events, snapshots, and secrets.
 - [ ] **4.4.3** Implement explicit compatibility and integrity checks before restore
   mutation begins.
 
-#### 4.5 Secret broker
+#### 4.5 Secret boundary
 
-- [ ] **4.5.1** Define secret references and operation-scoped lease types without
-  exposing raw values in domain results.
-- [ ] **4.5.2** Write tests for authorization, expiry, cleanup, redaction, and dependency
-  failures.
-- [ ] **4.5.3** Implement secret resolution only after policy approval and event
-  redaction are active.
-- [ ] **4.5.4** Prove secret values never enter workspace files, snapshots, errors,
-  results, or events.
+- [x] **4.5.1** Retain typed secret references and the explicit no-secret broker that
+  rejects every lease request.
+- [x] **4.5.2** Defer functional secret resolution, authorization, expiry, and redaction
+  behavior with the composed-policy decision.
+- [ ] **4.5.3** Re-open secret design only after an adapter or service requirement
+  identifies the caller identity, protected secret, permitted command, destination, and
+  lease lifetime.
 
 #### 4.6 Core conformance
 
@@ -662,10 +667,10 @@ including the remaining command profile, policy, events, snapshots, and secrets.
 - [ ] **4.9.2** `python -m pytest tests/conformance/test_direct_session.py -q` passes.
 - [ ] **4.9.3** `python -m ruff check src tests` and
   `python -m pyright src tests` pass.
-- [ ] **4.9.4** Every policy-aware behavior has happy, denied, dependency-failure, and
-  exact-boundary coverage.
-- [ ] **4.9.5** Secret-canary tests find no secret value in files, snapshots, errors,
-  results, or events.
+- [ ] **4.9.4** The minimal explicit admission seam remains covered and no current
+  release behavior depends on a speculative composed policy engine.
+- [ ] **4.9.5** Functional secret materialization remains disabled unless a later
+  approved design supplies authorization and redaction coverage.
 - [ ] **4.9.6** Unsupported behavior tests prove failure occurs before mutation and
   without host fallback.
 - [ ] **4.9.7** The dependency-boundary test still proves no agent-framework dependency
@@ -680,7 +685,8 @@ including the remaining command profile, policy, events, snapshots, and secrets.
 ### Goal
 
 Integrate the proven core with Python agent frameworks while preserving core ownership of
-filesystem, command, policy, lifecycle, and snapshot behavior.
+filesystem, command, lifecycle, and snapshot behavior. Adapters must not invent their own
+authorization system while composed policy remains deferred.
 
 ### Work
 
@@ -690,8 +696,9 @@ filesystem, command, policy, lifecycle, and snapshot behavior.
   `write_file`, and `apply_patch`.
 - [ ] **5.1.2** Implement shared request, result, correctable-error, terminal-error, and
   cancellation translation.
-- [ ] **5.1.3** Write adapter conformance tests proving no policy, filesystem, command,
-  or snapshot behavior is reimplemented in the adapter.
+- [ ] **5.1.3** Write adapter conformance tests proving no filesystem, command,
+  lifecycle, or snapshot behavior is reimplemented in the adapter and no unapproved
+  adapter-specific authorization behavior is introduced.
 
 #### 5.2 PydanticAI capability
 
@@ -750,6 +757,17 @@ filesystem, command, policy, lifecycle, and snapshot behavior.
 - [ ] **5.6.6** Keep comparative benchmarks separate from CI regression gates and require
   the documented methodology before publishing any "fastest provisioning" claim.
 
+#### 5.7 Policy and secret re-evaluation
+
+- [ ] **5.7.1** After `SandboxService` and at least one framework adapter are implemented,
+  review whether a concrete owner, secret, network, host-execution, or shared-state trust
+  boundary exists.
+- [ ] **5.7.2** If no concrete authorization requirement exists, keep the minimal
+  allow-all admission seam and continue deferring composed policy.
+- [ ] **5.7.3** If a trigger exists, open a new design issue that defines authority,
+  identity, protected actions, enforcement ownership, prepared artifacts, fail-closed
+  behavior, and behavior-first coverage before implementation.
+
 ### Exit criteria
 
 - [ ] **5.9.1** `python -m pytest tests/conformance -q` passes for direct session and
@@ -800,7 +818,7 @@ priority of fastest provisioning.
 #### 6.2 Design review
 
 - [ ] **6.2.1** Review the deferred content-offload design against the implemented
-  workspace, session, command, policy, event, and snapshot-store boundaries.
+  workspace, session, command, event, snapshot-store, and deferred-policy boundaries.
 - [ ] **6.2.2** Compare content offload with simpler alternatives such as adjusted
   quotas, lower process density, structural sharing, cached subtree hashes, and
   incremental accounting.
@@ -926,6 +944,7 @@ their referenced checklist task begins.
 | Command output | Independent 256 KiB stream caps with deterministic UTF-8 truncation | `2.6.5` | Resolved |
 | Timeout state | 30-second plan timeout; keep committed files and discard transient cwd/environment on timeout | `2.6` | Resolved |
 | Pipeline semantics | Bounded sequential UTF-8 transformations between registered pipeline-safe commands; fixed pipefail; final-stage-only redirection; no shell emulation | `4.1.6` | Resolved |
+| Composed policy engine | Retain the explicit allow-all admission seam; revisit only for a concrete owner, secret, network, host-execution, or shared-state trust boundary | `4.2` / `5.7` | Deferred |
 | Product validation | Stateful cross-adapter conformance plus controlled provisioning baselines; comparative evidence required for a scoped "fastest" claim | `5.6` | Resolved |
 | First framework adapter | PydanticAI capability | `5.2.1` | Open |
 | Workspace content offload | Revisit after Milestone 5 using measured workload and provisioning data | `6.2.3` | Deferred |
@@ -940,7 +959,8 @@ The first usable release is complete when:
 - [ ] The virtual command executor supports the documented command profile without host
   fallback.
 - [ ] Snapshots restore files, cwd, and approved environment state.
-- [ ] Policy denials and dependency failures produce stable domain errors.
+- [ ] The minimal explicit admission seam and dependency failures produce stable domain
+  errors; a composed policy engine is not required for the first usable release.
 - [ ] Events contain no secret or unbounded content.
 - [ ] The PydanticAI capability passes the shared conformance scenario.
 - [ ] The stateful create, snapshot, resume, continue, fork, and cleanup scenario passes

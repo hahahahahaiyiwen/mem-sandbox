@@ -170,7 +170,7 @@ Detailed design:
 | Sandbox session | Agent-facing operations, lifecycle, coordination, and composition | [Sandbox session](./components/sandbox-session/README.md) |
 | Workspace | Virtual paths, files, directories, metadata, quotas, and atomic mutations | [Workspace](./components/workspace/README.md) |
 | Command executor | Parsing and executing the constrained command language | [Command executor](./components/command-executor/README.md) |
-| Policy engine | Admission decisions for operations, resources, secrets, and egress | [Policy engine](./components/policy-engine/README.md) |
+| Policy admission | Minimal explicit per-operation decision seam; composed authorization deferred until a concrete trust boundary exists | [Policy admission](./components/policy-engine/README.md) |
 | Secret broker | Resolving approved secret references into scoped leases | [Secret broker](./components/secret-broker/README.md) |
 | Event sink | Structured operation, audit, and lifecycle event delivery | [Event sink](./components/event-sink/README.md) |
 | Snapshot store | Durable or process-local storage of versioned sandbox snapshots | [Snapshot store](./components/snapshot-store/README.md) |
@@ -263,7 +263,9 @@ session deletion remain host-controlled by default.
 5. Command parsing is a stateless capability owned by the command-executor boundary.
    A factory may share one immutable parser across executors, but `SandboxService` and
    `SandboxSession` do not parse or reinterpret command language.
-6. `PolicyEngine` returns decisions and does not mutate workspace state.
+6. The minimal policy-admission collaborator returns an explicit decision and does not
+   mutate workspace state. Composed authorization remains deferred; workspace,
+   command-executor, and session invariants stay authoritative in their owning modules.
 7. `SecretBroker` returns scoped leases and does not persist secrets in workspace or
    snapshot state.
 8. `EventSink` observes completed decisions and operations; event failures follow an
@@ -286,9 +288,10 @@ apply command semantics.
 
 Registry lookup, capability-profile admission, environment expansion, pipeline-safety
 checks, and execution limits remain executor-owned because they can differ between
-executors even when the syntax parser is shared. Future command policy must consume an
-immutable prepared-plan summary exposed by the command-executor boundary rather than
-duplicating parsing in the session, service, or policy engine.
+executors even when the syntax parser is shared. If a later concrete trust boundary
+requires command authorization, it must consume an immutable prepared artifact exposed
+by the command-executor boundary rather than duplicating parsing in the session, service,
+or policy module.
 
 ## 11. Core lifecycle
 
