@@ -30,7 +30,12 @@ from mem_sandbox.core import (
     SnapshotId,
     UuidGenerator,
 )
-from mem_sandbox.events import SandboxEvent, SandboxEventType
+from mem_sandbox.events import (
+    EventAttribute,
+    EventSensitivity,
+    SandboxEvent,
+    SandboxEventType,
+)
 from mem_sandbox.policy import PolicyDecision, PolicyRequest
 from mem_sandbox.session.errors import (
     SessionCleanupFailed,
@@ -575,6 +580,26 @@ class SandboxSession:
             request.cancellation,
             lambda: None,
             action,
+            post_commit_event=lambda value, revision: (
+                SandboxEventType.SNAPSHOT_CREATED,
+                (
+                    EventAttribute(
+                        "content_hash",
+                        str(value[1]),
+                        EventSensitivity.INTERNAL,
+                    ),
+                    EventAttribute(
+                        "snapshot_id",
+                        str(value[0].snapshot_id),
+                        EventSensitivity.INTERNAL,
+                    ),
+                    EventAttribute(
+                        "workspace_revision",
+                        revision.value,
+                        EventSensitivity.INTERNAL,
+                    ),
+                ),
+            ),
         )
         snapshot_ref, content_hash = outcome.value
         return CreateSnapshotResult(outcome.metadata, snapshot_ref, content_hash)
@@ -614,6 +639,21 @@ class SandboxSession:
             request.cancellation,
             lambda: None,
             action,
+            post_commit_event=lambda value, revision: (
+                SandboxEventType.SNAPSHOT_RESTORED,
+                (
+                    EventAttribute(
+                        "snapshot_id",
+                        str(value.snapshot_id),
+                        EventSensitivity.INTERNAL,
+                    ),
+                    EventAttribute(
+                        "workspace_revision",
+                        revision.value,
+                        EventSensitivity.INTERNAL,
+                    ),
+                ),
+            ),
         )
         return RestoreSnapshotResult(outcome.metadata, request.snapshot_ref)
 
@@ -717,6 +757,11 @@ class SandboxSession:
         cancellation: CancellationSignal | None,
         normalize: Callable[[], SandboxPath | None],
         action: Callable[[_OperationContext], Awaitable[tuple[_T, Revision]]],
+        post_commit_event: Callable[
+            [_T, Revision],
+            tuple[SandboxEventType, tuple[EventAttribute, ...]],
+        ]
+        | None = None,
     ) -> _OperationOutcome[_T]:
         self._reject_non_running()
         loop = asyncio.get_running_loop()
@@ -790,6 +835,27 @@ class SandboxSession:
                 started_at=started_at,
                 completed_at=completed_at,
             )
+            if post_commit_event is not None:
+                post_commit_deadline = original_deadline - limits.terminal_event_reserve_seconds / 2
+                try:
+                    event_type, attributes = post_commit_event(value, revision)
+                    await self._emit_event(
+                        self._new_event(
+                            event_type,
+                            operation_id=operation_id,
+                            operation_kind=kind,
+                            attributes=attributes,
+                        ),
+                        post_commit_deadline,
+                        operation_id=operation_id,
+                    )
+                except asyncio.CancelledError:
+                    raise
+                except Exception as error:
+                    raise SessionEventDeliveryFailed(
+                        f"required post-commit event delivery failed for {kind.value}",
+                        operation_id=operation_id,
+                    ) from error
         except asyncio.CancelledError as cancellation_error:
             if start_delivered and operation_id is not None:
                 try:
@@ -839,7 +905,13 @@ class SandboxSession:
                 kind,
                 operation_id,
                 original_deadline,
-                data={"workspace_revision": revision.value},
+                attributes=(
+                    EventAttribute(
+                        "workspace_revision",
+                        revision.value,
+                        EventSensitivity.INTERNAL,
+                    ),
+                ),
             )
             return _OperationOutcome(value, metadata)
         finally:
@@ -1011,14 +1083,14 @@ class SandboxSession:
         kind: OperationKind,
         operation_id: OperationId,
         deadline: float,
-        data: dict[str, int] | None = None,
+        attributes: tuple[EventAttribute, ...] = (),
     ) -> None:
         await self._emit_event(
             self._new_event(
                 event_type,
                 operation_id=operation_id,
                 operation_kind=kind,
-                data=data or {},
+                attributes=attributes,
             ),
             deadline,
             operation_id=operation_id,
@@ -1041,18 +1113,18 @@ class SandboxSession:
         *,
         operation_id: OperationId | None = None,
         operation_kind: OperationKind | None = None,
-        data: dict[str, int] | None = None,
+        attributes: tuple[EventAttribute, ...] = (),
     ) -> SandboxEvent:
         self._event_sequence += 1
         return SandboxEvent(
-            event_type.value,
+            event_type,
             self._clock.now(),
             self._session_id,
             self._event_sequence,
             operation_id,
             None,
             operation_kind,
-            data or {},
+            attributes,
         )
 
     def _reject_non_running(self) -> None:

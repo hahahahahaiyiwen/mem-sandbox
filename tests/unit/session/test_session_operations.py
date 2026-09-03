@@ -16,7 +16,13 @@ from mem_sandbox.command_executor import (
     ExecuteResult,
 )
 from mem_sandbox.core import OperationLimits, Revision, SessionId
-from mem_sandbox.events import SandboxEvent
+from mem_sandbox.events import (
+    EventDeliveryDiagnostic,
+    EventDeliveryMode,
+    EventDeliveryPolicy,
+    EventDispatcher,
+    SandboxEvent,
+)
 from mem_sandbox.policy import AllowAllPolicyEngine, PolicyDecision, PolicyRequest
 from mem_sandbox.secrets import (
     NoSecretBroker,
@@ -504,6 +510,273 @@ async def test_snapshot_metadata_comes_from_codec_and_store_capabilities() -> No
     assert store.saved is not None
     assert store.saved.metadata.format_name == "custom"
     assert store.saved.metadata.process_local is False
+
+
+@pytest.mark.asyncio
+async def test_required_snapshot_event_failure_preserves_the_saved_snapshot() -> None:
+    class RecordingStore:
+        def __init__(self) -> None:
+            self.saved: SandboxSnapshot | None = None
+
+        @property
+        def process_local(self) -> bool:
+            return True
+
+        async def save(self, snapshot: SandboxSnapshot) -> SnapshotRef:
+            self.saved = snapshot
+            return SnapshotRef(snapshot.snapshot_id)
+
+        async def load(self, snapshot_ref: SnapshotRef) -> SandboxSnapshot:
+            raise AssertionError(snapshot_ref)
+
+    class FailingSnapshotEvents:
+        def __init__(self) -> None:
+            self.values: list[SandboxEvent] = []
+
+        async def emit(self, event: SandboxEvent) -> None:
+            self.values.append(event)
+            if event.event_type == "snapshot.created":
+                raise RuntimeError("sink unavailable")
+
+    store = RecordingStore()
+    events = FailingSnapshotEvents()
+    session, workspace, _, _ = make_session(
+        event_sink=events,
+        snapshot_store=store,
+    )
+
+    async def export() -> WorkspaceSnapshotData:
+        return WorkspaceSnapshotData(
+            encoded=b"workspace",
+            schema_version=1,
+            integrity_hash=workspace.hash,
+            workspace_revision=workspace.revision,
+            root_hash=workspace.hash,
+        )
+
+    workspace.export = export  # type: ignore[method-assign]
+    await session.start()
+
+    with pytest.raises(SessionEventDeliveryFailed):
+        await session.create_snapshot(CreateSnapshotRequest())
+
+    assert store.saved is not None
+    assert [event.event_type for event in events.values[-3:]] == [
+        "operation.started",
+        "snapshot.created",
+        "operation.failed",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_snapshot_event_timeout_preserves_budget_for_failed_terminal() -> None:
+    class RecordingStore:
+        def __init__(self) -> None:
+            self.saved: SandboxSnapshot | None = None
+
+        @property
+        def process_local(self) -> bool:
+            return True
+
+        async def save(self, snapshot: SandboxSnapshot) -> SnapshotRef:
+            self.saved = snapshot
+            return SnapshotRef(snapshot.snapshot_id)
+
+        async def load(self, snapshot_ref: SnapshotRef) -> SandboxSnapshot:
+            raise AssertionError(snapshot_ref)
+
+    class BlockingSnapshotEvents:
+        def __init__(self) -> None:
+            self.values: list[SandboxEvent] = []
+
+        async def emit(self, event: SandboxEvent) -> None:
+            self.values.append(event)
+            if event.event_type == "snapshot.created":
+                await asyncio.sleep(10)
+
+    store = RecordingStore()
+    events = BlockingSnapshotEvents()
+    session, workspace, _, _ = make_session(
+        event_sink=events,
+        snapshot_store=store,
+    )
+
+    async def export() -> WorkspaceSnapshotData:
+        return WorkspaceSnapshotData(
+            encoded=b"workspace",
+            schema_version=1,
+            integrity_hash=workspace.hash,
+            workspace_revision=workspace.revision,
+            root_hash=workspace.hash,
+        )
+
+    workspace.export = export  # type: ignore[method-assign]
+    await session.start()
+
+    with pytest.raises(SessionEventDeliveryFailed):
+        await session.create_snapshot(
+            CreateSnapshotRequest(
+                limits=OperationLimits(
+                    timeout_seconds=0.3,
+                    terminal_event_reserve_seconds=0.2,
+                )
+            )
+        )
+
+    assert store.saved is not None
+    assert [event.event_type for event in events.values[-3:]] == [
+        "operation.started",
+        "snapshot.created",
+        "operation.failed",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_best_effort_snapshot_event_failure_keeps_operation_successful() -> None:
+    diagnostics: list[EventDeliveryDiagnostic] = []
+
+    class RecordingStore:
+        def __init__(self) -> None:
+            self.saved: SandboxSnapshot | None = None
+
+        @property
+        def process_local(self) -> bool:
+            return True
+
+        async def save(self, snapshot: SandboxSnapshot) -> SnapshotRef:
+            self.saved = snapshot
+            return SnapshotRef(snapshot.snapshot_id)
+
+        async def load(self, snapshot_ref: SnapshotRef) -> SandboxSnapshot:
+            raise AssertionError(snapshot_ref)
+
+    class FailingSnapshotSink:
+        def __init__(self) -> None:
+            self.values: list[SandboxEvent] = []
+
+        async def emit(self, event: SandboxEvent) -> None:
+            self.values.append(event)
+            if event.event_type == "snapshot.created":
+                raise RuntimeError("sink unavailable")
+
+    class Diagnostics:
+        def report(self, diagnostic: EventDeliveryDiagnostic) -> None:
+            diagnostics.append(diagnostic)
+
+    store = RecordingStore()
+    sink = FailingSnapshotSink()
+    dispatcher = EventDispatcher(
+        sink,
+        delivery_policy=EventDeliveryPolicy(
+            mode=EventDeliveryMode.BEST_EFFORT,
+            max_pending_events=16,
+        ),
+        diagnostic_handler=Diagnostics(),
+    )
+    session, workspace, _, _ = make_session(
+        event_sink=dispatcher,
+        snapshot_store=store,
+    )
+
+    async def export() -> WorkspaceSnapshotData:
+        return WorkspaceSnapshotData(
+            encoded=b"workspace",
+            schema_version=1,
+            integrity_hash=workspace.hash,
+            workspace_revision=workspace.revision,
+            root_hash=workspace.hash,
+        )
+
+    workspace.export = export  # type: ignore[method-assign]
+    await session.start()
+    result = await session.create_snapshot(CreateSnapshotRequest())
+    await dispatcher.flush()
+
+    assert store.saved is not None
+    assert result.snapshot_ref == SnapshotRef(store.saved.snapshot_id)
+    assert [event.event_type for event in sink.values[-3:]] == [
+        "operation.started",
+        "snapshot.created",
+        "operation.completed",
+    ]
+    assert len(diagnostics) == 1
+    assert diagnostics[0].failure_code == "event_delivery_failed"
+
+    await session.close()
+    await dispatcher.flush()
+    await dispatcher.close()
+
+
+@pytest.mark.asyncio
+async def test_best_effort_start_failure_does_not_change_session_or_operation() -> None:
+    diagnostics: list[EventDeliveryDiagnostic] = []
+
+    class FailingStartSink:
+        def __init__(self) -> None:
+            self.values: list[SandboxEvent] = []
+
+        async def emit(self, event: SandboxEvent) -> None:
+            self.values.append(event)
+            if event.event_type in {"sandbox.started", "operation.started"}:
+                raise RuntimeError("sink unavailable")
+
+    class Diagnostics:
+        def report(self, diagnostic: EventDeliveryDiagnostic) -> None:
+            diagnostics.append(diagnostic)
+
+    sink = FailingStartSink()
+    dispatcher = EventDispatcher(
+        sink,
+        delivery_policy=EventDeliveryPolicy(
+            mode=EventDeliveryMode.BEST_EFFORT,
+            max_pending_events=8,
+        ),
+        diagnostic_handler=Diagnostics(),
+    )
+    session, _, _, _ = make_session(event_sink=dispatcher)
+
+    await session.start()
+    result = await session.read_file(ReadFileRequest(path="file"))
+    await dispatcher.flush()
+
+    assert session.state is SandboxSessionState.RUNNING
+    assert result.content == "line"
+    assert [event.event_type for event in sink.values] == [
+        "sandbox.started",
+        "operation.started",
+        "operation.completed",
+    ]
+    assert len(diagnostics) == 2
+
+    await session.close()
+    await dispatcher.flush()
+    await dispatcher.close()
+
+
+@pytest.mark.asyncio
+async def test_session_never_owns_event_sink_flush_or_close() -> None:
+    class OwnedSink:
+        def __init__(self) -> None:
+            self.flush_calls = 0
+            self.close_calls = 0
+
+        async def emit(self, event: SandboxEvent) -> None:
+            _ = event
+
+        async def flush(self) -> None:
+            self.flush_calls += 1
+
+        async def close(self) -> None:
+            self.close_calls += 1
+
+    sink = OwnedSink()
+    session, _, _, _ = make_session(event_sink=sink)
+
+    await session.start()
+    await session.close()
+
+    assert sink.flush_calls == 0
+    assert sink.close_calls == 0
 
 
 @pytest.mark.asyncio

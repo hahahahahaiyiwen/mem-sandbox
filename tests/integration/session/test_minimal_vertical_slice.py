@@ -127,8 +127,17 @@ async def test_minimal_session_vertical_slice() -> None:
     operation_events = [
         event for event in events.events if event.event_type.startswith("operation.")
     ]
+    snapshot_events = [event for event in events.events if event.event_type.startswith("snapshot.")]
     assert [event.sequence for event in events.events] == list(range(1, len(events.events) + 1))
     assert len(operation_events) == 18
+    assert [event.event_type for event in snapshot_events] == [
+        "snapshot.created",
+        "snapshot.restored",
+    ]
+    for snapshot_event in snapshot_events:
+        event_index = events.events.index(snapshot_event)
+        assert events.events[event_index - 1].event_type == "operation.started"
+        assert events.events[event_index + 1].event_type == "operation.completed"
     assert all(
         operation_events[index].event_type == "operation.started"
         and operation_events[index + 1].event_type == "operation.completed"

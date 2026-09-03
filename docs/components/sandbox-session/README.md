@@ -379,26 +379,28 @@ identity and operation ordering when reasoning across that boundary.
 
 ## Event delivery
 
-Milestone 3 uses required delivery. The concrete `NoOpEventSink` is a real
+Required delivery remains the default. The concrete `NoOpEventSink` is a real
 accept-and-discard implementation whose `emit` operation succeeds.
 
 The session constructs immutable event envelopes and assigns the session-local monotonic
 sequence number. The sink only accepts an already-formed event; a shared sink never owns
 session sequencing.
 
-The exact Milestone 3 event set is:
+The session-owned event set is:
 
 - lifecycle: `sandbox.started`, `sandbox.closing`, `sandbox.closed`, `sandbox.failed`;
 - operation start: `operation.started`;
 - exactly one terminal event: `operation.completed`, `operation.failed`,
-  `operation.cancelled`, or `operation.timed_out`.
+  `operation.cancelled`, or `operation.timed_out`;
+- post-commit snapshots: `snapshot.created`, `snapshot.restored`.
 
 Policy-decision and secret events remain deferred with composed policy and functional
-secret resolution. Dedicated snapshot events may be added independently. Snapshot
-operations are represented by their operation kind in the minimal event envelope.
+secret resolution. Dedicated snapshot events use a post-commit hook before
+`operation.completed`. `sandbox.created` and `sandbox.deleted` remain owned by the
+future `SandboxService`.
 
-For operation events, failure to deliver a required event emits no further event for that
-operation:
+For operation start and terminal events, failure to deliver the required event emits no
+further event for that operation:
 
 - if `operation.started` delivery fails, no terminal event is attempted;
 - if terminal delivery fails, no replacement failure event is attempted.
@@ -438,8 +440,18 @@ timeout scope.
   mutation.
 - Event delivery never returns a success-shaped fallback.
 
-Later best-effort delivery requires an explicit diagnostic failure handler and belongs to
-the event-system completion milestone.
+Best-effort delivery is available through a per-session owner-managed dispatcher. The
+session still consumes only `emit()`.
+Best-effort dispatch prepares and enqueues events without waiting for the concrete sink,
+requires an explicit synchronous diagnostic handler, and never changes operation or
+lifecycle outcomes. If that handler raises, the secondary failure is reported through
+the asyncio loop exception handler.
+
+Snapshot-specific events are emitted after snapshot persistence or restore publication,
+but before `operation.completed`, using the first half of the terminal-event reserve.
+The second half remains available for the final operation event attempt. A required
+snapshot-event failure produces `operation.failed` while the already committed snapshot
+or restored state remains committed.
 
 ## Close and resource cleanup
 
