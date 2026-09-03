@@ -94,12 +94,14 @@ async def _exec_internal(
     timeout: float | None = None,
 ) -> ExecResult: ...
 
+
 async def read(
     self,
     path: Path,
     *,
     user: str | User | None = None,
 ) -> io.IOBase: ...
+
 
 async def write(
     self,
@@ -109,9 +111,12 @@ async def write(
     user: str | User | None = None,
 ) -> None: ...
 
+
 async def running(self) -> bool: ...
 
+
 async def persist_workspace(self) -> io.IOBase: ...
+
 
 async def hydrate_workspace(self, data: io.IOBase) -> None: ...
 ```
@@ -133,12 +138,15 @@ async def create(
     options: ClientOptionsT,
 ) -> SandboxSession: ...
 
+
 async def delete(self, session: SandboxSession) -> SandboxSession: ...
+
 
 async def resume(
     self,
     state: SandboxSessionState,
 ) -> SandboxSession: ...
+
 
 def deserialize_session_state(
     self,
@@ -441,9 +449,7 @@ class InMemorySandboxSession(BaseSandboxSession):
     async def _probe_workspace_root_for_preserved_resume(self) -> bool:
         if not self._workspace_state_preserved_on_start():
             return False
-        ready = await self._core.is_directory(
-            sandbox_path_str(self._workspace_root_path())
-        )
+        ready = await self._core.is_directory(sandbox_path_str(self._workspace_root_path()))
         if ready:
             self._mark_workspace_root_ready_from_probe()
         return ready
@@ -458,8 +464,7 @@ class InMemorySandboxSession(BaseSandboxSession):
     ) -> ExecResult:
         result = await self._core.execute(
             tuple(
-                sandbox_path_str(part) if isinstance(part, Path) else str(part)
-                for part in command
+                sandbox_path_str(part) if isinstance(part, Path) else str(part) for part in command
             ),
             timeout_seconds=timeout,
         )
@@ -605,9 +610,7 @@ class InMemorySandboxSession(BaseSandboxSession):
         )
 
 
-class InMemorySandboxClient(
-    BaseSandboxClient[InMemorySandboxClientOptions | None]
-):
+class InMemorySandboxClient(BaseSandboxClient[InMemorySandboxClientOptions | None]):
     backend_id = "in_memory"
     supports_default_options = True
 
@@ -653,10 +656,7 @@ class InMemorySandboxClient(
         state: SandboxSessionState,
     ) -> SandboxSession:
         if not isinstance(state, InMemorySandboxSessionState):
-            raise TypeError(
-                "InMemorySandboxClient.resume expects "
-                "InMemorySandboxSessionState"
-            )
+            raise TypeError("InMemorySandboxClient.resume expects InMemorySandboxSessionState")
         state.assert_path_grants_rebound()
 
         core = await self._store.attach(state.workspace_id)
@@ -675,9 +675,7 @@ class InMemorySandboxClient(
     async def delete(self, session: SandboxSession) -> SandboxSession:
         state = session.state
         if not isinstance(state, InMemorySandboxSessionState):
-            raise TypeError(
-                "InMemorySandboxClient.delete expects an in-memory session"
-            )
+            raise TypeError("InMemorySandboxClient.delete expects an in-memory session")
         await self._store.delete(state.workspace_id)
         return session
 
@@ -763,11 +761,13 @@ async def persist(
     dependencies: Dependencies | None = None,
 ) -> None: ...
 
+
 async def restore(
     self,
     *,
     dependencies: Dependencies | None = None,
 ) -> io.IOBase: ...
+
 
 async def restorable(
     self,
@@ -828,9 +828,7 @@ try:
         result = await Runner.run(
             agent,
             "Inspect the workspace.",
-            run_config=RunConfig(
-                sandbox=SandboxRunConfig(session=sandbox)
-            ),
+            run_config=RunConfig(sandbox=SandboxRunConfig(session=sandbox)),
         )
 finally:
     await client.delete(sandbox)

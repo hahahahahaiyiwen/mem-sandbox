@@ -81,9 +81,7 @@ class SessionExecuteRequest:
         if len(set(names)) != len(names):
             raise ValueError("secret_environment contains duplicate environment names")
         if len(self.secret_environment) > self.command_limits.max_secret_bindings:
-            raise ValueError(
-                "secret_environment exceeds command_limits.max_secret_bindings"
-            )
+            raise ValueError("secret_environment exceeds command_limits.max_secret_bindings")
         unique_refs = {binding.secret_ref for binding in self.secret_environment}
         if len(unique_refs) > self.command_limits.max_secret_bindings:
             raise ValueError(

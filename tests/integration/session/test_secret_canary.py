@@ -59,9 +59,7 @@ class SecretConsumerCommand:
         request: CommandRequest,
         context: CommandContext,
     ) -> CommandResult:
-        return CommandResult.success(
-            stdout=f"{context.environment.get('DEPLOY_TOKEN')}\n"
-        )
+        return CommandResult.success(stdout=f"{context.environment.get('DEPLOY_TOKEN')}\n")
 
 
 @pytest.mark.asyncio
@@ -109,9 +107,7 @@ async def test_secret_canary_stays_out_of_persistent_and_observable_boundaries()
         clock=clock,
         uuid_generator=uuids,
     )
-    binding = (
-        SessionSecretEnvironmentBinding("DEPLOY_TOKEN", SECRET_REF),
-    )
+    binding = (SessionSecretEnvironmentBinding("DEPLOY_TOKEN", SECRET_REF),)
     await session.start()
 
     visible = await session.execute(
@@ -147,9 +143,7 @@ async def test_secret_canary_stays_out_of_persistent_and_observable_boundaries()
     collected_events = await events.query()
     workspace_entries = await workspace.list(SandboxPath.root())
 
-    assert visible.stdout == (
-        "[REDACTED]\nDEPLOY_TOKEN=[REDACTED]\nPWD=/workspace\n"
-    )
+    assert visible.stdout == ("[REDACTED]\nDEPLOY_TOKEN=[REDACTED]\nPWD=/workspace\n")
     assert redirected.stdout == ""
     assert captured.content == "[REDACTED]"
     assert persisted_content == "[REDACTED]\n"

@@ -292,9 +292,7 @@ class SandboxSession:
                     )
 
                 redactor = ProtectedValueRedactor(
-                    text_values=tuple(
-                        lease.value.reveal_text() for _, lease in leases
-                    )
+                    text_values=tuple(lease.value.reveal_text() for _, lease in leases)
                 )
                 protection = _OperationValueProtection(redactor)
                 lease_by_ref = dict(leases)
@@ -343,9 +341,7 @@ class SandboxSession:
 
             cleanup_failed = False
             try:
-                cleanup_failed = await _close_secret_leases(
-                    tuple(lease for _, lease in leases)
-                )
+                cleanup_failed = await _close_secret_leases(tuple(lease for _, lease in leases))
             except BaseException as cleanup_interruption:
                 if primary is None:
                     primary = cleanup_interruption
@@ -365,9 +361,7 @@ class SandboxSession:
                             "secret-bearing execute was cancelled"
                         )
                         if cleanup_failed:
-                            safe_cancellation.add_note(
-                                "secret lease cleanup also failed"
-                            )
+                            safe_cancellation.add_note("secret lease cleanup also failed")
                         raise safe_cancellation from None
                     protected_failure = SessionFailed(
                         "secret-bearing execute failed with protected error data",
@@ -1373,8 +1367,7 @@ def _exception_graph_contains_protected(
             return True
         notes = getattr(current, "__notes__", ())
         if any(
-            not isinstance(note, str) or protection.contains_protected_text(note)
-            for note in notes
+            not isinstance(note, str) or protection.contains_protected_text(note) for note in notes
         ):
             return True
         if current.__cause__ is not None:

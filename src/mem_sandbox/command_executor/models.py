@@ -188,8 +188,7 @@ class CommandEnvironmentView:
         for entry in self.overlay.entries:
             current[entry.name] = entry.value.reveal_text()
         return tuple(
-            CommandEnvironmentViewEntry(name, value)
-            for name, value in sorted(current.items())
+            CommandEnvironmentViewEntry(name, value) for name, value in sorted(current.items())
         )
 
     def is_overlay_name(self, name: str) -> bool:
@@ -368,12 +367,8 @@ class CommandContext:
         elif isinstance(environment_object, CommandEnvironmentView):
             environment_view = environment_object
         else:
-            raise TypeError(
-                "environment must be a CommandEnvironment or CommandEnvironmentView"
-            )
-        resolved_protection = (
-            NoOpCommandValueProtection() if protection is None else protection
-        )
+            raise TypeError("environment must be a CommandEnvironment or CommandEnvironmentView")
+        resolved_protection = NoOpCommandValueProtection() if protection is None else protection
         for method in ("redact_text", "redact_bytes", "contains_protected_text"):
             if not callable(getattr(resolved_protection, method, None)):
                 raise TypeError("protection must implement CommandValueProtection")

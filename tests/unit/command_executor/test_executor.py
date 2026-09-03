@@ -121,9 +121,7 @@ async def test_quotes_empty_arguments_expansion_and_sequencing() -> None:
 @pytest.mark.asyncio
 async def test_overlay_is_visible_internally_but_redacted_before_results() -> None:
     workspace = MemoryWorkspace()
-    overlay = CommandEnvironmentOverlay(
-        (CommandEnvironmentOverlayEntry("TOKEN", OverlayValue()),)
-    )
+    overlay = CommandEnvironmentOverlay((CommandEnvironmentOverlayEntry("TOKEN", OverlayValue()),))
 
     result = await create_default_executor(workspace, workspace).execute(
         request("env", overlay=overlay),
@@ -151,9 +149,7 @@ async def test_pipeline_receives_redacted_not_original_protected_output() -> Non
             request: CommandRequest,
             context: CommandContext,
         ) -> CommandResult:
-            return CommandResult.success(
-                stdout=f"{context.environment.get('TOKEN')}\n"
-            )
+            return CommandResult.success(stdout=f"{context.environment.get('TOKEN')}\n")
 
     class SinkCommand:
         descriptor = CommandDescriptor("sink", (), "sink", "sink", True, True, True)
@@ -176,9 +172,7 @@ async def test_pipeline_receives_redacted_not_original_protected_output() -> Non
         ),
         workspace,
     )
-    overlay = CommandEnvironmentOverlay(
-        (CommandEnvironmentOverlayEntry("TOKEN", OverlayValue()),)
-    )
+    overlay = CommandEnvironmentOverlay((CommandEnvironmentOverlayEntry("TOKEN", OverlayValue()),))
 
     result = await executor.execute(
         request("source | sink", overlay=overlay),
@@ -210,18 +204,14 @@ async def test_short_protected_values_are_conservatively_redacted() -> None:
     )
 
     result = await VirtualCommandExecutor(
-        CommandRegistry(
-            (*create_first_wave_commands(workspace, workspace), SourceCommand())
-        ),
+        CommandRegistry((*create_first_wave_commands(workspace, workspace), SourceCommand())),
         workspace,
     ).execute(
         request("source", overlay=overlay),
         CommandExecutionContext(protection=Protection("x")),
     )
 
-    assert result.stdout == (
-        "prefi[REDACTED][REDACTED]suffi[REDACTED]\n"
-    )
+    assert result.stdout == ("prefi[REDACTED][REDACTED]suffi[REDACTED]\n")
     assert "x" not in result.stdout
 
 
@@ -270,9 +260,7 @@ async def test_protected_paths_and_redirection_fail_before_workspace_mutation(
     command: str,
 ) -> None:
     workspace = MemoryWorkspace()
-    overlay = CommandEnvironmentOverlay(
-        (CommandEnvironmentOverlayEntry("TOKEN", OverlayValue()),)
-    )
+    overlay = CommandEnvironmentOverlay((CommandEnvironmentOverlayEntry("TOKEN", OverlayValue()),))
 
     result = await create_default_executor(workspace, workspace).execute(
         request(command, overlay=overlay),
@@ -287,9 +275,7 @@ async def test_protected_paths_and_redirection_fail_before_workspace_mutation(
 
 @pytest.mark.asyncio
 async def test_all_multi_target_mutations_preflight_protected_operands() -> None:
-    overlay = CommandEnvironmentOverlay(
-        (CommandEnvironmentOverlayEntry("TOKEN", OverlayValue()),)
-    )
+    overlay = CommandEnvironmentOverlay((CommandEnvironmentOverlayEntry("TOKEN", OverlayValue()),))
     context = CommandExecutionContext(protection=Protection())
 
     for command in ('mkdir safe "$TOKEN"', 'touch safe "$TOKEN"'):
@@ -311,16 +297,14 @@ async def test_all_multi_target_mutations_preflight_protected_operands() -> None
         context,
     )
     assert result.failure_code is CommandFailureCode.PROTECTED_VALUE_REJECTED
-    assert [entry.path.name for entry in await workspace.list(SandboxPath.root())] == [
-        "existing"
-    ]
+    assert [entry.path.name for entry in await workspace.list(SandboxPath.root())] == ["existing"]
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "command",
     (
-        'export TOKEN=replacement',
+        "export TOKEN=replacement",
         "unset TOKEN",
         'export OTHER="$TOKEN"',
     ),
@@ -329,9 +313,7 @@ async def test_overlay_names_and_protected_environment_values_cannot_persist(
     command: str,
 ) -> None:
     workspace = MemoryWorkspace()
-    overlay = CommandEnvironmentOverlay(
-        (CommandEnvironmentOverlayEntry("TOKEN", OverlayValue()),)
-    )
+    overlay = CommandEnvironmentOverlay((CommandEnvironmentOverlayEntry("TOKEN", OverlayValue()),))
 
     result = await create_default_executor(workspace, workspace).execute(
         request(command, overlay=overlay),
@@ -412,9 +394,7 @@ async def test_protected_arguments_cannot_drive_command_semantics_or_control_flo
     assert result.failure_code is CommandFailureCode.PROTECTED_VALUE_REJECTED
     assert result.stdout == ""
     assert secret not in result.stderr
-    assert [entry.path.name for entry in await workspace.list(SandboxPath.root())] == [
-        "candidates"
-    ]
+    assert [entry.path.name for entry in await workspace.list(SandboxPath.root())] == ["candidates"]
 
 
 @pytest.mark.asyncio

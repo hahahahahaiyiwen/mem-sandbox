@@ -260,10 +260,7 @@ class VirtualCommandExecutor:
         final_argv: tuple[str, ...] | None = None
         redirection_admitted = True
         is_pipeline = len(item.stages) > 1
-        if (
-            destination is not None
-            and protection.contains_protected_text(destination)
-        ):
+        if destination is not None and protection.contains_protected_text(destination):
             first_failure = CommandResult(
                 1,
                 CommandFailureCode.PROTECTED_VALUE_REJECTED,
@@ -344,8 +341,7 @@ class VirtualCommandExecutor:
                 first_failure
                 if (
                     first_failure is not None
-                    and first_failure.failure_code
-                    is CommandFailureCode.PROTECTED_VALUE_REJECTED
+                    and first_failure.failure_code is CommandFailureCode.PROTECTED_VALUE_REJECTED
                 )
                 else CommandResult(
                     2,
@@ -539,19 +535,15 @@ class VirtualCommandExecutor:
         environment: CommandEnvironmentView,
     ) -> CommandResult:
         protection = execution_context.protection
-        if (
-            stage.resulting_cwd is not None
-            and protection.contains_protected_text(stage.resulting_cwd.value)
+        if stage.resulting_cwd is not None and protection.contains_protected_text(
+            stage.resulting_cwd.value
         ):
             return VirtualCommandExecutor._protected_failure(command_name, execution_context)
         for change in stage.environment_changes:
             if (
                 protection.contains_protected_text(change.name)
                 or environment.is_overlay_name(change.name)
-                or (
-                change.value is not None
-                and protection.contains_protected_text(change.value)
-                )
+                or (change.value is not None and protection.contains_protected_text(change.value))
             ):
                 return VirtualCommandExecutor._protected_failure(
                     command_name,

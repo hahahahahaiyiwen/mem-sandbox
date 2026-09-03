@@ -1141,9 +1141,7 @@ async def test_secret_policy_denial_calls_neither_broker_nor_executor() -> None:
         await session.execute(
             SessionExecuteRequest(
                 command="env",
-                secret_environment=(
-                    SessionSecretEnvironmentBinding("TOKEN", secret_ref),
-                ),
+                secret_environment=(SessionSecretEnvironmentBinding("TOKEN", secret_ref),),
             )
         )
 
@@ -1249,9 +1247,7 @@ async def test_secret_cleanup_failure_prevents_transient_state_commit() -> None:
         await session.execute(
             SessionExecuteRequest(
                 command="env",
-                secret_environment=(
-                    SessionSecretEnvironmentBinding("TOKEN", secret_ref),
-                ),
+                secret_environment=(SessionSecretEnvironmentBinding("TOKEN", secret_ref),),
             )
         )
 
@@ -1306,9 +1302,7 @@ async def test_secret_leases_close_on_timeout() -> None:
         await session.execute(
             SessionExecuteRequest(
                 command="env",
-                secret_environment=(
-                    SessionSecretEnvironmentBinding("TOKEN", secret_ref),
-                ),
+                secret_environment=(SessionSecretEnvironmentBinding("TOKEN", secret_ref),),
                 limits=OperationLimits(
                     timeout_seconds=0.2,
                     terminal_event_reserve_seconds=0.1,
@@ -1369,9 +1363,7 @@ async def test_secret_leases_close_on_cooperative_and_native_cancellation(
         session.execute(
             SessionExecuteRequest(
                 command="env",
-                secret_environment=(
-                    SessionSecretEnvironmentBinding("TOKEN", secret_ref),
-                ),
+                secret_environment=(SessionSecretEnvironmentBinding("TOKEN", secret_ref),),
                 cancellation=cancellation,
             )
         )
@@ -1429,9 +1421,7 @@ async def test_primary_and_cleanup_failures_publish_no_secret_in_traceback_or_no
         await session.execute(
             SessionExecuteRequest(
                 command="env",
-                secret_environment=(
-                    SessionSecretEnvironmentBinding("TOKEN", secret_ref),
-                ),
+                secret_environment=(SessionSecretEnvironmentBinding("TOKEN", secret_ref),),
             )
         )
 
@@ -1483,9 +1473,7 @@ async def test_secret_in_nested_exception_graph_is_replaced_before_publication()
         await session.execute(
             SessionExecuteRequest(
                 command="env",
-                secret_environment=(
-                    SessionSecretEnvironmentBinding("TOKEN", secret_ref),
-                ),
+                secret_environment=(SessionSecretEnvironmentBinding("TOKEN", secret_ref),),
             )
         )
 
@@ -1536,9 +1524,7 @@ async def test_secret_in_native_cancellation_graph_is_sanitized() -> None:
         await session.execute(
             SessionExecuteRequest(
                 command="env",
-                secret_environment=(
-                    SessionSecretEnvironmentBinding("TOKEN", secret_ref),
-                ),
+                secret_environment=(SessionSecretEnvironmentBinding("TOKEN", secret_ref),),
             )
         )
 

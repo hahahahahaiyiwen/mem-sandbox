@@ -171,7 +171,9 @@ class BoundedSecretBroker:
         try:
             offset = now.utcoffset()
         except Exception:
-            raise SecretSourceUnavailable("secret broker clock returned an invalid datetime") from None
+            raise SecretSourceUnavailable(
+                "secret broker clock returned an invalid datetime"
+            ) from None
         if now.tzinfo is None or offset is None:
             raise SecretSourceUnavailable("secret broker clock must return an aware datetime")
         if offset != timedelta(0):
