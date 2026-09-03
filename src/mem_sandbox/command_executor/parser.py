@@ -12,6 +12,7 @@ from mem_sandbox.command_executor.errors import (
 )
 from mem_sandbox.command_executor.models import (
     CommandEnvironment,
+    CommandEnvironmentView,
     CommandStage,
     CommandWord,
     Connector,
@@ -259,7 +260,7 @@ def parse_execution_plan(command: str) -> ExecutionPlan:
 
 def expand_word(
     word: CommandWord,
-    environment: CommandEnvironment,
+    environment: CommandEnvironment | CommandEnvironmentView,
     cwd: SandboxPath,
 ) -> str:
     """Expand approved variables without word splitting or globbing."""
@@ -279,7 +280,7 @@ def _validate_word_expansions(word: CommandWord) -> None:
 
 def _expand_fragment(
     text: str,
-    environment: CommandEnvironment,
+    environment: CommandEnvironment | CommandEnvironmentView,
     cwd: SandboxPath,
 ) -> str:
     return _scan_expansion(text, environment, cwd)
@@ -287,7 +288,7 @@ def _expand_fragment(
 
 def _scan_expansion(
     text: str,
-    environment: CommandEnvironment | None,
+    environment: CommandEnvironment | CommandEnvironmentView | None,
     cwd: SandboxPath | None,
 ) -> str:
     output: list[str] = []
@@ -328,7 +329,7 @@ def _scan_expansion(
 
 def _environment_value(
     name: str,
-    environment: CommandEnvironment | None,
+    environment: CommandEnvironment | CommandEnvironmentView | None,
     cwd: SandboxPath | None,
 ) -> str:
     if environment is None:

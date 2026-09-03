@@ -170,7 +170,7 @@ Detailed design:
 | Sandbox session | Agent-facing operations, lifecycle, coordination, and composition | [Sandbox session](./components/sandbox-session/README.md) |
 | Workspace | Virtual paths, files, directories, metadata, quotas, and atomic mutations | [Workspace](./components/workspace/README.md) |
 | Command executor | Parsing and executing the constrained command language | [Command executor](./components/command-executor/README.md) |
-| Policy admission | Minimal explicit per-operation decision seam; composed authorization deferred until a concrete trust boundary exists | [Policy admission](./components/policy-engine/README.md) |
+| Policy admission | Existing minimal explicit per-operation decision seam; issue #20 extends its request facts with secret references evaluated before source access, while composed authorization remains deferred | [Policy admission](./components/policy-engine/README.md) |
 | Secret broker | Resolving approved secret references into scoped leases | [Secret broker](./components/secret-broker/README.md) |
 | Event sink | Structured operation, audit, and lifecycle event delivery | [Event sink](./components/event-sink/README.md) |
 | Snapshot store | Durable or process-local storage of versioned sandbox snapshots | [Snapshot store](./components/snapshot-store/README.md) |
@@ -256,11 +256,15 @@ session deletion remain host-controlled by default.
 5. Command parsing is a stateless capability owned by the command-executor boundary.
    A factory may share one immutable parser across executors, but `SandboxService` and
    `SandboxSession` do not parse or reinterpret command language.
-6. The minimal policy-admission collaborator returns an explicit decision and does not
-   mutate workspace state. Composed authorization remains deferred; workspace,
+6. The minimal policy-admission collaborator returns an explicit decision and may
+   inspect issue #20 secret references before source access. It never receives values or
+   mutates workspace state. Composed authorization remains deferred; workspace,
    command-executor, and session invariants stay authoritative in their owning modules.
-7. `SecretBroker` returns scoped leases and does not persist secrets in workspace or
-   snapshot state.
+   `mem_sandbox.policy` may depend on the immutable `SecretRef` data contract but not on
+   source, broker, lease, or value implementations.
+7. `SecretBroker` returns scoped leases. `SandboxSession` owns lease ordering and
+   cleanup, while `CommandExecutor` owns the ephemeral overlay and protected persistence
+   guards. No secret enters workspace, session, result, event, or snapshot state.
 8. `EventSink` observes completed decisions and operations; event failures follow an
    explicit delivery policy.
 9. `SnapshotStore` stores and retrieves snapshots and consumes workspace snapshot data

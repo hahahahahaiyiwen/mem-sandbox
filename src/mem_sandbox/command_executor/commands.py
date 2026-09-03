@@ -64,6 +64,24 @@ def _invalid(command: str, message: str) -> CommandResult:
     )
 
 
+def _protected_value(command: str) -> CommandResult:
+    return _failure(
+        command,
+        "protected values cannot be persisted",
+        code=CommandFailureCode.PROTECTED_VALUE_REJECTED,
+    )
+
+
+def _reject_protected_operands(
+    command: str,
+    operands: tuple[str, ...],
+    context: CommandContext,
+) -> CommandResult | None:
+    if any(context.protection.contains_protected_text(value) for value in operands):
+        return _protected_value(command)
+    return None
+
+
 def _reject_stdin(command: str, request: CommandRequest) -> CommandResult | None:
     if request.stdin_connected or request.stdin:
         return _invalid(command, "stdin is not accepted")
@@ -135,6 +153,8 @@ async def _read_inputs(
         if operand == "-":
             output.append((None if not operands else "-", request.stdin))
             continue
+        if rejected := _reject_protected_operands(command, (operand,), context):
+            return output, rejected
         try:
             path = reader.resolve_path(operand, cwd=context.cwd)
             output.append((operand, (await reader.read_text(path)).content))
@@ -174,6 +194,8 @@ class CdCommand:
             return _invalid("cd", "usage: cd PATH")
         if arguments[0].startswith("-") and request.argv[1] != "--":
             return _invalid("cd", "usage: cd PATH")
+        if rejected := _reject_protected_operands("cd", (arguments[0],), context):
+            return rejected
         try:
             path = self._reader.resolve_path(arguments[0], cwd=context.cwd)
             entry = await self._reader.stat(path)
@@ -218,6 +240,8 @@ class LsCommand:
         sections: list[str] = []
         multiple = len(operands) > 1
         for operand in operands:
+            if rejected := _reject_protected_operands("ls", (operand,), context):
+                return rejected
             try:
                 path = self._reader.resolve_path(operand, cwd=context.cwd)
                 entry = await self._reader.stat(path)
@@ -267,6 +291,8 @@ class CatCommand:
             if value == "-":
                 output.append(request.stdin)
                 continue
+            if rejected := _reject_protected_operands("cat", (value,), context):
+                return rejected
             try:
                 path = self._reader.resolve_path(value, cwd=context.cwd)
                 output.append((await self._reader.read_text(path)).content)
@@ -325,6 +351,8 @@ class MkdirCommand:
             not allow_option_paths and any(value.startswith("-") for value in arguments)
         ):
             return _invalid("mkdir", "usage: mkdir [-p] PATH...")
+        if rejected := _reject_protected_operands("mkdir", tuple(arguments), context):
+            return rejected
 
         for value in arguments:
             try:
@@ -371,6 +399,8 @@ class TouchCommand:
             not allow_option_paths and any(value.startswith("-") for value in arguments)
         ):
             return _invalid("touch", "usage: touch FILE...")
+        if rejected := _reject_protected_operands("touch", tuple(arguments), context):
+            return rejected
         for value in arguments:
             try:
                 path = self._reader.resolve_path(value, cwd=context.cwd)
@@ -419,6 +449,8 @@ class RmCommand:
                 paths.append(argument)
         if not paths:
             return _invalid("rm", "usage: rm [-rR] [-f] PATH...")
+        if rejected := _reject_protected_operands("rm", tuple(paths), context):
+            return rejected
         for value in paths:
             try:
                 path = self._reader.resolve_path(value, cwd=context.cwd)
@@ -591,6 +623,8 @@ class GrepCommand:
                 if operand == "-":
                     sources.append(("(standard input)", request.stdin))
                     continue
+                if rejected := _reject_protected_operands("grep", (operand,), context):
+                    return rejected
                 root = self._reader.resolve_path(operand, cwd=context.cwd)
                 entry = await self._reader.stat(root)
                 if entry.kind is NodeKind.DIRECTORY:
@@ -687,6 +721,8 @@ class FindCommand:
                     "find",
                     "usage: find [PATH] [-type f|d] [-name GLOB] [-maxdepth N]",
                 )
+        if rejected := _reject_protected_operands("find", (operand,), context):
+            return rejected
         try:
             root = self._reader.resolve_path(operand, cwd=context.cwd)
             entries = await _walk(self._reader, root, max_depth=max_depth)
@@ -935,6 +971,12 @@ async def _transfer(
     recursive: bool,
     move: bool,
 ) -> CommandResult:
+    if rejected := _reject_protected_operands(
+        command,
+        (*sources, destination_operand),
+        context,
+    ):
+        return rejected
     try:
         destination = reader.resolve_path(destination_operand, cwd=context.cwd)
         try:
@@ -1011,9 +1053,13 @@ class ExportCommand:
         changes: list[EnvironmentChange] = []
         try:
             for argument in arguments:
+                if context.protection.contains_protected_text(argument):
+                    return _protected_value("export")
                 name, separator, value = argument.partition("=")
                 if not separator or name == "PWD":
                     return _invalid("export", "usage: export NAME=VALUE...")
+                if context.environment.is_overlay_name(name):
+                    return _protected_value("export")
                 changes.append(EnvironmentChange(name, value))
         except (TypeError, ValueError):
             return _invalid("export", "usage: export NAME=VALUE...")
@@ -1035,7 +1081,11 @@ class UnsetCommand:
             arguments.pop(0)
         if not arguments or "PWD" in arguments:
             return _invalid("unset", "usage: unset NAME...")
+        if any(context.protection.contains_protected_text(name) for name in arguments):
+            return _protected_value("unset")
         try:
+            if any(context.environment.is_overlay_name(name) for name in arguments):
+                return _protected_value("unset")
             changes = tuple(EnvironmentChange(name, None) for name in arguments)
         except (TypeError, ValueError):
             return _invalid("unset", "usage: unset NAME...")

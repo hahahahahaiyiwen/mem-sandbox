@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import cast
 
 from mem_sandbox.core import OperationId, OperationKind, OperationLimits, SessionId
+from mem_sandbox.secrets import SecretRef
 from mem_sandbox.workspace import SandboxPath
 
 
@@ -17,6 +18,18 @@ class PolicyRequest:
     path: SandboxPath | None
     command_name: str | None
     requested_limits: OperationLimits
+    secret_refs: tuple[SecretRef, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(cast(object, self.secret_refs), tuple):
+            raise TypeError("secret_refs must be a tuple")
+        for secret_ref in self.secret_refs:
+            if not isinstance(cast(object, secret_ref), SecretRef):
+                raise TypeError("secret_refs must contain SecretRef values")
+        if tuple(sorted(self.secret_refs, key=lambda item: item.name)) != self.secret_refs:
+            raise ValueError("secret_refs must be sorted by reference name")
+        if len(set(self.secret_refs)) != len(self.secret_refs):
+            raise ValueError("secret_refs must not contain duplicates")
 
 
 @dataclass(frozen=True, slots=True)

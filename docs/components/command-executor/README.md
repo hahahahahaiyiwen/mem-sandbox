@@ -1,6 +1,6 @@
 # Command Executor Design
 
-**Status:** Milestone 2 and issue #16 command completion implemented
+**Status:** Command profile and issue #20 protected-overlay behavior implemented
 
 ## Purpose
 
@@ -24,6 +24,8 @@ Milestone 2 commands; `create_command_profile()` constructs the complete profile
 - Maintain command-local cwd and approved environment state.
 - Support deterministic sequencing and output redirection.
 - Apply command, argument, timeout, and output limits.
+- Consume a typed operation-local environment overlay without persisting it.
+- Redact protected output and reject protected persistence before workspace mutation.
 - Cooperate with cancellation.
 - Return structured stdout, stderr, exit code, duration, and truncation metadata.
 - Reject unsupported shell syntax explicitly.
@@ -54,6 +56,7 @@ include:
 - finite command, intermediate-output, aggregate-output, and timeout limits;
 - atomic virtual-workspace publication;
 - no mutation after timeout, cancellation, or infrastructure failure;
+- operation-scoped secret non-persistence and mandatory external-output redaction;
 - missing virtual metadata such as owners, permissions, links, and timestamps;
 - inability to provide atomic recursive directory merging.
 
@@ -461,14 +464,138 @@ The context contains:
 - cancellation signal
 - separate bounded stdout and stderr collectors
 - operation and session identity
-- approved secret leases, if required
+- one operation-local protected-value guard, when required
 
 Handlers return state transitions; they do not mutate a shared cwd or environment
 dictionary. The executor applies successful transitions before evaluating the next
 command.
 
-Secret values are resolved before command dispatch by the session and are never added to
-history or result metadata.
+Secret values are resolved before command dispatch by the session. The executor receives
+a separate `CommandEnvironmentOverlay`; it never receives a merged persistent
+`CommandEnvironment`.
+
+## Protected environment overlay
+
+The command-executor module owns the overlay and protection contracts:
+
+```python
+class CommandOverlayValue(Protocol):
+    def reveal_text(self) -> str: ...
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class CommandEnvironmentOverlayEntry:
+    name: str
+    value: CommandOverlayValue
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class CommandEnvironmentOverlay:
+    entries: tuple[CommandEnvironmentOverlayEntry, ...] = ()
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class CommandEnvironmentViewEntry:
+    name: str
+    value: str
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class CommandEnvironmentView:
+    base: CommandEnvironment
+    overlay: CommandEnvironmentOverlay
+
+    def get(self, name: str, default: str = "") -> str: ...
+    @property
+    def values(self) -> tuple[CommandEnvironmentViewEntry, ...]: ...
+
+
+class CommandValueProtection(Protocol):
+    def redact_text(self, value: str) -> str: ...
+    def redact_bytes(self, value: bytes) -> bytes: ...
+    def contains_protected_text(self, value: str) -> bool: ...
+```
+
+`ExecuteRequest` keeps its approved base environment and gains the separate overlay.
+`CommandExecutionContext` gains the operation-local protection port. Empty overlay and
+protection implementations preserve current direct-executor behavior.
+
+The executor constructs `CommandEnvironmentView` and supplies it to both parser
+expansion and `CommandContext`. `env` therefore sees overlay names internally, but the
+stage output is redacted before it reaches a pipeline, redirection, collector, or caller.
+View entries use non-revealing representations even after overlay values are
+materialized.
+
+Generic command dispatch rejects any expanded command name, argument, or redirection
+destination containing a protected value before command resolution or handler
+invocation. Exact output redaction alone cannot prevent a command from exposing derived
+facts through match results, option parsing, exit status, or `&&` control flow. A future
+secret-consuming command must therefore be an explicitly registered trusted handler
+that reads a typed value from `CommandContext.environment`; the built-in command profile
+provides no such destination-specific capability.
+
+Overlay rules:
+
+- names use the existing command environment grammar;
+- `PWD` is always derived and cannot be overlaid;
+- duplicate names are invalid;
+- overlay lookup shadows the base environment and command-local `export`/`unset`
+  transitions for the entire execution plan;
+- each lookup reaches the overlay value provider so lease close/expiry remains
+  enforceable;
+- overlay entries are never included in `ExecuteResult.environment_changes`.
+- `export` and `unset` targeting an overlaid name are rejected so a shadowed persistent
+  base value cannot change invisibly.
+
+`CommandContext`, `CommandRequest`, internal `CommandResult`, `EnvironmentChange`,
+expanded stages, prepared units, overlays, and value providers that may contain resolved
+material use non-revealing representations. The externally returned `ExecuteResult`
+contains only already-sanitized values. The executor retains no command history or
+prepared plan after completion.
+
+## Protected output and persistence
+
+Every command stage is sanitized immediately after handler return and before its data can
+cross another boundary:
+
+```text
+handler result
+  -> redact stdout/stderr
+  -> reject protected persistent environment changes
+  -> forward redacted pipeline data or apply guarded redirection
+  -> append redacted bounded output
+```
+
+This ordering ensures:
+
+- later pipeline stages never receive raw protected output;
+- redirected content is already redacted;
+- output collectors and results never retain raw protected text;
+- output byte/truncation metadata describes only the redacted collector input;
+- generated command diagnostics are redacted before result or exception publication.
+
+The executor rejects protected values in:
+
+- expanded command names and arguments before dispatch;
+- persistent `EnvironmentChange` values;
+- stdout-redirection destinations;
+- workspace path operands identified by each command handler;
+- cwd transitions.
+
+Handlers own operand meaning and must run the command-owned protection guard before
+resolving a path or invoking a workspace port. A rejected persistence attempt returns
+`CommandFailureCode.PROTECTED_VALUE_REJECTED` and performs no corresponding workspace or
+session-state mutation. The executor does not silently discard changes or report success
+after substituting a redaction marker.
+
+Exact redaction does not infer encoded or derived forms. Pre-dispatch rejection prevents
+the built-in profile from using a protected argument as a semantic oracle, while
+redaction before pipeline forwarding prevents a trusted handler's output from reaching a
+later stage in raw form.
+
+For secret-bearing operations, output byte counts and truncation flags describe the
+redacted stream accepted by the collectors, not the raw secret-bearing stream. This
+avoids exposing secret length through result metadata.
 
 ## Timeout and cancellation
 
@@ -573,12 +700,14 @@ Normal command failures remain structured results:
 | Workspace operation failure | 1 |
 | Redirection or redirected-output-limit failure | 1 |
 | Pipeline intermediate or aggregate limit failure | 1 |
+| Protected value would enter persistent environment, cwd, path, or file state | 1 |
 
 The result includes a stable failure code in addition to deterministic stderr. This lets
 `;` and `&&` evaluate failures without exception-driven control flow. Policy denial is a
 session concern and occurs before invoking the executor. Milestone 4 adds the stable
 `NO_MATCH` code for normal grep no-match results and `PIPELINE_LIMIT_EXCEEDED` for a
 bounded pipeline that cannot retain complete intermediate data.
+Issue #20 adds `PROTECTED_VALUE_REJECTED` for a normal fail-before-persistence result.
 
 ## Resource limits
 
@@ -594,6 +723,7 @@ The configurable default profile is:
 | Pipeline stages | 8 |
 | Intermediate pipeline payload | 256 KiB UTF-8 |
 | Aggregate intermediate materialization | 1 MiB UTF-8 |
+| Secret environment bindings | 16 |
 | Complete execution plan | 30 seconds |
 
 The static argv-entry count is checked for the complete plan before dispatch because
@@ -610,6 +740,14 @@ non-finite, zero, or negative timeout and limit values are invalid requests.
 - Cover happy, non-zero, timeout, cancellation, and dependency-failure paths.
 - Confirm no post-timeout mutations.
 - Confirm deterministic output truncation and redaction.
+- Confirm secret overlay values are visible to expansion and explicitly trusted handlers
+  but absent from every result, diagnostic, and useful object representation.
+- Confirm every protected expanded command name, argument, and redirection destination
+  fails before dispatch, independent of its content or potential command semantics.
+- Confirm stage output is redacted before pipeline forwarding and redirection.
+- Confirm protected `export`, cwd, path operands, and redirection destinations fail
+  before persistence with `PROTECTED_VALUE_REJECTED`.
+- Confirm an empty overlay preserves all existing command behavior and representations.
 - Verify cwd and environment commit rules.
 - Verify append is one atomic workspace mutation rather than read-then-write.
 - Verify normal non-zero command and pipeline results redirect captured stdout while

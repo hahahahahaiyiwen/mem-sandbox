@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import traceback
 from dataclasses import replace
 from datetime import UTC, datetime
 from uuid import UUID
@@ -10,6 +11,7 @@ import pytest
 from mem_sandbox.command_executor import (
     CommandExecutionContext,
     CommandFailureCode,
+    CommandInternalFailure,
     CommandLimits,
     EnvironmentChange,
     ExecuteRequest,
@@ -28,6 +30,10 @@ from mem_sandbox.secrets import (
     NoSecretBroker,
     SecretAccessRequest,
     SecretLease,
+    SecretLeaseCleanupFailed,
+    SecretNotFound,
+    SecretRef,
+    SecretValue,
 )
 from mem_sandbox.session import (
     ApplyPatchRequest,
@@ -51,6 +57,7 @@ from mem_sandbox.session import (
     SessionPolicyEngine,
     SessionResourceScope,
     SessionSecretBroker,
+    SessionSecretEnvironmentBinding,
     SessionSnapshotCodec,
     SessionSnapshotStore,
     SessionStartInvalid,
@@ -211,6 +218,7 @@ class Executor:
 def make_session(
     policy_engine: SessionPolicyEngine | None = None,
     *,
+    command_executor: Executor | None = None,
     event_sink: SessionEventSink | None = None,
     resource_scope: SessionResourceScope | None = None,
     secret_broker: SessionSecretBroker | None = None,
@@ -218,7 +226,7 @@ def make_session(
     snapshot_codec: SessionSnapshotCodec | None = None,
 ) -> tuple[SandboxSession, Workspace, Executor, Events]:
     workspace = Workspace()
-    executor = Executor()
+    executor = command_executor or Executor()
     events = Events()
     return (
         SandboxSession(
@@ -991,3 +999,591 @@ async def test_public_operations_never_touch_the_no_secret_broker() -> None:
     await session.write_file(WriteFileRequest(path="file", content="content"))
     await session.execute(SessionExecuteRequest(command="bad"))
     assert spy.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_secret_execute_orders_policy_leases_overlay_cleanup_and_state_commit() -> None:
+    order: list[str] = []
+    first_ref = SecretRef("a-token")
+    second_ref = SecretRef("b-token")
+    values = {
+        first_ref: SecretValue("first-secret"),
+        second_ref: SecretValue("second-secret"),
+    }
+
+    class Policy:
+        def __init__(self) -> None:
+            self.requests: list[PolicyRequest] = []
+
+        async def evaluate(self, request: PolicyRequest) -> PolicyDecision:
+            order.append("policy")
+            self.requests.append(request)
+            return PolicyDecision(True, "approved", request.requested_limits)
+
+    class Lease:
+        def __init__(self, secret_ref: SecretRef, value: SecretValue) -> None:
+            self.secret_ref = secret_ref
+            self._value = value
+            self.closed = False
+
+        @property
+        def value(self) -> SecretValue:
+            assert not self.closed
+            return self._value
+
+        @property
+        def expires_at(self) -> datetime:
+            return datetime(2026, 9, 1, 13, tzinfo=UTC)
+
+        async def close(self) -> None:
+            self.closed = True
+            order.append(f"close:{self.secret_ref.name}")
+
+    class Broker:
+        def __init__(self) -> None:
+            self.requests: list[SecretAccessRequest] = []
+            self.leases: list[Lease] = []
+
+        async def lease(self, request: SecretAccessRequest) -> SecretLease:
+            order.append(f"lease:{request.secret_ref.name}")
+            self.requests.append(request)
+            lease = Lease(request.secret_ref, values[request.secret_ref])
+            self.leases.append(lease)
+            return lease
+
+    class SecretExecutor(Executor):
+        async def execute(
+            self,
+            request: ExecuteRequest,
+            context: CommandExecutionContext,
+        ) -> ExecuteResult:
+            order.append("execute")
+            self.requests.append((request, context))
+            assert request.overlay.get("TOKEN_A") == "second-secret"
+            assert request.overlay.get("TOKEN_B") == "first-secret"
+            assert request.overlay.get("TOKEN_Z") == "first-secret"
+            assert context.protection.redact_text("first-secret") == "[REDACTED]"
+            assert context.protection.contains_protected_text("second-secret")
+            return ExecuteResult(
+                0,
+                None,
+                "[REDACTED]\n",
+                "",
+                11,
+                0,
+                False,
+                False,
+                1.0,
+                SandboxPath.root(),
+                (EnvironmentChange("SAFE", "value"),),
+            )
+
+    policy = Policy()
+    broker = Broker()
+    executor = SecretExecutor()
+    session, _, _, _ = make_session(
+        policy,
+        command_executor=executor,
+        secret_broker=broker,
+    )
+    await session.start()
+
+    result = await session.execute(
+        SessionExecuteRequest(
+            command='echo "$TOKEN_A"',
+            secret_environment=(
+                SessionSecretEnvironmentBinding("TOKEN_Z", first_ref),
+                SessionSecretEnvironmentBinding("TOKEN_A", second_ref),
+                SessionSecretEnvironmentBinding("TOKEN_B", first_ref),
+            ),
+        )
+    )
+
+    assert policy.requests[0].secret_refs == (first_ref, second_ref)
+    assert [request.secret_ref for request in broker.requests] == [first_ref, second_ref]
+    assert all(request.max_lease_seconds <= 29 for request in broker.requests)
+    assert order == [
+        "policy",
+        "lease:a-token",
+        "lease:b-token",
+        "execute",
+        "close:b-token",
+        "close:a-token",
+    ]
+    assert all(lease.closed for lease in broker.leases)
+    assert session.environment.get("SAFE") == "value"
+    assert session.environment.get("TOKEN_A") == ""
+    assert result.environment_changes == (EnvironmentChange("SAFE", "value"),)
+
+
+@pytest.mark.asyncio
+async def test_secret_policy_denial_calls_neither_broker_nor_executor() -> None:
+    secret_ref = SecretRef("service-token")
+
+    class Deny:
+        async def evaluate(self, request: PolicyRequest) -> PolicyDecision:
+            assert request.secret_refs == (secret_ref,)
+            return PolicyDecision(False, "secret_blocked", request.requested_limits)
+
+    class Broker:
+        async def lease(self, request: SecretAccessRequest) -> SecretLease:
+            raise AssertionError("broker must not be called")
+
+    executor = Executor()
+    session, _, _, _ = make_session(
+        Deny(),
+        command_executor=executor,
+        secret_broker=Broker(),
+    )
+    await session.start()
+
+    with pytest.raises(SessionPolicyDenied):
+        await session.execute(
+            SessionExecuteRequest(
+                command="env",
+                secret_environment=(SessionSecretEnvironmentBinding("TOKEN", secret_ref),),
+            )
+        )
+
+    assert executor.requests == []
+
+
+@pytest.mark.asyncio
+async def test_later_secret_acquisition_failure_closes_earlier_lease() -> None:
+    first_ref = SecretRef("a-token")
+    second_ref = SecretRef("b-token")
+
+    class Lease:
+        closed = False
+
+        @property
+        def value(self) -> SecretValue:
+            return SecretValue("first-secret")
+
+        @property
+        def expires_at(self) -> datetime:
+            return datetime(2026, 9, 1, 13, tzinfo=UTC)
+
+        async def close(self) -> None:
+            self.closed = True
+
+    first = Lease()
+
+    class Broker:
+        async def lease(self, request: SecretAccessRequest) -> SecretLease:
+            if request.secret_ref == first_ref:
+                return first
+            raise SecretNotFound("safe missing reference")
+
+    executor = Executor()
+    session, _, _, _ = make_session(
+        command_executor=executor,
+        secret_broker=Broker(),
+    )
+    await session.start()
+
+    with pytest.raises(SecretNotFound):
+        await session.execute(
+            SessionExecuteRequest(
+                command="env",
+                secret_environment=(
+                    SessionSecretEnvironmentBinding("FIRST", first_ref),
+                    SessionSecretEnvironmentBinding("SECOND", second_ref),
+                ),
+            )
+        )
+
+    assert first.closed
+    assert executor.requests == []
+
+
+@pytest.mark.asyncio
+async def test_secret_cleanup_failure_prevents_transient_state_commit() -> None:
+    secret_ref = SecretRef("service-token")
+
+    class Lease:
+        @property
+        def value(self) -> SecretValue:
+            return SecretValue("operation-secret")
+
+        @property
+        def expires_at(self) -> datetime:
+            return datetime(2026, 9, 1, 13, tzinfo=UTC)
+
+        async def close(self) -> None:
+            raise RuntimeError("operation-secret")
+
+    class Broker:
+        async def lease(self, request: SecretAccessRequest) -> SecretLease:
+            return Lease()
+
+    class SecretExecutor(Executor):
+        async def execute(
+            self,
+            request: ExecuteRequest,
+            context: CommandExecutionContext,
+        ) -> ExecuteResult:
+            return ExecuteResult(
+                0,
+                None,
+                "",
+                "",
+                0,
+                0,
+                False,
+                False,
+                1.0,
+                SandboxPath.resolve("/workspace/changed"),
+                (EnvironmentChange("SAFE", "value"),),
+            )
+
+    session, _, _, events = make_session(
+        command_executor=SecretExecutor(),
+        secret_broker=Broker(),
+    )
+    await session.start()
+
+    with pytest.raises(SecretLeaseCleanupFailed) as raised:
+        await session.execute(
+            SessionExecuteRequest(
+                command="env",
+                secret_environment=(SessionSecretEnvironmentBinding("TOKEN", secret_ref),),
+            )
+        )
+
+    assert "operation-secret" not in str(raised.value)
+    assert session.cwd == SandboxPath.root()
+    assert session.environment.get("SAFE") == ""
+    assert events.values[-1].event_type == "operation.failed"
+
+
+@pytest.mark.asyncio
+async def test_secret_leases_close_on_timeout() -> None:
+    secret_ref = SecretRef("service-token")
+    started = asyncio.Event()
+
+    class Lease:
+        closed = False
+
+        @property
+        def value(self) -> SecretValue:
+            return SecretValue("operation-secret")
+
+        @property
+        def expires_at(self) -> datetime:
+            return datetime(2026, 9, 1, 13, tzinfo=UTC)
+
+        async def close(self) -> None:
+            self.closed = True
+
+    lease = Lease()
+
+    class Broker:
+        async def lease(self, request: SecretAccessRequest) -> SecretLease:
+            return lease
+
+    class BlockingExecutor(Executor):
+        async def execute(
+            self,
+            request: ExecuteRequest,
+            context: CommandExecutionContext,
+        ) -> ExecuteResult:
+            started.set()
+            await asyncio.sleep(10)
+            raise AssertionError
+
+    session, _, _, events = make_session(
+        command_executor=BlockingExecutor(),
+        secret_broker=Broker(),
+    )
+    await session.start()
+
+    with pytest.raises(SessionOperationTimeout):
+        await session.execute(
+            SessionExecuteRequest(
+                command="env",
+                secret_environment=(SessionSecretEnvironmentBinding("TOKEN", secret_ref),),
+                limits=OperationLimits(
+                    timeout_seconds=0.2,
+                    terminal_event_reserve_seconds=0.1,
+                ),
+            )
+        )
+
+    assert started.is_set()
+    assert lease.closed
+    assert events.values[-1].event_type == "operation.timed_out"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("native", (False, True))
+async def test_secret_leases_close_on_cooperative_and_native_cancellation(
+    native: bool,
+) -> None:
+    secret_ref = SecretRef("service-token")
+    started = asyncio.Event()
+    cancellation = asyncio.Event()
+
+    class Lease:
+        closed = False
+
+        @property
+        def value(self) -> SecretValue:
+            return SecretValue("operation-secret")
+
+        @property
+        def expires_at(self) -> datetime:
+            return datetime(2026, 9, 1, 13, tzinfo=UTC)
+
+        async def close(self) -> None:
+            self.closed = True
+
+    lease = Lease()
+
+    class Broker:
+        async def lease(self, request: SecretAccessRequest) -> SecretLease:
+            return lease
+
+    class BlockingExecutor(Executor):
+        async def execute(
+            self,
+            request: ExecuteRequest,
+            context: CommandExecutionContext,
+        ) -> ExecuteResult:
+            started.set()
+            await asyncio.sleep(10)
+            raise AssertionError
+
+    session, _, _, events = make_session(
+        command_executor=BlockingExecutor(),
+        secret_broker=Broker(),
+    )
+    await session.start()
+    task = asyncio.create_task(
+        session.execute(
+            SessionExecuteRequest(
+                command="env",
+                secret_environment=(SessionSecretEnvironmentBinding("TOKEN", secret_ref),),
+                cancellation=cancellation,
+            )
+        )
+    )
+    await started.wait()
+    if native:
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    else:
+        cancellation.set()
+        with pytest.raises(SessionOperationCancelled):
+            await task
+
+    assert lease.closed
+    assert events.values[-1].event_type == "operation.cancelled"
+
+
+@pytest.mark.asyncio
+async def test_primary_and_cleanup_failures_publish_no_secret_in_traceback_or_notes() -> None:
+    secret_ref = SecretRef("service-token")
+    canary = "operation-secret"
+
+    class Lease:
+        @property
+        def value(self) -> SecretValue:
+            return SecretValue(canary)
+
+        @property
+        def expires_at(self) -> datetime:
+            return datetime(2026, 9, 1, 13, tzinfo=UTC)
+
+        async def close(self) -> None:
+            raise RuntimeError(canary)
+
+    class Broker:
+        async def lease(self, request: SecretAccessRequest) -> SecretLease:
+            return Lease()
+
+    class FailingExecutor(Executor):
+        async def execute(
+            self,
+            request: ExecuteRequest,
+            context: CommandExecutionContext,
+        ) -> ExecuteResult:
+            raise RuntimeError(canary)
+
+    session, _, _, events = make_session(
+        command_executor=FailingExecutor(),
+        secret_broker=Broker(),
+    )
+    await session.start()
+
+    with pytest.raises(SessionFailed) as raised:
+        await session.execute(
+            SessionExecuteRequest(
+                command="env",
+                secret_environment=(SessionSecretEnvironmentBinding("TOKEN", secret_ref),),
+            )
+        )
+
+    formatted = "".join(traceback.format_exception(raised.value))
+    assert canary not in formatted
+    assert all(canary not in note for note in raised.value.__notes__)
+    assert events.values[-1].event_type == "operation.failed"
+
+
+@pytest.mark.asyncio
+async def test_secret_in_nested_exception_graph_is_replaced_before_publication() -> None:
+    secret_ref = SecretRef("service-token")
+    canary = "nested-operation-secret"
+
+    class Lease:
+        @property
+        def value(self) -> SecretValue:
+            return SecretValue(canary)
+
+        @property
+        def expires_at(self) -> datetime:
+            return datetime(2026, 9, 1, 13, tzinfo=UTC)
+
+        async def close(self) -> None:
+            return None
+
+    class Broker:
+        async def lease(self, request: SecretAccessRequest) -> SecretLease:
+            return Lease()
+
+    class FailingExecutor(Executor):
+        async def execute(
+            self,
+            request: ExecuteRequest,
+            context: CommandExecutionContext,
+        ) -> ExecuteResult:
+            try:
+                raise ExceptionGroup("wrapper", [RuntimeError(canary)])
+            except ExceptionGroup as error:
+                raise CommandInternalFailure("safe command failure") from error
+
+    session, _, _, events = make_session(
+        command_executor=FailingExecutor(),
+        secret_broker=Broker(),
+    )
+    await session.start()
+
+    with pytest.raises(SessionFailed) as raised:
+        await session.execute(
+            SessionExecuteRequest(
+                command="env",
+                secret_environment=(SessionSecretEnvironmentBinding("TOKEN", secret_ref),),
+            )
+        )
+
+    assert canary not in "".join(traceback.format_exception(raised.value))
+    assert raised.value.__cause__ is None
+    assert raised.value.__context__ is None
+    assert events.values[-1].event_type == "operation.failed"
+
+
+@pytest.mark.asyncio
+async def test_secret_in_native_cancellation_graph_is_sanitized() -> None:
+    secret_ref = SecretRef("service-token")
+    canary = "cancelled-operation-secret"
+
+    class Lease:
+        @property
+        def value(self) -> SecretValue:
+            return SecretValue(canary)
+
+        @property
+        def expires_at(self) -> datetime:
+            return datetime(2026, 9, 1, 13, tzinfo=UTC)
+
+        async def close(self) -> None:
+            return None
+
+    class Broker:
+        async def lease(self, request: SecretAccessRequest) -> SecretLease:
+            return Lease()
+
+    class CancellingExecutor(Executor):
+        async def execute(
+            self,
+            request: ExecuteRequest,
+            context: CommandExecutionContext,
+        ) -> ExecuteResult:
+            cancellation = asyncio.CancelledError(canary)
+            cancellation.add_note(canary)
+            raise cancellation
+
+    session, _, _, events = make_session(
+        command_executor=CancellingExecutor(),
+        secret_broker=Broker(),
+    )
+    await session.start()
+
+    with pytest.raises(asyncio.CancelledError) as raised:
+        await session.execute(
+            SessionExecuteRequest(
+                command="env",
+                secret_environment=(SessionSecretEnvironmentBinding("TOKEN", secret_ref),),
+            )
+        )
+
+    assert canary not in str(raised.value)
+    assert canary not in "".join(traceback.format_exception(raised.value))
+    assert raised.value.__cause__ is None
+    assert raised.value.__context__ is None
+    assert events.values[-1].event_type == "operation.cancelled"
+
+
+@pytest.mark.asyncio
+async def test_fatal_lease_cleanup_is_contained_and_remaining_leases_close() -> None:
+    first_ref = SecretRef("a-token")
+    second_ref = SecretRef("b-token")
+    canary = "fatal-cleanup-secret"
+
+    class FatalCleanup(BaseException):
+        pass
+
+    class Lease:
+        def __init__(self, *, fail: bool) -> None:
+            self.fail = fail
+            self.closed = False
+
+        @property
+        def value(self) -> SecretValue:
+            return SecretValue("operation-secret")
+
+        @property
+        def expires_at(self) -> datetime:
+            return datetime(2026, 9, 1, 13, tzinfo=UTC)
+
+        async def close(self) -> None:
+            self.closed = True
+            if self.fail:
+                raise FatalCleanup(canary)
+
+    first = Lease(fail=False)
+    second = Lease(fail=True)
+
+    class Broker:
+        async def lease(self, request: SecretAccessRequest) -> SecretLease:
+            return first if request.secret_ref == first_ref else second
+
+    session, _, _, events = make_session(secret_broker=Broker())
+    await session.start()
+
+    with pytest.raises(SecretLeaseCleanupFailed) as raised:
+        await session.execute(
+            SessionExecuteRequest(
+                command="env",
+                secret_environment=(
+                    SessionSecretEnvironmentBinding("FIRST", first_ref),
+                    SessionSecretEnvironmentBinding("SECOND", second_ref),
+                ),
+            )
+        )
+
+    assert first.closed
+    assert second.closed
+    assert canary not in "".join(traceback.format_exception(raised.value))
+    assert events.values[-1].event_type == "operation.failed"

@@ -11,7 +11,10 @@ from typing import TypeVar, cast
 from mem_sandbox.command_executor import (
     CancellationSignal,
     CommandEnvironment,
+    CommandEnvironmentOverlay,
+    CommandEnvironmentOverlayEntry,
     CommandExecutionContext,
+    CommandValueProtection,
     EnvironmentChange,
     EnvironmentValue,
     ExecuteRequest,
@@ -33,10 +36,17 @@ from mem_sandbox.core import (
 from mem_sandbox.events import (
     EventAttribute,
     EventSensitivity,
+    ProtectedValueRedactor,
     SandboxEvent,
     SandboxEventType,
 )
 from mem_sandbox.policy import PolicyDecision, PolicyRequest
+from mem_sandbox.secrets import (
+    SecretAccessRequest,
+    SecretLease,
+    SecretLeaseCleanupFailed,
+    SecretRef,
+)
 from mem_sandbox.session.errors import (
     SessionCleanupFailed,
     SessionClosed,
@@ -70,6 +80,7 @@ from mem_sandbox.session.models import (
     SessionExecuteRequest,
     SessionExecuteResult,
     SessionExpectedFileHash,
+    SessionSecretEnvironmentBinding,
     StatRequest,
     StatResult,
     WriteBytesRequest,
@@ -129,6 +140,32 @@ class _OperationContext:
 class _OperationOutcome[T]:
     value: T
     metadata: OperationResultMetadata
+
+
+class _LeaseOverlayValue:
+    __slots__ = ("_lease",)
+
+    def __init__(self, lease: SecretLease) -> None:
+        self._lease = lease
+
+    def reveal_text(self) -> str:
+        return self._lease.value.reveal_text()
+
+
+class _OperationValueProtection:
+    __slots__ = ("_redactor",)
+
+    def __init__(self, redactor: ProtectedValueRedactor) -> None:
+        self._redactor = redactor
+
+    def redact_text(self, value: str) -> str:
+        return self._redactor.redact_text(value)
+
+    def redact_bytes(self, value: bytes) -> bytes:
+        return self._redactor.redact_bytes(value)
+
+    def contains_protected_text(self, value: str) -> bool:
+        return self._redactor.redact_text(value) != value
 
 
 class SandboxSession:
@@ -220,29 +257,137 @@ class SandboxSession:
 
     async def execute(self, request: SessionExecuteRequest) -> SessionExecuteResult:
         async def action(context: _OperationContext) -> tuple[ExecuteResult, Revision]:
-            remaining = self._remaining(context.collaborator_deadline, context.operation_id)
-            effective_command_limits = replace(
-                request.command_limits,
-                timeout_seconds=min(request.command_limits.timeout_seconds, remaining),
-            )
-            result = await self._await_collaborator(
-                lambda: self._command_executor.execute(
-                    ExecuteRequest(
-                        request.command,
-                        self._cwd,
-                        self._environment,
-                        effective_command_limits,
+            leases: list[tuple[SecretRef, SecretLease]] = []
+            protection: CommandValueProtection | None = None
+            result: ExecuteResult | None = None
+            primary: BaseException | None = None
+            try:
+                for secret_ref in _secret_refs(request.secret_environment):
+                    remaining = self._remaining(
+                        context.collaborator_deadline,
+                        context.operation_id,
+                    )
+
+                    async def acquire(
+                        ref: SecretRef = secret_ref,
+                        duration: float = remaining,
+                    ) -> SecretLease:
+                        lease = await self._secret_broker.lease(
+                            SecretAccessRequest(
+                                session_id=self._session_id,
+                                operation_id=context.operation_id,
+                                secret_ref=ref,
+                                command_name=None,
+                                max_lease_seconds=duration,
+                            )
+                        )
+                        leases.append((ref, lease))
+                        return lease
+
+                    await self._await_collaborator(
+                        acquire,
+                        context.collaborator_deadline,
+                        request.cancellation,
+                        context.operation_id,
+                    )
+
+                redactor = ProtectedValueRedactor(
+                    text_values=tuple(lease.value.reveal_text() for _, lease in leases)
+                )
+                protection = _OperationValueProtection(redactor)
+                lease_by_ref = dict(leases)
+                overlay = CommandEnvironmentOverlay(
+                    tuple(
+                        CommandEnvironmentOverlayEntry(
+                            binding.name,
+                            _LeaseOverlayValue(lease_by_ref[binding.secret_ref]),
+                        )
+                        for binding in request.secret_environment
+                    )
+                )
+                remaining = self._remaining(
+                    context.collaborator_deadline,
+                    context.operation_id,
+                )
+                effective_command_limits = replace(
+                    request.command_limits,
+                    timeout_seconds=min(
+                        request.command_limits.timeout_seconds,
+                        remaining,
                     ),
-                    CommandExecutionContext(
-                        session_id=self._session_id,
+                )
+                result = await self._await_collaborator(
+                    lambda: self._command_executor.execute(
+                        ExecuteRequest(
+                            request.command,
+                            self._cwd,
+                            self._environment,
+                            effective_command_limits,
+                            overlay,
+                        ),
+                        CommandExecutionContext(
+                            session_id=self._session_id,
+                            operation_id=context.operation_id,
+                            cancellation=request.cancellation,
+                            protection=protection,
+                        ),
+                    ),
+                    context.collaborator_deadline,
+                    request.cancellation,
+                    context.operation_id,
+                )
+            except BaseException as error:
+                primary = error
+
+            cleanup_failed = False
+            try:
+                cleanup_failed = await _close_secret_leases(tuple(lease for _, lease in leases))
+            except BaseException as cleanup_interruption:
+                if primary is None:
+                    primary = cleanup_interruption
+                else:
+                    primary.add_note("secret lease cleanup was interrupted")
+            if primary is not None:
+                if cleanup_failed:
+                    primary.add_note("secret lease cleanup also failed")
+                unsafe_graph = (
+                    bool(request.secret_environment)
+                    and protection is not None
+                    and _exception_graph_contains_protected(primary, protection)
+                )
+                if unsafe_graph:
+                    if isinstance(primary, asyncio.CancelledError):
+                        safe_cancellation = asyncio.CancelledError(
+                            "secret-bearing execute was cancelled"
+                        )
+                        if cleanup_failed:
+                            safe_cancellation.add_note("secret lease cleanup also failed")
+                        raise safe_cancellation from None
+                    protected_failure = SessionFailed(
+                        "secret-bearing execute failed with protected error data",
                         operation_id=context.operation_id,
-                        cancellation=request.cancellation,
-                    ),
-                ),
-                context.collaborator_deadline,
-                request.cancellation,
-                context.operation_id,
-            )
+                    )
+                    if cleanup_failed:
+                        protected_failure.add_note("secret lease cleanup also failed")
+                    raise protected_failure from None
+                if isinstance(primary, asyncio.CancelledError):
+                    raise primary
+                if not request.secret_environment:
+                    raise primary
+                if isinstance(primary, SandboxError):
+                    raise primary
+                if isinstance(primary, Exception):
+                    collaborator_failure = SessionFailed(
+                        "secret-bearing execute collaborator failed unexpectedly",
+                        operation_id=context.operation_id,
+                    )
+                    if cleanup_failed:
+                        collaborator_failure.add_note("secret lease cleanup also failed")
+                    raise collaborator_failure from None
+                raise primary
+            if cleanup_failed:
+                raise SecretLeaseCleanupFailed("secret lease cleanup failed")
+            assert result is not None
             resulting_environment = _apply_environment_changes(
                 self._environment,
                 result.environment_changes,
@@ -263,6 +408,7 @@ class SandboxSession:
             request.cancellation,
             lambda: None,
             action,
+            policy_secret_refs=_secret_refs(request.secret_environment),
         )
         result = outcome.value
         return SessionExecuteResult(
@@ -762,6 +908,8 @@ class SandboxSession:
             tuple[SandboxEventType, tuple[EventAttribute, ...]],
         ]
         | None = None,
+        *,
+        policy_secret_refs: tuple[SecretRef, ...] = (),
     ) -> _OperationOutcome[_T]:
         self._reject_non_running()
         loop = asyncio.get_running_loop()
@@ -803,6 +951,7 @@ class SandboxSession:
                         path,
                         None,
                         limits,
+                        policy_secret_refs,
                     )
                 ),
                 policy_deadline,
@@ -1190,6 +1339,84 @@ def _terminal_for_error(error: SandboxError) -> SandboxEventType:
     if error.category is ErrorCategory.CANCELLED:
         return SandboxEventType.OPERATION_CANCELLED
     return SandboxEventType.OPERATION_FAILED
+
+
+def _secret_refs(
+    bindings: tuple[SessionSecretEnvironmentBinding, ...],
+) -> tuple[SecretRef, ...]:
+    return tuple(sorted({binding.secret_ref for binding in bindings}, key=lambda ref: ref.name))
+
+
+def _exception_graph_contains_protected(
+    error: BaseException,
+    protection: CommandValueProtection,
+) -> bool:
+    pending = [error]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop()
+        identity = id(current)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        try:
+            rendered = (str(current), repr(current))
+        except Exception:
+            return True
+        if any(protection.contains_protected_text(value) for value in rendered):
+            return True
+        notes = getattr(current, "__notes__", ())
+        if any(
+            not isinstance(note, str) or protection.contains_protected_text(note) for note in notes
+        ):
+            return True
+        if current.__cause__ is not None:
+            pending.append(current.__cause__)
+        if current.__context__ is not None:
+            pending.append(current.__context__)
+        if isinstance(current, BaseExceptionGroup):
+            group = cast(BaseExceptionGroup[BaseException], current)
+            pending.extend(group.exceptions)
+    return False
+
+
+async def _close_secret_leases(leases: tuple[SecretLease, ...]) -> bool:
+    failed = False
+    interruption: BaseException | None = None
+    for lease in reversed(leases):
+        task = asyncio.create_task(lease.close())
+        while True:
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError as error:
+                if task.cancelled():
+                    failed = True
+                    break
+                if interruption is None:
+                    interruption = error
+                if task.done():
+                    try:
+                        task.result()
+                    except asyncio.CancelledError:
+                        failed = True
+                    except BaseException:
+                        failed = True
+                    break
+                continue
+            except BaseException as error:
+                if task.done():
+                    failed = True
+                    break
+                if interruption is None:
+                    interruption = error
+                continue
+            else:
+                break
+    if interruption is not None:
+        if failed:
+            interruption.add_note("secret lease cleanup also failed")
+        raise interruption
+    return failed
 
 
 async def _await_cancelled_task[T](task: asyncio.Future[T]) -> None:

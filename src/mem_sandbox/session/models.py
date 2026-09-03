@@ -11,8 +11,10 @@ from mem_sandbox.command_executor import (
     CommandFailureCode,
     CommandLimits,
     EnvironmentChange,
+    EnvironmentValue,
 )
 from mem_sandbox.core import OperationLimits, OperationResultMetadata
+from mem_sandbox.secrets import SecretRef
 from mem_sandbox.snapshots import SnapshotRef
 from mem_sandbox.workspace import (
     AnyCurrentState,
@@ -38,6 +40,19 @@ SessionState = SandboxSessionState
 
 
 @dataclass(frozen=True, slots=True)
+class SessionSecretEnvironmentBinding:
+    name: str
+    secret_ref: SecretRef
+
+    def __post_init__(self) -> None:
+        EnvironmentValue(self.name, "")
+        if self.name == "PWD":
+            raise ValueError("PWD cannot be used as a secret environment binding")
+        if not isinstance(cast(object, self.secret_ref), SecretRef):
+            raise TypeError("secret_ref must be a SecretRef")
+
+
+@dataclass(frozen=True, slots=True)
 class SessionExpectedFileHash:
     path: str
     content_hash: ContentHash
@@ -46,12 +61,37 @@ class SessionExpectedFileHash:
 @dataclass(frozen=True, slots=True, kw_only=True)
 class SessionExecuteRequest:
     command: str
+    secret_environment: tuple[SessionSecretEnvironmentBinding, ...] = ()
     command_limits: CommandLimits = field(default_factory=CommandLimits)
     limits: OperationLimits = field(default_factory=OperationLimits)
     cancellation: CancellationSignal | None = None
 
     def __post_init__(self) -> None:
         _require_text("command", self.command)
+        if not isinstance(cast(object, self.command_limits), CommandLimits):
+            raise TypeError("command_limits must be CommandLimits")
+        if not isinstance(cast(object, self.secret_environment), tuple):
+            raise TypeError("secret_environment must be a tuple")
+        for binding in self.secret_environment:
+            if not isinstance(cast(object, binding), SessionSecretEnvironmentBinding):
+                raise TypeError(
+                    "secret_environment must contain SessionSecretEnvironmentBinding values"
+                )
+        names = tuple(binding.name for binding in self.secret_environment)
+        if len(set(names)) != len(names):
+            raise ValueError("secret_environment contains duplicate environment names")
+        if len(self.secret_environment) > self.command_limits.max_secret_bindings:
+            raise ValueError("secret_environment exceeds command_limits.max_secret_bindings")
+        unique_refs = {binding.secret_ref for binding in self.secret_environment}
+        if len(unique_refs) > self.command_limits.max_secret_bindings:
+            raise ValueError(
+                "secret_environment references exceed command_limits.max_secret_bindings"
+            )
+        object.__setattr__(
+            self,
+            "secret_environment",
+            tuple(sorted(self.secret_environment, key=lambda binding: binding.name)),
+        )
 
 
 @dataclass(frozen=True, slots=True)

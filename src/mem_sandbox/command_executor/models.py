@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Protocol, cast
 
@@ -24,6 +24,7 @@ class CommandFailureCode(StrEnum):
     WORKSPACE_FAILURE = "workspace_failure"
     PIPELINE_LIMIT_EXCEEDED = "pipeline_limit_exceeded"
     REDIRECTION_FAILURE = "redirection_failure"
+    PROTECTED_VALUE_REJECTED = "protected_value_rejected"
 
 
 @dataclass(frozen=True, slots=True, order=True)
@@ -56,7 +57,7 @@ class CommandEnvironment:
         return default
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, repr=False)
 class EnvironmentChange:
     """An explicit environment assignment or removal."""
 
@@ -81,6 +82,7 @@ class CommandLimits:
     max_pipeline_stages: int = 8
     max_pipeline_intermediate_bytes: int = 256 * 1024
     max_pipeline_aggregate_bytes: int = 1024 * 1024
+    max_secret_bindings: int = 16
     timeout_seconds: float = 30.0
 
     def __post_init__(self) -> None:
@@ -93,6 +95,7 @@ class CommandLimits:
             "max_pipeline_stages",
             "max_pipeline_intermediate_bytes",
             "max_pipeline_aggregate_bytes",
+            "max_secret_bindings",
         ):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int):
@@ -102,7 +105,117 @@ class CommandLimits:
         _require_timeout(self.timeout_seconds)
 
 
+class CommandOverlayValue(Protocol):
+    def reveal_text(self) -> str: ...
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class CommandEnvironmentOverlayEntry:
+    name: str
+    value: CommandOverlayValue
+
+    def __post_init__(self) -> None:
+        _require_environment_name(self.name)
+        if self.name == "PWD":
+            raise ValueError("PWD cannot be overlaid")
+        if not callable(getattr(self.value, "reveal_text", None)):
+            raise TypeError("overlay value must implement reveal_text")
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class CommandEnvironmentOverlay:
+    entries: tuple[CommandEnvironmentOverlayEntry, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(cast(object, self.entries), tuple):
+            raise TypeError("overlay entries must be a tuple")
+        names: set[str] = set()
+        for entry in self.entries:
+            if not isinstance(cast(object, entry), CommandEnvironmentOverlayEntry):
+                raise TypeError(
+                    "overlay entries must contain CommandEnvironmentOverlayEntry values"
+                )
+            if entry.name in names:
+                raise ValueError(f"duplicate overlay environment name: {entry.name}")
+            names.add(entry.name)
+        object.__setattr__(
+            self,
+            "entries",
+            tuple(sorted(self.entries, key=lambda entry: entry.name)),
+        )
+
+    def get(self, name: str) -> str | None:
+        _require_environment_name(name)
+        for entry in self.entries:
+            if entry.name == name:
+                return entry.value.reveal_text()
+        return None
+
+    def contains(self, name: str) -> bool:
+        _require_environment_name(name)
+        return any(entry.name == name for entry in self.entries)
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class CommandEnvironmentViewEntry:
+    name: str
+    value: str
+
+    def __post_init__(self) -> None:
+        _require_environment_name(self.name)
+        _require_utf8_text("environment view value", self.value)
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class CommandEnvironmentView:
+    base: CommandEnvironment
+    overlay: CommandEnvironmentOverlay = field(default_factory=CommandEnvironmentOverlay)
+
+    def __post_init__(self) -> None:
+        _require_instance("base", self.base, CommandEnvironment)
+        _require_instance("overlay", self.overlay, CommandEnvironmentOverlay)
+
+    def get(self, name: str, default: str = "") -> str:
+        _require_environment_name(name)
+        overlay_value = self.overlay.get(name)
+        if overlay_value is not None:
+            return overlay_value
+        return self.base.get(name, default)
+
+    @property
+    def values(self) -> tuple[CommandEnvironmentViewEntry, ...]:
+        current = {item.name: item.value for item in self.base.values}
+        for entry in self.overlay.entries:
+            current[entry.name] = entry.value.reveal_text()
+        return tuple(
+            CommandEnvironmentViewEntry(name, value) for name, value in sorted(current.items())
+        )
+
+    def is_overlay_name(self, name: str) -> bool:
+        return self.overlay.contains(name)
+
+
+class CommandValueProtection(Protocol):
+    def redact_text(self, value: str) -> str: ...
+
+    def redact_bytes(self, value: bytes) -> bytes: ...
+
+    def contains_protected_text(self, value: str) -> bool: ...
+
+
 @dataclass(frozen=True, slots=True)
+class NoOpCommandValueProtection:
+    def redact_text(self, value: str) -> str:
+        return value
+
+    def redact_bytes(self, value: bytes) -> bytes:
+        return value
+
+    def contains_protected_text(self, value: str) -> bool:
+        return False
+
+
+@dataclass(frozen=True, slots=True, repr=False)
 class ExecuteRequest:
     """A complete constrained command-language request."""
 
@@ -110,12 +223,16 @@ class ExecuteRequest:
     cwd: SandboxPath
     environment: CommandEnvironment
     limits: CommandLimits
+    overlay: CommandEnvironmentOverlay = field(default_factory=CommandEnvironmentOverlay)
 
     def __post_init__(self) -> None:
         _require_text("command", self.command)
         _require_instance("cwd", self.cwd, SandboxPath)
         _require_instance("environment", self.environment, CommandEnvironment)
         _require_instance("limits", self.limits, CommandLimits)
+        _require_instance("overlay", self.overlay, CommandEnvironmentOverlay)
+        if len(self.overlay.entries) > self.limits.max_secret_bindings:
+            raise ValueError("overlay exceeds limits.max_secret_bindings")
 
 
 @dataclass(frozen=True, slots=True)
@@ -150,7 +267,7 @@ class ExecuteResult:
         _require_non_negative_finite("duration_ms", self.duration_ms)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, repr=False)
 class CommandRequest:
     """One expanded simple-command request."""
 
@@ -166,7 +283,7 @@ class CommandRequest:
         _require_boolean("stdin_connected", self.stdin_connected)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, repr=False)
 class CommandResult:
     """One pipeline-ready stage result and explicit state transition."""
 
@@ -207,24 +324,60 @@ class CancellationSignal(Protocol):
         ...
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, repr=False)
 class CommandExecutionContext:
     """Per-execution identity and cooperative cancellation."""
 
     session_id: SessionId | None = None
     operation_id: OperationId | None = None
     cancellation: CancellationSignal | None = None
+    protection: CommandValueProtection = field(default_factory=NoOpCommandValueProtection)
+
+    def __post_init__(self) -> None:
+        protection = self.protection
+        for method in ("redact_text", "redact_bytes", "contains_protected_text"):
+            if not callable(getattr(protection, method, None)):
+                raise TypeError("protection must implement CommandValueProtection")
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, repr=False, init=False)
 class CommandContext:
     """Current immutable state supplied to one command stage."""
 
     cwd: SandboxPath
-    environment: CommandEnvironment
+    environment: CommandEnvironmentView
     cancellation: CancellationSignal | None
     session_id: SessionId | None
     operation_id: OperationId | None
+    protection: CommandValueProtection
+
+    def __init__(
+        self,
+        cwd: SandboxPath,
+        environment: CommandEnvironment | CommandEnvironmentView,
+        cancellation: CancellationSignal | None,
+        session_id: SessionId | None,
+        operation_id: OperationId | None,
+        protection: CommandValueProtection | None = None,
+    ) -> None:
+        _require_instance("cwd", cwd, SandboxPath)
+        environment_object = cast(object, environment)
+        if isinstance(environment_object, CommandEnvironment):
+            environment_view = CommandEnvironmentView(environment_object)
+        elif isinstance(environment_object, CommandEnvironmentView):
+            environment_view = environment_object
+        else:
+            raise TypeError("environment must be a CommandEnvironment or CommandEnvironmentView")
+        resolved_protection = NoOpCommandValueProtection() if protection is None else protection
+        for method in ("redact_text", "redact_bytes", "contains_protected_text"):
+            if not callable(getattr(resolved_protection, method, None)):
+                raise TypeError("protection must implement CommandValueProtection")
+        object.__setattr__(self, "cwd", cwd)
+        object.__setattr__(self, "environment", environment_view)
+        object.__setattr__(self, "cancellation", cancellation)
+        object.__setattr__(self, "session_id", session_id)
+        object.__setattr__(self, "operation_id", operation_id)
+        object.__setattr__(self, "protection", resolved_protection)
 
 
 @dataclass(frozen=True, slots=True)

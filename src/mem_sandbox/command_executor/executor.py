@@ -18,10 +18,12 @@ from mem_sandbox.command_executor.errors import (
 from mem_sandbox.command_executor.models import (
     CommandContext,
     CommandEnvironment,
+    CommandEnvironmentView,
     CommandExecutionContext,
     CommandFailureCode,
     CommandRequest,
     CommandResult,
+    CommandValueProtection,
     EnvironmentChange,
     EnvironmentValue,
     ExecuteRequest,
@@ -67,13 +69,13 @@ class CommandExecutor(Protocol):
     ) -> ExecuteResult: ...
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, repr=False)
 class _PreparedStage:
     argv: tuple[str, ...]
     command: VirtualCommand
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, repr=False)
 class _PreparedUnit:
     stages: tuple[_PreparedStage, ...]
     destination: str | None
@@ -156,7 +158,14 @@ class VirtualCommandExecutor:
             if item.connector.value == "on_success" and last_exit != 0:
                 continue
             self._check_execution_state(execution_context, deadline)
-            prepared = self._prepare_unit(item, request, environment, cwd)
+            environment_view = CommandEnvironmentView(environment, request.overlay)
+            prepared = self._prepare_unit(
+                item,
+                request,
+                environment_view,
+                cwd,
+                execution_context.protection,
+            )
             if prepared.failure is not None:
                 stage = prepared.failure
             else:
@@ -164,10 +173,16 @@ class VirtualCommandExecutor:
                     prepared,
                     request,
                     execution_context,
-                    environment,
+                    environment_view,
                     cwd,
                     deadline,
                 )
+            stage = self._sanitize_stage(
+                stage,
+                "command",
+                execution_context,
+                environment_view,
+            )
             self._check_execution_state(execution_context, deadline)
 
             if (
@@ -177,7 +192,7 @@ class VirtualCommandExecutor:
             ):
                 assert prepared.destination is not None
                 command_name = self._diagnostic_command_name(
-                    expand_word(item.stages[-1].words[0], environment, cwd)
+                    expand_word(item.stages[-1].words[0], environment_view, cwd)
                 )
                 stage = await self._apply_redirection(
                     command_name,
@@ -186,6 +201,13 @@ class VirtualCommandExecutor:
                     cwd,
                     stage,
                     request,
+                    execution_context,
+                )
+                stage = self._sanitize_stage(
+                    stage,
+                    command_name,
+                    execution_context,
+                    environment_view,
                 )
                 self._check_execution_state(execution_context, deadline)
             else:
@@ -223,8 +245,9 @@ class VirtualCommandExecutor:
         self,
         item: PlanUnit,
         request: ExecuteRequest,
-        environment: CommandEnvironment,
+        environment: CommandEnvironmentView,
         cwd: SandboxPath,
+        protection: CommandValueProtection,
     ) -> _PreparedUnit:
         destination = (
             expand_word(item.redirection.destination, environment, cwd)
@@ -237,14 +260,33 @@ class VirtualCommandExecutor:
         final_argv: tuple[str, ...] | None = None
         redirection_admitted = True
         is_pipeline = len(item.stages) > 1
+        if destination is not None and protection.contains_protected_text(destination):
+            first_failure = CommandResult(
+                1,
+                CommandFailureCode.PROTECTED_VALUE_REJECTED,
+                "",
+                "command: protected command arguments are not permitted\n",
+            )
+            redirection_admitted = False
         for index, stage in enumerate(item.stages):
             argv = tuple(expand_word(word, environment, cwd) for word in stage.words)
             if index == len(item.stages) - 1:
                 final_argv = argv
+            if any(protection.contains_protected_text(argument) for argument in argv):
+                if first_failure is None:
+                    first_failure = CommandResult(
+                        1,
+                        CommandFailureCode.PROTECTED_VALUE_REJECTED,
+                        "",
+                        "command: protected command arguments are not permitted\n",
+                    )
+                redirection_admitted = False
+                continue
             argument_error = self._expanded_argument_error(
                 argv,
                 destination if index == len(item.stages) - 1 else None,
                 request,
+                protection,
             )
             if argument_error is not None:
                 redirection_admitted = False
@@ -296,7 +338,12 @@ class VirtualCommandExecutor:
             return _PreparedUnit(
                 tuple(prepared),
                 destination,
-                CommandResult(
+                first_failure
+                if (
+                    first_failure is not None
+                    and first_failure.failure_code is CommandFailureCode.PROTECTED_VALUE_REJECTED
+                )
+                else CommandResult(
                     2,
                     CommandFailureCode.INVALID_ARGUMENT,
                     "",
@@ -316,7 +363,7 @@ class VirtualCommandExecutor:
         prepared: _PreparedUnit,
         request: ExecuteRequest,
         execution_context: CommandExecutionContext,
-        environment: CommandEnvironment,
+        environment: CommandEnvironmentView,
         cwd: SandboxPath,
         deadline: float,
     ) -> CommandResult:
@@ -389,7 +436,7 @@ class VirtualCommandExecutor:
         prepared: _PreparedStage,
         stdin: str,
         stdin_connected: bool,
-        environment: CommandEnvironment,
+        environment: CommandEnvironmentView,
         cwd: SandboxPath,
         execution_context: CommandExecutionContext,
     ) -> CommandResult:
@@ -399,18 +446,35 @@ class VirtualCommandExecutor:
             execution_context.cancellation,
             execution_context.session_id,
             execution_context.operation_id,
+            execution_context.protection,
         )
         try:
-            return await prepared.command.execute(
+            result = await prepared.command.execute(
                 CommandRequest(prepared.argv, stdin, stdin_connected),
                 command_context,
             )
-        except SandboxError:
+        except SandboxError as error:
+            if execution_context.protection.contains_protected_text(str(error)):
+                raise CommandInternalFailure(
+                    f"command handler {prepared.command.descriptor.name} "
+                    "failed with protected error data"
+                ) from None
             raise
         except Exception as error:
+            if execution_context.protection.contains_protected_text(str(error)):
+                raise CommandInternalFailure(
+                    f"command handler {prepared.command.descriptor.name} "
+                    "failed with protected error data"
+                ) from None
             raise CommandInternalFailure(
                 f"command handler {prepared.command.descriptor.name} failed unexpectedly"
             ) from error
+        return self._sanitize_stage(
+            result,
+            prepared.command.descriptor.name,
+            execution_context,
+            environment,
+        )
 
     async def _apply_redirection(
         self,
@@ -420,7 +484,10 @@ class VirtualCommandExecutor:
         cwd: SandboxPath,
         stage: CommandResult,
         request: ExecuteRequest,
+        execution_context: CommandExecutionContext,
     ) -> CommandResult:
+        if execution_context.protection.contains_protected_text(destination):
+            return self._protected_failure(command_name, execution_context)
         bounded = bound_text(stage.stdout, request.limits.max_stdout_bytes)
         if bounded.truncated:
             return CommandResult(
@@ -461,6 +528,50 @@ class VirtualCommandExecutor:
         )
 
     @staticmethod
+    def _sanitize_stage(
+        stage: CommandResult,
+        command_name: str,
+        execution_context: CommandExecutionContext,
+        environment: CommandEnvironmentView,
+    ) -> CommandResult:
+        protection = execution_context.protection
+        if stage.resulting_cwd is not None and protection.contains_protected_text(
+            stage.resulting_cwd.value
+        ):
+            return VirtualCommandExecutor._protected_failure(command_name, execution_context)
+        for change in stage.environment_changes:
+            if (
+                protection.contains_protected_text(change.name)
+                or environment.is_overlay_name(change.name)
+                or (change.value is not None and protection.contains_protected_text(change.value))
+            ):
+                return VirtualCommandExecutor._protected_failure(
+                    command_name,
+                    execution_context,
+                )
+        return CommandResult(
+            stage.exit_code,
+            stage.failure_code,
+            protection.redact_text(stage.stdout),
+            protection.redact_text(stage.stderr),
+            stage.resulting_cwd,
+            stage.environment_changes,
+        )
+
+    @staticmethod
+    def _protected_failure(
+        command_name: str,
+        execution_context: CommandExecutionContext,
+    ) -> CommandResult:
+        safe_name = execution_context.protection.redact_text(command_name)
+        return CommandResult(
+            1,
+            CommandFailureCode.PROTECTED_VALUE_REJECTED,
+            "",
+            f"{safe_name}: protected values cannot be persisted\n",
+        )
+
+    @staticmethod
     def _check_cancelled(context: CommandExecutionContext) -> None:
         if context.cancellation is not None and context.cancellation.is_set():
             raise CommandCancelled("command execution was cancelled")
@@ -497,6 +608,7 @@ class VirtualCommandExecutor:
         argv: tuple[str, ...],
         destination: str | None,
         request: ExecuteRequest,
+        protection: CommandValueProtection,
     ) -> str | None:
         for argument in (*argv, *((destination,) if destination is not None else ())):
             try:
@@ -504,6 +616,8 @@ class VirtualCommandExecutor:
             except UnicodeEncodeError:
                 return "expanded argument must be valid UTF-8"
             if size > request.limits.max_argument_bytes:
+                if protection.contains_protected_text(argument):
+                    return "expanded protected argument exceeds the configured limit"
                 return (
                     f"expanded argument contains {size} bytes; limit is "
                     f"{request.limits.max_argument_bytes}"
