@@ -19,10 +19,14 @@ from mem_sandbox.snapshots.errors import (
 )
 from mem_sandbox.snapshots.models import (
     SandboxSnapshot,
+    SandboxSnapshotDraft,
     SessionSnapshotState,
     SnapshotMetadata,
     SnapshotPayload,
+    SnapshotPurgeResult,
     SnapshotRef,
+    SnapshotStoreLimits,
+    SnapshotStoreStats,
 )
 from mem_sandbox.snapshots.store import InMemorySnapshotStore
 
@@ -30,6 +34,7 @@ __all__ = [
     "InMemorySnapshotStore",
     "JsonSessionSnapshotCodec",
     "SandboxSnapshot",
+    "SandboxSnapshotDraft",
     "SessionSnapshotState",
     "SnapshotCorrupt",
     "SnapshotCorruptError",
@@ -42,10 +47,13 @@ __all__ = [
     "SnapshotNotFound",
     "SnapshotNotFoundError",
     "SnapshotPayload",
+    "SnapshotPurgeResult",
     "SnapshotRef",
     "SnapshotRestoreFailed",
     "SnapshotSaveFailed",
     "SnapshotStoreFull",
+    "SnapshotStoreLimits",
+    "SnapshotStoreStats",
     "SnapshotTooLarge",
     "SnapshotTooLargeError",
 ]

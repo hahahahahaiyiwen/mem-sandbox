@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import timedelta
+
 import pytest
 
 from mem_sandbox.command_executor import (
@@ -23,7 +25,11 @@ from mem_sandbox.session import (
     SessionExpectedFileHash,
     WriteFileRequest,
 )
-from mem_sandbox.snapshots import InMemorySnapshotStore, JsonSessionSnapshotCodec
+from mem_sandbox.snapshots import (
+    InMemorySnapshotStore,
+    JsonSessionSnapshotCodec,
+    SnapshotStoreLimits,
+)
 from mem_sandbox.workspace import ContentHashMustEqual, MemoryWorkspace
 
 
@@ -49,7 +55,14 @@ async def test_minimal_session_vertical_slice() -> None:
         policy_engine=AllowAllPolicyEngine(),
         secret_broker=NoSecretBroker(),
         event_sink=events,
-        snapshot_store=InMemorySnapshotStore(),
+        snapshot_store=InMemorySnapshotStore(
+            default_ttl=timedelta(days=1),
+            limits=SnapshotStoreLimits(
+                max_snapshots=10,
+                max_total_payload_bytes=64 * 1024 * 1024,
+            ),
+            clock=SystemClock(),
+        ),
         snapshot_codec=JsonSessionSnapshotCodec(),
         resource_scope=NoOpSessionResourceScope(),
         clock=SystemClock(),

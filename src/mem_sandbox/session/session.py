@@ -88,7 +88,7 @@ from mem_sandbox.session.ports import (
     SessionWorkspaceSnapshotPort,
 )
 from mem_sandbox.snapshots import (
-    SandboxSnapshot,
+    SandboxSnapshotDraft,
     SessionSnapshotState,
     SnapshotCorrupt,
     SnapshotIncompatible,
@@ -550,7 +550,7 @@ class SandboxSession:
             state = SessionSnapshotState(workspace, self._cwd, self._environment)
             self._remaining(context.collaborator_deadline, context.operation_id)
             payload = self._snapshot_codec.encode(state)
-            snapshot = SandboxSnapshot(
+            snapshot = SandboxSnapshotDraft(
                 snapshot_id=SnapshotId(self._uuid_generator.new_uuid()),
                 schema_version=payload.schema_version,
                 created_at=self._clock.now(),

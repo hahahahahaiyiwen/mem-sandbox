@@ -508,9 +508,9 @@ agent-facing contract without exposing concrete core components.
   immutable candidate that validates the required cwd before live state changes. Extend
   the workspace snapshot port and owning workspace README with prepare/commit behavior.
 - [x] **3.4.4** Write tests for source-session provenance, opaque references, missing and
-  incompatible snapshots, atomic restore failure, and successful round-trip. Owner
-  authorization remains a future `SandboxService` responsibility. Cover duplicate
-  snapshot identifiers and explicit workspace-revision rewind across restore.
+  incompatible snapshots, atomic restore failure, and successful round-trip. Application
+  authorization remains outside the package boundary. Cover duplicate snapshot
+  identifiers and explicit workspace-revision rewind across restore.
 
 #### 3.5 Vertical-slice conformance
 
@@ -640,10 +640,13 @@ boundary exists.
 
 #### 4.4 Snapshot store completion
 
-- [ ] **4.4.1** Write tests for snapshot ownership, count and byte limits, expiration,
-  compatibility, and integrity.
-- [ ] **4.4.2** Implement process-local snapshot limits and expiration.
-- [ ] **4.4.3** Implement explicit compatibility and integrity checks before restore
+- [x] **4.4.1** Write the approved snapshot-store behavior matrix for creator provenance,
+  count and byte limits, store-assigned absolute expiration, explicit purge,
+  compatibility, integrity, and concurrent accounting.
+- [x] **4.4.2** Introduce snapshot draft/persisted types, migrate the session snapshot
+  store port and existing construction sites, and implement process-local count/byte
+  limits plus store-assigned expiration.
+- [x] **4.4.3** Implement explicit compatibility and integrity checks before restore
   mutation begins.
 
 #### 4.5 Secret boundary
@@ -666,14 +669,18 @@ boundary exists.
 
 #### 4.7 Sandbox service and session factory
 
-- [ ] **4.7.1** Write tests for owner-bound create, lookup, resume, delete, expiration,
-  and concurrent registry behavior.
-- [ ] **4.7.2** Implement the process-local `SandboxService`, session factory, opaque
-  handles, owner authorization, and exactly-once registry cleanup.
-- [ ] **4.7.3** Assemble borrowed shared collaborators and per-session
-  `SessionResourceScope` instances through the factory.
-- [ ] **4.7.4** Enforce snapshot owner authorization before loading or resuming while
-  preserving source-session provenance as non-authoritative metadata.
+- [x] **4.7.1** Write the approved service behavior matrix for provenance-preserving
+  create/resume, lookup, delete, factory cleanup, independent forks, and concurrent
+  registry behavior. Application authorization and automatic live-session expiration
+  remain out of core.
+- [x] **4.7.2** Implement the process-local `SandboxService`, opaque handles,
+  owner provenance, service shutdown, and exactly-once registry cleanup.
+- [x] **4.7.3** Implement the service-owned session-factory, snapshot-gateway, decoder,
+  and runtime ports. Assemble borrowed shared collaborators, the session resource scope,
+  and a post-session dispatcher scope in the required close order.
+- [x] **4.7.4** Preserve creator and source-session provenance without treating either as
+  authorization. Document that applications own principal-to-handle and
+  principal-to-snapshot-reference access control.
 
 ### Exit criteria
 
@@ -959,6 +966,10 @@ their referenced checklist task begins.
 | Timeout state | 30-second plan timeout; keep committed files and discard transient cwd/environment on timeout | `2.6` | Resolved |
 | Pipeline semantics | Bounded sequential UTF-8 transformations between registered pipeline-safe commands; fixed pipefail; final-stage-only redirection; no shell emulation | `4.1.6` | Resolved |
 | Composed policy engine | Retain the explicit allow-all admission seam; revisit only for a concrete owner, secret, network, host-execution, or shared-state trust boundary | `4.2` / `5.7` | Deferred |
+| Service ownership | Preserve application-supplied `OwnerId` as provenance; applications own principal-to-handle and snapshot-reference authorization | `4.7` | Resolved |
+| Session lifetime | No automatic live-session expiry; explicit deletion owns process-local cleanup | `4.7` | Resolved |
+| Snapshot expiration | Require an explicit store-level default TTL; the store assigns absolute expiry and performs lazy/explicit purge | `4.4` | Resolved |
+| Service lifecycle events | Keep `sandbox.created`/`sandbox.deleted` producer-less until shared sequencing or separate service identity is approved | `4.7` | Deferred |
 | Product validation | Stateful cross-adapter conformance plus controlled provisioning baselines; comparative evidence required for a scoped "fastest" claim | `5.6` | Resolved |
 | First framework adapter | PydanticAI capability | `5.2.1` | Open |
 | Workspace content offload | Revisit after Milestone 5 using measured workload and provisioning data | `6.2.3` | Deferred |

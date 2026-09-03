@@ -61,6 +61,7 @@ from mem_sandbox.session import (
 from mem_sandbox.snapshots import (
     JsonSessionSnapshotCodec,
     SandboxSnapshot,
+    SandboxSnapshotDraft,
     SessionSnapshotState,
     SnapshotPayload,
     SnapshotRef,
@@ -111,7 +112,7 @@ class Store:
     def process_local(self) -> bool:
         return True
 
-    async def save(self, snapshot: SandboxSnapshot) -> SnapshotRef:
+    async def save(self, draft: SandboxSnapshotDraft) -> SnapshotRef:
         raise AssertionError
 
     async def load(self, snapshot_ref: SnapshotRef) -> SandboxSnapshot:
@@ -475,15 +476,15 @@ async def test_snapshot_metadata_comes_from_codec_and_store_capabilities() -> No
 
     class RecordingStore:
         def __init__(self) -> None:
-            self.saved: SandboxSnapshot | None = None
+            self.saved: SandboxSnapshotDraft | None = None
 
         @property
         def process_local(self) -> bool:
             return False
 
-        async def save(self, snapshot: SandboxSnapshot) -> SnapshotRef:
-            self.saved = snapshot
-            return SnapshotRef(snapshot.snapshot_id)
+        async def save(self, draft: SandboxSnapshotDraft) -> SnapshotRef:
+            self.saved = draft
+            return SnapshotRef(draft.snapshot_id)
 
         async def load(self, snapshot_ref: SnapshotRef) -> SandboxSnapshot:
             raise AssertionError(snapshot_ref)
@@ -516,15 +517,15 @@ async def test_snapshot_metadata_comes_from_codec_and_store_capabilities() -> No
 async def test_required_snapshot_event_failure_preserves_the_saved_snapshot() -> None:
     class RecordingStore:
         def __init__(self) -> None:
-            self.saved: SandboxSnapshot | None = None
+            self.saved: SandboxSnapshotDraft | None = None
 
         @property
         def process_local(self) -> bool:
             return True
 
-        async def save(self, snapshot: SandboxSnapshot) -> SnapshotRef:
-            self.saved = snapshot
-            return SnapshotRef(snapshot.snapshot_id)
+        async def save(self, draft: SandboxSnapshotDraft) -> SnapshotRef:
+            self.saved = draft
+            return SnapshotRef(draft.snapshot_id)
 
         async def load(self, snapshot_ref: SnapshotRef) -> SandboxSnapshot:
             raise AssertionError(snapshot_ref)
@@ -572,15 +573,15 @@ async def test_required_snapshot_event_failure_preserves_the_saved_snapshot() ->
 async def test_snapshot_event_timeout_preserves_budget_for_failed_terminal() -> None:
     class RecordingStore:
         def __init__(self) -> None:
-            self.saved: SandboxSnapshot | None = None
+            self.saved: SandboxSnapshotDraft | None = None
 
         @property
         def process_local(self) -> bool:
             return True
 
-        async def save(self, snapshot: SandboxSnapshot) -> SnapshotRef:
-            self.saved = snapshot
-            return SnapshotRef(snapshot.snapshot_id)
+        async def save(self, draft: SandboxSnapshotDraft) -> SnapshotRef:
+            self.saved = draft
+            return SnapshotRef(draft.snapshot_id)
 
         async def load(self, snapshot_ref: SnapshotRef) -> SandboxSnapshot:
             raise AssertionError(snapshot_ref)
@@ -637,15 +638,15 @@ async def test_best_effort_snapshot_event_failure_keeps_operation_successful() -
 
     class RecordingStore:
         def __init__(self) -> None:
-            self.saved: SandboxSnapshot | None = None
+            self.saved: SandboxSnapshotDraft | None = None
 
         @property
         def process_local(self) -> bool:
             return True
 
-        async def save(self, snapshot: SandboxSnapshot) -> SnapshotRef:
-            self.saved = snapshot
-            return SnapshotRef(snapshot.snapshot_id)
+        async def save(self, draft: SandboxSnapshotDraft) -> SnapshotRef:
+            self.saved = draft
+            return SnapshotRef(draft.snapshot_id)
 
         async def load(self, snapshot_ref: SnapshotRef) -> SandboxSnapshot:
             raise AssertionError(snapshot_ref)

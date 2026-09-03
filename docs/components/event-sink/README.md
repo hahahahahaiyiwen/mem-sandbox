@@ -90,7 +90,7 @@ Event categories and issue #18 producers are:
 | Lifecycle | `sandbox.started`, `sandbox.closing`, `sandbox.closed`, `sandbox.failed` | `SandboxSession` |
 | Operation | `operation.started`, `operation.completed`, `operation.failed`, `operation.cancelled`, `operation.timed_out` | `SandboxSession` |
 | Snapshot | `snapshot.created`, `snapshot.restored` | `SandboxSession` post-commit hook |
-| Service lifecycle | `sandbox.created`, `sandbox.deleted` | Defined for the future `SandboxService`; not emitted by issue #18 |
+| Service lifecycle | `sandbox.created`, `sandbox.deleted` | Defined but producer-less until a shared service/session sequencing design is approved |
 
 Policy and secret event types are not added while those features are deferred. File and
 command details remain bounded operation attributes rather than creating an unbounded
@@ -380,8 +380,8 @@ signals.
 - Best-effort snapshot-event failure reports a diagnostic and still permits
   `operation.completed`.
 - No policy or secret event is emitted while those features are deferred.
-- `sandbox.created` and `sandbox.deleted` remain intentionally producer-less until
-  `SandboxService`.
+- `sandbox.created` and `sandbox.deleted` remain intentionally producer-less until a
+  shared service/session event sequencer or separate service-event identity is approved.
 - Default session events contain no file content, full command text, stdout/stderr,
   environment values, host paths, or secrets.
 
