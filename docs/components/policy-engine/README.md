@@ -7,11 +7,12 @@
 MemSandbox will not implement the previously proposed composed policy engine in the
 current release path.
 
-The in-memory sandbox currently has no caller or owner authorization context, functional
-secret resolution, network destination, host-process execution, or shared persistent
-backend. Without one of those trust boundaries, a general operation/path/command rule
-engine would add restrictions and cross-module coupling without providing meaningful
-security or product value.
+The in-memory sandbox currently has no authenticated caller or in-core owner
+authorization context, functional secret resolution, network destination, host-process
+execution, or shared persistent backend. Logical `OwnerId` values are provenance only.
+Without one of those trust boundaries, a general operation/path/command rule engine would
+add restrictions and cross-module coupling without providing meaningful security or
+product value.
 
 The essential sandbox guarantees remain enforced by the modules that own them:
 

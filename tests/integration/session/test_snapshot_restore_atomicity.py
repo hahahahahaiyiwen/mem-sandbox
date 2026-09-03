@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import replace
+from datetime import timedelta
 
 import pytest
 
@@ -26,15 +27,24 @@ from mem_sandbox.snapshots import (
     InMemorySnapshotStore,
     JsonSessionSnapshotCodec,
     SandboxSnapshot,
+    SandboxSnapshotDraft,
     SnapshotCorrupt,
     SnapshotRef,
+    SnapshotStoreLimits,
 )
 from mem_sandbox.workspace import MemoryWorkspace
 
 
 class ControllableSnapshotStore:
     def __init__(self) -> None:
-        self.delegate = InMemorySnapshotStore()
+        self.delegate = InMemorySnapshotStore(
+            default_ttl=timedelta(days=1),
+            limits=SnapshotStoreLimits(
+                max_snapshots=10,
+                max_total_payload_bytes=64 * 1024 * 1024,
+            ),
+            clock=SystemClock(),
+        )
         self.corrupt_load = False
         self.block_load = False
         self.load_started = asyncio.Event()
@@ -44,8 +54,8 @@ class ControllableSnapshotStore:
     def process_local(self) -> bool:
         return self.delegate.process_local
 
-    async def save(self, snapshot: SandboxSnapshot) -> SnapshotRef:
-        return await self.delegate.save(snapshot)
+    async def save(self, draft: SandboxSnapshotDraft) -> SnapshotRef:
+        return await self.delegate.save(draft)
 
     async def load(self, snapshot_ref: SnapshotRef) -> SandboxSnapshot:
         if self.block_load:

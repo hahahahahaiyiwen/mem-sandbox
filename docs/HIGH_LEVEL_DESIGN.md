@@ -166,7 +166,7 @@ Detailed design:
 
 | Component | Boundary ownership | Detailed design |
 |---|---|---|
-| Sandbox service | Session creation, lookup, resume, expiration, and deletion | [Sandbox service](./components/sandbox-service/README.md) |
+| Sandbox service | Session creation, lookup, resume, explicit deletion, and creator provenance | [Sandbox service](./components/sandbox-service/README.md) |
 | Sandbox session | Agent-facing operations, lifecycle, coordination, and composition | [Sandbox session](./components/sandbox-session/README.md) |
 | Workspace | Virtual paths, files, directories, metadata, quotas, and atomic mutations | [Workspace](./components/workspace/README.md) |
 | Command executor | Parsing and executing the constrained command language | [Command executor](./components/command-executor/README.md) |
@@ -184,23 +184,16 @@ The service is the host-facing lifecycle boundary:
 ```python
 class SandboxService:
     async def create(self, request: CreateSandboxRequest) -> SandboxHandle: ...
-    async def get_session(
-        self,
-        handle: SandboxHandle,
-        *,
-        owner_id: str,
-    ) -> SandboxSession: ...
+    async def get_session(self, handle: SandboxHandle) -> SandboxSession: ...
     async def resume(self, request: ResumeSandboxRequest) -> SandboxHandle: ...
-    async def delete(
-        self,
-        handle: SandboxHandle,
-        *,
-        owner_id: str,
-    ) -> None: ...
+    async def delete(self, handle: SandboxHandle) -> None: ...
+    async def close(self) -> None: ...
 ```
 
 The concrete API may evolve, but lifecycle ownership must remain separate from
-model-facing tools.
+model-facing tools. `OwnerId` on create/resume is logical provenance, not an
+authentication or authorization decision. Applications own access to handles and
+snapshot references.
 
 ### 8.2 Sandbox session
 
@@ -318,7 +311,7 @@ host requests snapshot
   -> original session may be closed
 
 host resumes snapshot
-  -> service authorizes owner access to the reference
+  -> application supplies an authorized reference
   -> snapshot store loads and validates snapshot
   -> service creates a new session identity
   -> factory prepares and commits restored workspace, cwd, and environment while CREATED
@@ -329,10 +322,11 @@ host resumes snapshot
 Snapshots transfer sandbox state. Framework conversation state and workflow checkpoints
 remain separate concerns.
 
-Milestone 3 records source-session provenance without enforcing owner authorization in
-the session or minimal store. `SandboxService` owns authorization in the later lifecycle
-composition. Restore validates a workspace-prepared immutable candidate, including the
-required cwd, before publishing workspace and session state.
+Source-session and logical creator values are provenance only. `SandboxSession`, the
+snapshot store, and the process-local `SandboxService` do not authenticate callers or
+authorize references. Applications own that trust boundary. Restore validates a
+workspace-prepared immutable candidate, including the required cwd, before publishing
+workspace and session state.
 
 ## 12. Session state and ownership
 
@@ -366,7 +360,8 @@ Required invariants:
 - Normal execute results commit returned cwd/environment even for non-zero command exits.
 - Repeated close/delete calls are idempotent where practical.
 - Behavior collaborators are borrowed; the session closes one owned resource scope that
-  contains only per-session closeable resources.
+  contains only per-session closeable resources. A service-owned runtime may close
+  post-session resources, such as the event dispatcher, after `sandbox.closed`.
 
 ## 13. Data and error contracts
 
@@ -387,7 +382,7 @@ Stable error categories include:
 - policy denied
 - secret denied or expired
 - snapshot incompatible or corrupt
-- session closed, failed, or expired
+- session closed or failed
 
 Adapters map these errors into each framework's tool or backend error shape without
 changing their meaning.

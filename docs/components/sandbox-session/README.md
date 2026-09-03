@@ -126,7 +126,9 @@ class SessionEventSink(Protocol):
 
 
 class SessionSnapshotStore(Protocol):
-    async def save(self, snapshot: SandboxSnapshot) -> SnapshotRef: ...
+    @property
+    def process_local(self) -> bool: ...
+    async def save(self, draft: SandboxSnapshotDraft) -> SnapshotRef: ...
     async def load(self, snapshot_ref: SnapshotRef) -> SandboxSnapshot: ...
 
 
@@ -155,8 +157,10 @@ depend on one broad infrastructure interface.
 
 The snapshot module implements a deterministic `JsonSessionSnapshotCodec`; the session
 depends only on the session-owned codec protocol. Encoding produces the payload and state
-hash before store save. Decoding verifies the payload size, canonical encoding, content
-hash, session schema, and capability version before workspace restore preparation.
+hash before store save. `create_snapshot` builds a `SandboxSnapshotDraft`; the store
+assigns absolute expiration when it accepts that draft. Decoding a persisted
+`SandboxSnapshot` verifies the payload size, canonical encoding, content hash, session
+schema, and capability version before workspace restore preparation.
 
 The codec has a validated, session-configured `max_payload_bytes` limit of 64 MiB by
 default. This bounds the complete session envelope independently of the workspace
@@ -169,6 +173,15 @@ generator individually. The composition root instead supplies one session-owned
 `SessionResourceScope` containing only resources created specifically for that session.
 Shared services are excluded from the scope. Operation-scoped secret leases remain owned
 by the operation and close in `finally`.
+
+A per-session event dispatcher must remain outside this scope because `close()` emits
+`sandbox.closed` after scope cleanup. The service/factory-owned post-session scope closes
+that dispatcher only after `SandboxSession.close()` completes.
+
+The default `SandboxService` factory may inject a provenance-decorating implementation
+of the existing `SessionSnapshotStore` port. That wrapper stamps snapshot drafts with
+application-supplied logical owner provenance before delegating to the shared store. The
+session remains unaware of owner identity and performs no authorization decision.
 
 ## Operation pipeline
 
@@ -330,13 +343,13 @@ acquire only to observe `CLOSING` or `CLOSED` and fail without invoking collabor
 
 The session owns:
 
-- session and owner identity
+- session identity
 - lifecycle status
 - operation sequence number
 - current working directory
 - approved environment variables
 - capability profile
-- creation and expiration metadata
+- creation metadata
 - close admission and completion state
 
 File content belongs to the workspace. Persisted snapshot bytes belong to the snapshot
@@ -355,8 +368,10 @@ Snapshot creation does not capture active operations, secret leases, framework t
 objects, or agent conversation state.
 
 Milestone 3 records `source_session_id` as provenance only. Snapshot authorization is not
-performed by `SandboxSession` or the minimal in-memory store; the future
-`SandboxService` authorizes owner-bound access before supplying a reference.
+performed by `SandboxSession`, the snapshot store, or the process-local
+`SandboxService`. Applications decide which references may cross their trust boundary.
+Service-created sessions preserve logical creator provenance without treating it as an
+access decision.
 
 Restore is an exclusive host operation on a live `RUNNING` session. The session validates
 session schema, capability version, cwd, and approved environment before changing live
@@ -396,8 +411,9 @@ The session-owned event set is:
 
 Policy-decision and secret events remain deferred with composed policy and functional
 secret resolution. Dedicated snapshot events use a post-commit hook before
-`operation.completed`. `sandbox.created` and `sandbox.deleted` remain owned by the
-future `SandboxService`.
+`operation.completed`. `sandbox.created` and `sandbox.deleted` remain producer-less
+until service and session events share one approved sequencer or use separate event
+identity contracts.
 
 For operation start and terminal events, failure to deliver the required event emits no
 further event for that operation:

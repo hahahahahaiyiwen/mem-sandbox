@@ -12,6 +12,7 @@ from mem_sandbox.policy import PolicyDecision, PolicyRequest
 from mem_sandbox.secrets import SecretAccessRequest, SecretLease
 from mem_sandbox.snapshots import (
     SandboxSnapshot,
+    SandboxSnapshotDraft,
     SessionSnapshotState,
     SnapshotPayload,
     SnapshotRef,
@@ -70,7 +71,7 @@ class SessionSnapshotStore(Protocol):
     @property
     def process_local(self) -> bool: ...
 
-    async def save(self, snapshot: SandboxSnapshot) -> SnapshotRef: ...
+    async def save(self, draft: SandboxSnapshotDraft) -> SnapshotRef: ...
     async def load(self, snapshot_ref: SnapshotRef) -> SandboxSnapshot: ...
 
 

@@ -1,17 +1,18 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 import pytest
 
 from mem_sandbox.command_executor import CommandEnvironment, EnvironmentValue
-from mem_sandbox.core import Revision, SessionId, SnapshotId
+from mem_sandbox.core import Revision, SessionId, SnapshotId, SystemClock
 from mem_sandbox.snapshots import (
     InMemorySnapshotStore,
     JsonSessionSnapshotCodec,
     SandboxSnapshot,
+    SandboxSnapshotDraft,
     SessionSnapshotState,
     SnapshotCorrupt,
     SnapshotIdentifierConflict,
@@ -19,6 +20,7 @@ from mem_sandbox.snapshots import (
     SnapshotMetadata,
     SnapshotNotFound,
     SnapshotRef,
+    SnapshotStoreLimits,
     SnapshotTooLarge,
 )
 from mem_sandbox.workspace import AnyCurrentState, MemoryWorkspace, WorkspaceWriteRequest
@@ -57,11 +59,13 @@ async def test_session_snapshot_codec_is_deterministic_and_verifies_hash() -> No
         snapshot_id=SNAPSHOT_ID,
         schema_version=1,
         created_at=datetime(2026, 9, 1, tzinfo=UTC),
+        expires_at=datetime(2026, 9, 2, tzinfo=UTC),
         source_session_id=SESSION_ID,
         workspace_revision=state.workspace.workspace_revision,
         content_hash=first.content_hash,
         payload=first.payload,
         metadata=SnapshotMetadata("json", len(first.payload), True),
+        created_by=None,
     )
     assert codec.decode(snapshot) == state
 
@@ -69,11 +73,13 @@ async def test_session_snapshot_codec_is_deterministic_and_verifies_hash() -> No
         snapshot_id=snapshot.snapshot_id,
         schema_version=snapshot.schema_version,
         created_at=snapshot.created_at,
+        expires_at=snapshot.expires_at,
         source_session_id=snapshot.source_session_id,
         workspace_revision=snapshot.workspace_revision,
         content_hash=snapshot.content_hash,
         payload=snapshot.payload[:-1] + bytes([snapshot.payload[-1] ^ 1]),
         metadata=snapshot.metadata,
+        created_by=snapshot.created_by,
     )
     with pytest.raises(SnapshotCorrupt):
         codec.decode(corrupt)
@@ -93,7 +99,7 @@ async def test_session_snapshot_codec_enforces_complete_payload_limit() -> None:
 async def test_in_memory_store_preserves_identity_and_rejects_duplicates() -> None:
     state = await _state()
     payload = JsonSessionSnapshotCodec().encode(state)
-    snapshot = SandboxSnapshot(
+    snapshot = SandboxSnapshotDraft(
         snapshot_id=SNAPSHOT_ID,
         schema_version=1,
         created_at=datetime(2026, 9, 1, tzinfo=UTC),
@@ -103,14 +109,23 @@ async def test_in_memory_store_preserves_identity_and_rejects_duplicates() -> No
         payload=payload.payload,
         metadata=SnapshotMetadata("json", len(payload.payload), True),
     )
-    store = InMemorySnapshotStore()
+    store = InMemorySnapshotStore(
+        default_ttl=timedelta(days=1),
+        limits=SnapshotStoreLimits(
+            max_snapshots=10,
+            max_total_payload_bytes=64 * 1024 * 1024,
+        ),
+        clock=SystemClock(),
+    )
     assert store.process_local is True
 
     snapshot_ref = await store.save(snapshot)
+    persisted = await store.load(snapshot_ref)
 
     assert snapshot_ref == SnapshotRef(SNAPSHOT_ID)
-    assert await store.load(snapshot_ref) == snapshot
-    assert (await store.load(snapshot_ref)).source_session_id == SESSION_ID
+    assert persisted.snapshot_id == snapshot.snapshot_id
+    assert persisted.payload == snapshot.payload
+    assert persisted.source_session_id == SESSION_ID
     with pytest.raises(SnapshotIdentifierConflict):
         await store.save(snapshot)
     await store.delete(snapshot_ref)
@@ -129,21 +144,25 @@ async def test_snapshot_compatibility_and_outer_identity_do_not_change_state_has
         SNAPSHOT_ID,
         1,
         datetime(2026, 9, 1, tzinfo=UTC),
+        datetime(2026, 9, 3, tzinfo=UTC),
         SESSION_ID,
         state.workspace.workspace_revision,
         payload.content_hash,
         payload.payload,
         SnapshotMetadata("json", len(payload.payload), True),
+        None,
     )
     second = SandboxSnapshot(
         other_id,
         1,
         datetime(2026, 9, 2, tzinfo=UTC),
+        datetime(2026, 9, 4, tzinfo=UTC),
         SESSION_ID,
         state.workspace.workspace_revision,
         payload.content_hash,
         payload.payload,
         SnapshotMetadata("json", len(payload.payload), True),
+        None,
     )
 
     assert first.content_hash == second.content_hash
