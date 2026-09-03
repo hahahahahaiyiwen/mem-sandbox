@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime
 from uuid import UUID
 
@@ -42,6 +43,32 @@ async def test_allow_all_returns_an_explicit_unchanged_decision() -> None:
     assert decision.allowed is True
     assert decision.reason_code == "allow_all"
     assert decision.effective_limits is limits
+
+
+@pytest.mark.asyncio
+async def test_policy_request_accepts_only_sorted_unique_secret_reference_facts() -> None:
+    first = SecretRef("first")
+    second = SecretRef("second")
+    request = PolicyRequest(
+        session_id=SESSION_ID,
+        operation_id=OPERATION_ID,
+        operation_kind=OperationKind.EXECUTE,
+        path=None,
+        command_name=None,
+        requested_limits=OperationLimits(),
+        secret_refs=(first, second),
+    )
+
+    decision = await AllowAllPolicyEngine().evaluate(request)
+
+    assert request.secret_refs == (first, second)
+    assert decision.allowed is True
+    with pytest.raises(ValueError, match="sorted"):
+        replace(request, secret_refs=(second, first))
+    with pytest.raises(ValueError, match="duplicates"):
+        replace(request, secret_refs=(first, first))
+    with pytest.raises(TypeError, match="tuple"):
+        replace(request, secret_refs=[first])  # type: ignore[arg-type]
 
 
 @pytest.mark.asyncio

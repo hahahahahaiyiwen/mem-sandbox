@@ -1,13 +1,13 @@
 # Sandbox Session Design
 
-**Status:** Milestone 3 implemented
+**Status:** Core lifecycle and issue #20 secret execution behavior implemented
 
 ## Purpose
 
 `SandboxSession` is the central application-facing facade. It exposes the small agent
 operation surface, owns lifecycle and operation ordering, and coordinates the workspace,
-command executor, minimal policy-admission seam, no-secret broker, event sink, and
-snapshot store.
+command executor, minimal policy-admission seam, secret broker, event sink, and snapshot
+store.
 
 The session contains orchestration logic. It does not contain concrete infrastructure.
 
@@ -65,6 +65,30 @@ collaborator budget.
 `OperationKind` and `OperationLimits` are shared immutable data contracts owned by
 `mem_sandbox.core.operations`. The session, policy, and event modules import them from
 core; no module imports session-owned types back into policy or events.
+
+Issue #20 extends only execute requests:
+
+```python
+@dataclass(frozen=True, slots=True)
+class SessionSecretEnvironmentBinding:
+    name: str
+    secret_ref: SecretRef
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class SessionExecuteRequest:
+    command: str
+    secret_environment: tuple[SessionSecretEnvironmentBinding, ...] = ()
+    command_limits: CommandLimits = field(default_factory=CommandLimits)
+    limits: OperationLimits = field(default_factory=OperationLimits)
+    cancellation: CancellationSignal | None = None
+```
+
+Bindings are immutable and deterministically ordered by environment name. `PWD`,
+duplicate names, invalid command-environment names, invalid references, and unsupported
+types fail during request construction. Multiple names may reference the same
+`SecretRef`; policy and broker acquisition de-duplicate the reference while the overlay
+retains every approved name.
 
 Host-only methods may include:
 
@@ -195,16 +219,19 @@ except lifecycle methods where a step does not apply:
 5. Normalize paths and command metadata.
 6. Create an operation identifier and emit the required `operation.started` event.
 7. Ask the minimal policy-admission collaborator for an explicit decision.
-8. Resolve approved secret references only if a later approved design enables them.
-9. Invoke the workspace or command executor with the remaining deadline budget.
-10. Commit explicit session state from a normal result.
-11. Emit the required completion or failure event.
-12. Release secret leases and the operation gate.
-13. Return a domain result or raise a stable domain error.
+8. For execute, acquire each approved unique secret reference in deterministic order.
+9. Build one operation-local redactor and ephemeral command-environment overlay.
+10. Invoke the workspace or command executor with the remaining deadline budget.
+11. Close all acquired leases before committing transient cwd/environment state.
+12. Commit explicit session state from a normal result.
+13. Emit the required completion or failure event.
+14. Release the operation gate.
+15. Return a domain result or raise a stable domain error.
 
-Admission denial occurs before secret resolution and before workspace mutation. The
-current release retains the explicit allow-all seam but does not implement composed
-operation, path, command, argument, or resource policy.
+Admission denial occurs before secret resolution and before workspace mutation. Policy
+receives only the sorted unique `SecretRef` values, not environment values or resolved
+material. The release retains the explicit admission seam but does not implement
+composed operation, path, command, argument, destination, or resource policy.
 
 The deadline covers gate wait, policy, collaborator execution, session-state commit, and
 terminal event delivery. Cancellation or timeout while waiting for the gate creates no
@@ -234,9 +261,42 @@ Session deadlines use `asyncio` loop monotonic time. The injected UTC `Clock` su
 event and result timestamps only; it is not widened into a timeout or scheduling
 dependency.
 
-A normal command-executor result commits its returned cwd and approved environment
-changes even when its exit code is non-zero. Raised timeout, cancellation, policy,
-infrastructure, or internal failures do not commit transient cwd or environment state.
+For execute, the existing action closure owns lease acquisition and cleanup without
+duplicating the shared operation pipeline. `_run_operation` accepts only the normalized
+reference facts needed to construct the policy request:
+
+```text
+policy-approved action
+  -> verify remaining collaborator budget
+  -> acquire unique leases
+  -> build overlay and protection adapter
+  -> await command executor
+  -> close all leases
+  -> read workspace stats
+  -> compute and commit cwd/approved non-secret environment
+  -> return to shared terminal-event handling
+```
+
+Lease cleanup therefore completes before cwd/environment commit. A cleanup-only failure
+prevents those transient changes from becoming session state. The shared terminal event
+is emitted after leases have closed. If lease acquisition or redactor construction
+fails, earlier leases close and the command executor is never invoked.
+
+Cleanup continues through every lease when one close raises any `BaseException`.
+Failures originating in a close task are reduced to the stable, value-free
+`SecretLeaseCleanupFailed`; interruption delivered to the outer operation is deferred
+until every lease has closed and then passes through the same protected exception-graph
+sanitizer as other operation failures.
+
+Before constructing each `SecretAccessRequest`, the session rechecks the remaining
+effective collaborator budget. An exhausted budget raises `SessionOperationTimeout`
+rather than exposing a non-positive requested-duration validation error.
+
+A normal command-executor result commits its returned cwd and approved non-secret
+environment changes even when its exit code is non-zero. Raised timeout, cancellation,
+policy, secret, infrastructure, or internal failures do not commit transient cwd or
+environment state. A command result containing a protected persistent environment
+change is rejected by the executor before it reaches this commit boundary.
 Earlier workspace mutations performed by a timed-out command may remain committed while
 its transient cwd/environment changes are discarded; this divergence is intentional and
 matches the command-executor contract.
@@ -353,7 +413,7 @@ The session owns:
 - close admission and completion state
 
 File content belongs to the workspace. Persisted snapshot bytes belong to the snapshot
-store. Secret values never become session state.
+store. Secret values, leases, overlays, and operation redactors never become session state.
 
 ## Snapshot behavior
 
@@ -366,6 +426,10 @@ Snapshot creation captures a consistent combination of:
 
 Snapshot creation does not capture active operations, secret leases, framework tool
 objects, or agent conversation state.
+
+An execute operation closes all leases before another operation can acquire the session
+gate. Snapshot creation therefore cannot race or observe an active overlay. Snapshots
+encode only the approved persistent `CommandEnvironment`.
 
 Milestone 3 records `source_session_id` as provenance only. Snapshot authorization is not
 performed by `SandboxSession`, the snapshot store, or the process-local
@@ -409,11 +473,10 @@ The session-owned event set is:
   `operation.cancelled`, or `operation.timed_out`;
 - post-commit snapshots: `snapshot.created`, `snapshot.restored`.
 
-Policy-decision and secret events remain deferred with composed policy and functional
-secret resolution. Dedicated snapshot events use a post-commit hook before
-`operation.completed`. `sandbox.created` and `sandbox.deleted` remain producer-less
-until service and session events share one approved sequencer or use separate event
-identity contracts.
+Policy-decision and secret lifecycle events remain deferred; issue #20 adds no new event
+types. Dedicated snapshot events use a post-commit hook before `operation.completed`.
+`sandbox.created` and `sandbox.deleted` remain producer-less until service and session
+events share one approved sequencer or use separate event identity contracts.
 
 For operation start and terminal events, failure to deliver the required event emits no
 further event for that operation:
@@ -439,8 +502,9 @@ the error originated in the session or a collaborator:
 - every other error -> `operation.failed`;
 - a normal domain result, including a non-zero command exit, -> `operation.completed`.
 
-Execute admission requests use `path=None` and `command_name=None`. The session does not
-duplicate command-language parsing merely to populate speculative policy metadata.
+Execute admission requests use `path=None` and `command_name=None`, plus the sorted
+unique secret references declared by the request. The session does not duplicate
+command-language parsing merely to populate speculative policy metadata.
 Descriptor-level command authorization remains deferred until an adapter or service
 introduces a concrete trust boundary. Any future design must consume executor-owned
 prepared artifacts rather than reparse command text in the session.
@@ -539,6 +603,7 @@ Milestone 3 defines:
 - `SessionPolicyDenied`;
 - `SessionEventDeliveryFailed`;
 - `SessionSnapshotRestoreFailed`;
+- `SecretLeaseCleanupFailed`;
 - `SessionCleanupFailed`.
 
 | Session error | Core category |
@@ -552,7 +617,19 @@ Milestone 3 defines:
 | `SessionPolicyDenied` | `POLICY_DENIED` |
 | `SessionEventDeliveryFailed` | `INTERNAL` |
 | `SessionSnapshotRestoreFailed` | `INTERNAL` |
+| `SecretLeaseCleanupFailed` | `INTERNAL` |
 | `SessionCleanupFailed` | `INTERNAL` |
+| `SecretReferenceInvalid` | `INVALID_REQUEST` |
+| `SecretDenied` | `POLICY_DENIED` |
+| `SecretNotFound` | `NOT_FOUND` |
+| `SecretExpired` | `TIMEOUT` |
+| `SecretLeaseLimitExceeded` | `QUOTA_EXCEEDED` |
+| `SecretSourceUnavailable`, `SecretSourceValueInvalid` | `INTERNAL` |
+| `SecretLeaseClosed` | `CONFLICT` |
+
+`SecretExpired` maps to `operation.timed_out`. Every other secret error maps to
+`operation.failed`. No secret error text, cause, or cleanup note contains a resolved
+value.
 
 Session errors subclass the corresponding existing core category classes while adding
 optional operation identity. Collaborator errors that already have a stable category are
@@ -573,6 +650,18 @@ the session to `FAILED`.
 
 - Happy path for each of the four agent operations.
 - Policy-denied operations invoke no workspace, executor, or secret collaborator.
+- Secret-bearing execute denial invokes neither broker nor source.
+- Empty secret bindings preserve the current no-broker-call path.
+- Partial lease acquisition failure closes earlier leases and does not invoke the
+  executor.
+- Lease cleanup runs in reverse order across success, non-zero results, failures,
+  timeouts, cooperative cancellation, native cancellation, and terminal-event failure.
+- An arbitrary `BaseException` raised by one lease close is contained, later leases still
+  close, and no unsafe exception detail escapes.
+- Secret overlays are visible only during execute and never enter session environment,
+  cwd, snapshots, results, events, exception text, or useful object representations.
+- Protected environment persistence, workspace paths, and redirection destinations are
+  rejected before mutation.
 - Dependency failures are surfaced with stable categories.
 - Timeout and cancellation produce no later mutation.
 - Concurrent calls on one session are serialized deterministically.

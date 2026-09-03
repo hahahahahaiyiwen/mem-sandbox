@@ -10,6 +10,8 @@ from mem_sandbox.command_executor import (
     CommandContext,
     CommandDescriptor,
     CommandEnvironment,
+    CommandEnvironmentOverlay,
+    CommandEnvironmentOverlayEntry,
     CommandExecutionContext,
     CommandFailureCode,
     CommandLimits,
@@ -27,6 +29,8 @@ from mem_sandbox.command_executor import (
     create_first_wave_commands,
 )
 from mem_sandbox.core.errors import InternalSandboxError
+from mem_sandbox.events import ProtectedValueRedactor
+from mem_sandbox.secrets import SecretExpired, SecretLeaseClosed
 from mem_sandbox.workspace import (
     AnyCurrentState,
     MemoryWorkspace,
@@ -39,13 +43,43 @@ from mem_sandbox.workspace import (
     WorkspaceWriteRequest,
 )
 
+CANARY = "secret-\N{LOCK}-canary"
 
-def request(command: str, *, limits: CommandLimits | None = None) -> ExecuteRequest:
+
+class OverlayValue:
+    def __init__(self, value: str = CANARY) -> None:
+        self._value = value
+
+    def reveal_text(self) -> str:
+        return self._value
+
+
+class Protection:
+    def __init__(self, value: str = CANARY) -> None:
+        self._redactor = ProtectedValueRedactor(text_values=(value,))
+
+    def redact_text(self, value: str) -> str:
+        return self._redactor.redact_text(value)
+
+    def redact_bytes(self, value: bytes) -> bytes:
+        return self._redactor.redact_bytes(value)
+
+    def contains_protected_text(self, value: str) -> bool:
+        return self.redact_text(value) != value
+
+
+def request(
+    command: str,
+    *,
+    limits: CommandLimits | None = None,
+    overlay: CommandEnvironmentOverlay | None = None,
+) -> ExecuteRequest:
     return ExecuteRequest(
         command=command,
         cwd=SandboxPath.root(),
         environment=CommandEnvironment((EnvironmentValue("NAME", "world"),)),
         limits=limits or CommandLimits(),
+        overlay=overlay or CommandEnvironmentOverlay(),
     )
 
 
@@ -82,6 +116,305 @@ async def test_quotes_empty_arguments_expansion_and_sequencing() -> None:
     assert result.stdout == " world $NAME\n/workspace\n"
     assert result.resulting_cwd == SandboxPath.root()
     assert result.environment_changes == ()
+
+
+@pytest.mark.asyncio
+async def test_overlay_is_visible_internally_but_redacted_before_results() -> None:
+    workspace = MemoryWorkspace()
+    overlay = CommandEnvironmentOverlay(
+        (CommandEnvironmentOverlayEntry("TOKEN", OverlayValue()),)
+    )
+
+    result = await create_default_executor(workspace, workspace).execute(
+        request("env", overlay=overlay),
+        CommandExecutionContext(protection=Protection()),
+    )
+
+    assert result.exit_code == 0
+    assert result.stdout == "NAME=world\nPWD=/workspace\nTOKEN=[REDACTED]\n"
+    assert result.stdout_original_bytes == len(result.stdout.encode("utf-8"))
+    assert result.environment_changes == ()
+    assert CANARY not in repr(result)
+    assert CANARY not in str(result)
+
+
+@pytest.mark.asyncio
+async def test_pipeline_receives_redacted_not_original_protected_output() -> None:
+    workspace = MemoryWorkspace()
+    seen: list[str] = []
+
+    class SourceCommand:
+        descriptor = CommandDescriptor("source", (), "source", "source", True, True, True)
+
+        async def execute(
+            self,
+            request: CommandRequest,
+            context: CommandContext,
+        ) -> CommandResult:
+            return CommandResult.success(
+                stdout=f"{context.environment.get('TOKEN')}\n"
+            )
+
+    class SinkCommand:
+        descriptor = CommandDescriptor("sink", (), "sink", "sink", True, True, True)
+
+        async def execute(
+            self,
+            request: CommandRequest,
+            context: CommandContext,
+        ) -> CommandResult:
+            seen.append(request.stdin)
+            return CommandResult.success(stdout=request.stdin)
+
+    executor = VirtualCommandExecutor(
+        CommandRegistry(
+            (
+                *create_first_wave_commands(workspace, workspace),
+                SourceCommand(),
+                SinkCommand(),
+            )
+        ),
+        workspace,
+    )
+    overlay = CommandEnvironmentOverlay(
+        (CommandEnvironmentOverlayEntry("TOKEN", OverlayValue()),)
+    )
+
+    result = await executor.execute(
+        request("source | sink", overlay=overlay),
+        CommandExecutionContext(protection=Protection()),
+    )
+
+    assert seen == ["[REDACTED]\n"]
+    assert result.stdout == "[REDACTED]\n"
+    assert CANARY not in repr(result)
+
+
+@pytest.mark.asyncio
+async def test_short_protected_values_are_conservatively_redacted() -> None:
+    workspace = MemoryWorkspace()
+
+    class SourceCommand:
+        descriptor = CommandDescriptor("source", (), "source", "source", True, True, True)
+
+        async def execute(
+            self,
+            request: CommandRequest,
+            context: CommandContext,
+        ) -> CommandResult:
+            value = context.environment.get("TOKEN")
+            return CommandResult.success(stdout=f"prefix{value}suffix\n")
+
+    overlay = CommandEnvironmentOverlay(
+        (CommandEnvironmentOverlayEntry("TOKEN", OverlayValue("x")),)
+    )
+
+    result = await VirtualCommandExecutor(
+        CommandRegistry(
+            (*create_first_wave_commands(workspace, workspace), SourceCommand())
+        ),
+        workspace,
+    ).execute(
+        request("source", overlay=overlay),
+        CommandExecutionContext(protection=Protection("x")),
+    )
+
+    assert result.stdout == (
+        "prefi[REDACTED][REDACTED]suffi[REDACTED]\n"
+    )
+    assert "x" not in result.stdout
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error_type", (SecretExpired, SecretLeaseClosed))
+async def test_overlay_access_preserves_expired_and_closed_lease_errors(
+    error_type: type[SecretExpired] | type[SecretLeaseClosed],
+) -> None:
+    class FailingOverlayValue:
+        def reveal_text(self) -> str:
+            raise error_type("safe lease failure")
+
+    workspace = MemoryWorkspace()
+    overlay = CommandEnvironmentOverlay(
+        (CommandEnvironmentOverlayEntry("TOKEN", FailingOverlayValue()),)
+    )
+
+    with pytest.raises(error_type):
+        await create_default_executor(workspace, workspace).execute(
+            request('echo "$TOKEN"', overlay=overlay),
+            CommandExecutionContext(protection=Protection()),
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "command",
+    (
+        'cat "$TOKEN"',
+        'cd "$TOKEN"',
+        'cp "$TOKEN" target',
+        'cp source "$TOKEN"',
+        'find "$TOKEN"',
+        'grep needle "$TOKEN"',
+        'ls "$TOKEN"',
+        'mkdir "$TOKEN"',
+        'mv "$TOKEN" target',
+        'mv source "$TOKEN"',
+        'rm "$TOKEN"',
+        'touch "$TOKEN"',
+        'echo content > "$TOKEN"',
+        'cd . > "$TOKEN"',
+    ),
+)
+async def test_protected_paths_and_redirection_fail_before_workspace_mutation(
+    command: str,
+) -> None:
+    workspace = MemoryWorkspace()
+    overlay = CommandEnvironmentOverlay(
+        (CommandEnvironmentOverlayEntry("TOKEN", OverlayValue()),)
+    )
+
+    result = await create_default_executor(workspace, workspace).execute(
+        request(command, overlay=overlay),
+        CommandExecutionContext(protection=Protection()),
+    )
+
+    assert result.exit_code == 1
+    assert result.failure_code is CommandFailureCode.PROTECTED_VALUE_REJECTED
+    assert (await workspace.stats()).node_count == 1
+    assert CANARY not in result.stderr
+
+
+@pytest.mark.asyncio
+async def test_all_multi_target_mutations_preflight_protected_operands() -> None:
+    overlay = CommandEnvironmentOverlay(
+        (CommandEnvironmentOverlayEntry("TOKEN", OverlayValue()),)
+    )
+    context = CommandExecutionContext(protection=Protection())
+
+    for command in ('mkdir safe "$TOKEN"', 'touch safe "$TOKEN"'):
+        workspace = MemoryWorkspace()
+        result = await create_default_executor(workspace, workspace).execute(
+            request(command, overlay=overlay),
+            context,
+        )
+        assert result.failure_code is CommandFailureCode.PROTECTED_VALUE_REJECTED
+        assert (await workspace.stats()).node_count == 1
+
+    workspace = MemoryWorkspace()
+    await create_default_executor(workspace, workspace).execute(
+        request("touch existing"),
+        CommandExecutionContext(),
+    )
+    result = await create_default_executor(workspace, workspace).execute(
+        request('rm existing "$TOKEN"', overlay=overlay),
+        context,
+    )
+    assert result.failure_code is CommandFailureCode.PROTECTED_VALUE_REJECTED
+    assert [entry.path.name for entry in await workspace.list(SandboxPath.root())] == [
+        "existing"
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "command",
+    (
+        'export TOKEN=replacement',
+        "unset TOKEN",
+        'export OTHER="$TOKEN"',
+    ),
+)
+async def test_overlay_names_and_protected_environment_values_cannot_persist(
+    command: str,
+) -> None:
+    workspace = MemoryWorkspace()
+    overlay = CommandEnvironmentOverlay(
+        (CommandEnvironmentOverlayEntry("TOKEN", OverlayValue()),)
+    )
+
+    result = await create_default_executor(workspace, workspace).execute(
+        request(command, overlay=overlay),
+        CommandExecutionContext(protection=Protection()),
+    )
+
+    assert result.exit_code == 1
+    assert result.failure_code is CommandFailureCode.PROTECTED_VALUE_REJECTED
+    assert result.environment_changes == ()
+    assert CANARY not in result.stderr
+
+
+@pytest.mark.asyncio
+async def test_protected_material_cannot_escape_through_an_unset_name() -> None:
+    workspace = MemoryWorkspace()
+    overlay = CommandEnvironmentOverlay(
+        (CommandEnvironmentOverlayEntry("TOKEN", OverlayValue("SECRETNAME")),)
+    )
+
+    result = await create_default_executor(workspace, workspace).execute(
+        request('unset "$TOKEN"', overlay=overlay),
+        CommandExecutionContext(protection=Protection("SECRETNAME")),
+    )
+
+    assert result.exit_code == 1
+    assert result.failure_code is CommandFailureCode.PROTECTED_VALUE_REJECTED
+    assert result.environment_changes == ()
+    assert "SECRETNAME" not in result.stderr
+
+
+@pytest.mark.asyncio
+async def test_invalid_unset_name_remains_a_structured_command_failure() -> None:
+    workspace = MemoryWorkspace()
+
+    result = await create_default_executor(workspace, workspace).execute(
+        request("unset 1BAD; echo after"),
+        CommandExecutionContext(),
+    )
+
+    assert result.exit_code == 0
+    assert result.failure_code is None
+    assert result.stdout == "after\n"
+    assert result.stderr == "unset: usage: unset NAME...\n"
+    assert result.environment_changes == ()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("secret", "command"),
+    (
+        ("beta", 'grep -Fn "$TOKEN" candidates && touch matched'),
+        ("2", 'head -n "$TOKEN" candidates'),
+        ("*.txt", 'find . -name "$TOKEN"'),
+    ),
+)
+async def test_protected_arguments_cannot_drive_command_semantics_or_control_flow(
+    secret: str,
+    command: str,
+) -> None:
+    workspace = MemoryWorkspace()
+    await workspace.write(
+        WorkspaceWriteRequest(
+            SandboxPath.resolve("/workspace/candidates"),
+            b"alpha\nbeta\ngamma\n",
+            AnyCurrentState(),
+        )
+    )
+    overlay = CommandEnvironmentOverlay(
+        (CommandEnvironmentOverlayEntry("TOKEN", OverlayValue(secret)),)
+    )
+
+    result = await create_default_executor(workspace, workspace).execute(
+        request(command, overlay=overlay),
+        CommandExecutionContext(protection=Protection(secret)),
+    )
+
+    assert result.exit_code == 1
+    assert result.failure_code is CommandFailureCode.PROTECTED_VALUE_REJECTED
+    assert result.stdout == ""
+    assert secret not in result.stderr
+    assert [entry.path.name for entry in await workspace.list(SandboxPath.root())] == [
+        "candidates"
+    ]
 
 
 @pytest.mark.asyncio

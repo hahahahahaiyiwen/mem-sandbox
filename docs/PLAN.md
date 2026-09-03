@@ -604,7 +604,8 @@ boundary exists.
   `PolicyRequest`, `PolicyDecision`, and `AllowAllPolicyEngine`.
 - [x] **4.2.2** Defer composed operation, path, command, argument, limit, obligation,
   secret-reference, and destination policy until a concrete authorization boundary
-  exists.
+  exists. Issue #20 later introduced only reference-set admission before source access;
+  composed secret or destination policy remains deferred.
 - [x] **4.2.3** Document that workspace, command, lifecycle, deadline, and no-host-
   fallback guarantees remain authoritative invariants in their owning modules rather
   than configurable policy rules.
@@ -655,9 +656,20 @@ boundary exists.
   rejects every lease request.
 - [x] **4.5.2** Defer functional secret resolution, authorization, expiry, and redaction
   behavior with the composed-policy decision.
-- [ ] **4.5.3** Re-open secret design only after an adapter or service requirement
-  identifies the caller identity, protected secret, permitted command, destination, and
-  lease lifetime.
+- [x] **4.5.3** Re-open secret design only for a concrete protected use and enforcement
+  point. Issue #20 identifies execute-time reference access and lease lifetime, retains
+  application-owned caller authorization, and explicitly defers command/destination
+  binding.
+- [x] **4.5.4** Implement the functional source, bounded broker, protected value,
+  operation-scoped lease, exact expiry, active-count accounting, cleanup, and stable
+  secret errors.
+- [x] **4.5.5** Extend execute admission with immutable environment-to-reference
+  bindings, policy-visible reference facts, an ephemeral command overlay, and protected
+  output/persistence guards, including pre-dispatch rejection of generic protected
+  command arguments that could expose derived facts through command semantics.
+- [x] **4.5.6** Add the cross-module secret-canary matrix for workspace paths/content,
+  session/snapshot state, results, errors, events, diagnostics, representations, traces,
+  timeout, cancellation, and cleanup.
 
 #### 4.6 Core conformance
 
@@ -690,8 +702,9 @@ boundary exists.
   `python -m pyright src tests` pass.
 - [ ] **4.9.4** The minimal explicit admission seam remains covered and no current
   release behavior depends on a speculative composed policy engine.
-- [ ] **4.9.5** Functional secret materialization remains disabled unless a later
-  approved design supplies authorization and redaction coverage.
+- [ ] **4.9.5** Functional secret materialization follows the issue #20 approved
+  policy-before-source, operation-local overlay, lease cleanup, persistence guard, and
+  canary-redaction contract.
 - [ ] **4.9.6** Unsupported behavior tests prove failure occurs before mutation and
   without host fallback.
 - [ ] **4.9.7** The dependency-boundary test still proves no agent-framework dependency

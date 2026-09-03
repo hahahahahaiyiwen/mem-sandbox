@@ -1,6 +1,6 @@
 # Event Collection and Delivery Design
 
-**Status:** Issue #18 implemented
+**Status:** Issue #18 implemented; issue #20 secret-canary coverage implemented
 
 ## Purpose
 
@@ -26,8 +26,7 @@ Events are observability records, not the source of truth for workspace or sessi
 - OpenTelemetry or logging-vendor dependencies in core.
 - Raw file content, command text, stdout, stderr, environment values, host paths, or
   secret values in default event payloads.
-- Policy-decision and secret events while composed policy and functional secrets are
-  deferred.
+- Policy-decision and secret lifecycle events; issue #20 adds no new event types.
 - Treating event delivery as an operating-system isolation or authorization boundary.
 - Agent-framework callback APIs.
 
@@ -92,9 +91,10 @@ Event categories and issue #18 producers are:
 | Snapshot | `snapshot.created`, `snapshot.restored` | `SandboxSession` post-commit hook |
 | Service lifecycle | `sandbox.created`, `sandbox.deleted` | Defined but producer-less until a shared service/session sequencing design is approved |
 
-Policy and secret event types are not added while those features are deferred. File and
-command details remain bounded operation attributes rather than creating an unbounded
-vendor-specific event taxonomy.
+Policy and secret event types are not added by issue #20. File and command details remain
+bounded operation attributes rather than creating an unbounded vendor-specific event
+taxonomy. Secret references and environment binding names are intentionally omitted from
+the existing operation events.
 
 Each session assigns sequence numbers when events are created. Accepted events are unique
 and strictly increasing per session. A failed delivery may leave a gap, so consumers must
@@ -219,6 +219,17 @@ construct classified event
 Redaction therefore occurs before the final field and aggregate byte checks and before
 sink invocation. A caller cannot bypass redaction by invoking the concrete sink through
 the session boundary.
+
+Issue #20 does not mutate a per-session dispatcher's registered values. The session
+creates a separate operation-local redactor after lease acquisition and passes it to the
+command executor's protection port. Existing events contain no command output,
+environment, reference, or exception text, so the event dispatcher continues to enforce
+its static classified payload rules.
+
+The secret canary suite nevertheless treats events as an external observation boundary:
+the canary must be absent from source events, prepared events, canonical bytes, queued
+best-effort events, sink diagnostics, and query results across success, denial, source
+failure, command failure, timeout, cancellation, and lease-cleanup failure.
 
 ## Delivery modes
 
@@ -379,11 +390,13 @@ signals.
   `operation.failed`.
 - Best-effort snapshot-event failure reports a diagnostic and still permits
   `operation.completed`.
-- No policy or secret event is emitted while those features are deferred.
+- No policy or secret event is emitted by issue #20.
 - `sandbox.created` and `sandbox.deleted` remain intentionally producer-less until a
   shared service/session event sequencer or separate service-event identity is approved.
 - Default session events contain no file content, full command text, stdout/stderr,
   environment values, host paths, or secrets.
+- The exact secret canary is absent from source/prepared events, canonical bytes,
+  best-effort diagnostics, and in-memory query results for every lease outcome.
 
 ## Maintenance rule
 

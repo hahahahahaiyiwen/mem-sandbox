@@ -1,18 +1,18 @@
 # Policy Admission Design
 
-**Status:** Minimal Milestone 3 admission seam implemented; composed policy engine deferred
+**Status:** Minimal admission seam and issue #20 reference-aware extension implemented
 
 ## Decision
 
 MemSandbox will not implement the previously proposed composed policy engine in the
 current release path.
 
-The in-memory sandbox currently has no authenticated caller or in-core owner
-authorization context, functional secret resolution, network destination, host-process
-execution, or shared persistent backend. Logical `OwnerId` values are provenance only.
-Without one of those trust boundaries, a general operation/path/command rule engine would
-add restrictions and cross-module coupling without providing meaningful security or
-product value.
+The in-memory sandbox has no authenticated caller or in-core owner authorization
+context, network destination, host-process execution, or shared persistent backend.
+Logical `OwnerId` values are provenance only. Issue #20 adds one concrete protected
+action: an execute operation may request typed secret references for an ephemeral
+environment overlay. This reopens only the facts required to approve or deny those
+references; it does not justify a general operation/path/command rule engine.
 
 The essential sandbox guarantees remain enforced by the modules that own them:
 
@@ -22,7 +22,8 @@ The essential sandbox guarantees remain enforced by the modules that own them:
   and output limits, and prohibition of host-shell fallback;
 - the session owns lifecycle, serialization, deadlines, cancellation, and collaborator
   ordering;
-- the current secret boundary rejects every request explicitly.
+- the default secret boundary rejects every request explicitly, while an opt-in
+  functional broker resolves only references approved through this seam.
 
 These guarantees do not depend on a configurable policy engine and must not be weakened
 when policy is reconsidered.
@@ -42,6 +43,7 @@ class PolicyRequest:
     path: SandboxPath | None
     command_name: str | None
     requested_limits: OperationLimits
+    secret_refs: tuple[SecretRef, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -56,9 +58,19 @@ class SessionPolicyEngine(Protocol):
 ```
 
 The explicit seam preserves dependency injection and fail-closed session ordering
-without committing the project to a speculative policy language. The current
-`AllowAllPolicyEngine` returns `allowed=True`, reason code `allow_all`, and unchanged
-effective limits.
+without committing the project to a speculative policy language. `secret_refs` contains
+the unique references declared by an execute request, sorted by `SecretRef.name`, and
+never contains resolved values or environment overlay material. The default empty tuple
+preserves existing positional construction and non-execute behavior.
+
+The current `AllowAllPolicyEngine` returns `allowed=True`, reason code `allow_all`, and
+unchanged effective limits. Applications that inject a functional secret broker must
+decide whether allow-all is appropriate for every reference exposed by their source.
+`NoSecretBroker` remains the fail-closed default.
+
+This narrow contract creates one permitted data-contract dependency from
+`mem_sandbox.policy` to `mem_sandbox.secrets.SecretRef`. The policy module does not
+depend on broker, source, lease, value, or command-executor implementations.
 
 Lifecycle `start()` and `close()` are not policy operations. A custom implementation may
 still deny an operation or narrow its timeout through the existing contract, but the
@@ -70,6 +82,9 @@ project does not yet advertise a general authorization framework.
   allow, and silent defaults are prohibited.
 - A denial occurs before the workspace, command executor, snapshot store, or secret
   broker operation.
+- Secret references are policy facts; secret values are never policy facts.
+- Denied secret-bearing execute requests call neither broker nor source.
+- Multiple bindings of one reference are normalized into one sorted policy fact.
 - Policy may narrow only `timeout_seconds`.
 - `terminal_event_reserve_seconds` remains session-owned and must be preserved.
 - A narrowed timeout is measured from the original operation start, not from completion
@@ -99,10 +114,11 @@ authorization belongs and what identity and resource facts are actually availabl
 
 ## Re-evaluation triggers
 
-Open a new design issue before enabling any of the following:
+Open a new design issue before enabling any of the following beyond issue #20:
 
 - multi-owner or multi-tenant `SandboxService` authorization;
-- functional secret resolution or secret leasing;
+- secret authorization based on parsed arguments, command stages, network destinations,
+  owners, tenants, or external approval obligations;
 - network destinations or egress-capable commands;
 - arbitrary host process, Python, container, or remote execution;
 - shared persistent workspaces or snapshots across authorization boundaries;
@@ -134,6 +150,7 @@ If a trigger occurs, the design must:
 ## Maintenance rule
 
 Do not expand the current policy contracts merely because a future feature might need
-authorization. First document the concrete trust boundary, identity, protected action,
-and enforcement point, then decide whether the minimal admission seam should be extended
-or authorization should live at `SandboxService` or another integration boundary.
+authorization. Issue #20 is the narrow exception because it identifies the protected
+action and enforcement point: an execute operation's declared reference set is evaluated
+before broker/source access. Command, argument, destination, owner, or tenant facts still
+require a separate approved design.

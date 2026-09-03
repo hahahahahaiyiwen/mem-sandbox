@@ -1,15 +1,64 @@
 """Secret-reference contracts and the explicit no-secret broker."""
 
-from mem_sandbox.secrets.broker import NoSecretBroker
-from mem_sandbox.secrets.errors import SecretDenied, SecretDeniedError
-from mem_sandbox.secrets.models import SecretAccessRequest, SecretLease, SecretRef, SecretValue
+from mem_sandbox.secrets.broker import BoundedSecretBroker, NoSecretBroker
+from mem_sandbox.secrets.errors import (
+    SecretDenied,
+    SecretDeniedError,
+    SecretExpired,
+    SecretExpiredError,
+    SecretLeaseCleanupFailed,
+    SecretLeaseCleanupFailedError,
+    SecretLeaseClosed,
+    SecretLeaseClosedError,
+    SecretLeaseLimitExceeded,
+    SecretLeaseLimitExceededError,
+    SecretNotFound,
+    SecretNotFoundError,
+    SecretReferenceInvalid,
+    SecretReferenceInvalidError,
+    SecretSourceUnavailable,
+    SecretSourceUnavailableError,
+    SecretSourceValueInvalid,
+    SecretSourceValueInvalidError,
+)
+from mem_sandbox.secrets.models import (
+    SecretAccessRequest,
+    SecretBroker,
+    SecretBrokerLimits,
+    SecretLease,
+    SecretRef,
+    SecretSource,
+    SecretValue,
+)
+from mem_sandbox.secrets.source import MappingSecretSource
 
 __all__ = [
+    "BoundedSecretBroker",
+    "MappingSecretSource",
     "NoSecretBroker",
     "SecretAccessRequest",
+    "SecretBroker",
+    "SecretBrokerLimits",
     "SecretDenied",
     "SecretDeniedError",
+    "SecretExpired",
+    "SecretExpiredError",
     "SecretLease",
+    "SecretLeaseCleanupFailed",
+    "SecretLeaseCleanupFailedError",
+    "SecretLeaseClosed",
+    "SecretLeaseClosedError",
+    "SecretLeaseLimitExceeded",
+    "SecretLeaseLimitExceededError",
+    "SecretNotFound",
+    "SecretNotFoundError",
     "SecretRef",
+    "SecretReferenceInvalid",
+    "SecretReferenceInvalidError",
+    "SecretSource",
+    "SecretSourceUnavailable",
+    "SecretSourceUnavailableError",
+    "SecretSourceValueInvalid",
+    "SecretSourceValueInvalidError",
     "SecretValue",
 ]
