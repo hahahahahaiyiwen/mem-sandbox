@@ -836,9 +836,7 @@ class SandboxSession:
                 completed_at=completed_at,
             )
             if post_commit_event is not None:
-                post_commit_deadline = (
-                    original_deadline - limits.terminal_event_reserve_seconds / 2
-                )
+                post_commit_deadline = original_deadline - limits.terminal_event_reserve_seconds / 2
                 try:
                     event_type, attributes = post_commit_event(value, revision)
                     await self._emit_event(

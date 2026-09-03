@@ -63,11 +63,7 @@ class InMemoryEventSink:
     async def query(self, query: EventQuery | None = None) -> tuple[SandboxEvent, ...]:
         requested = EventQuery() if query is None else query
         async with self._lock:
-            selected = tuple(
-                event
-                for event in self._events
-                if _matches(event, requested)
-            )
+            selected = tuple(event for event in self._events if _matches(event, requested))
         return tuple(
             sorted(
                 selected,

@@ -199,9 +199,7 @@ async def test_required_restore_event_failure_preserves_published_state() -> Non
     await session.write_file(WriteFileRequest(path="file.txt", content="live"))
 
     with pytest.raises(SessionEventDeliveryFailed):
-        await session.restore_snapshot(
-            RestoreSnapshotRequest(snapshot_ref=snapshot.snapshot_ref)
-        )
+        await session.restore_snapshot(RestoreSnapshotRequest(snapshot_ref=snapshot.snapshot_ref))
 
     assert [event.event_type for event in events.values[-3:]] == [
         "operation.started",

@@ -52,12 +52,8 @@ class ProtectedValueRedactor:
             except UnicodeDecodeError:
                 pass
 
-        self._text_values = tuple(
-            sorted(text_registered, key=lambda item: (-len(item), item))
-        )
-        self._byte_values = tuple(
-            sorted(byte_registered, key=lambda item: (-len(item), item))
-        )
+        self._text_values = tuple(sorted(text_registered, key=lambda item: (-len(item), item)))
+        self._byte_values = tuple(sorted(byte_registered, key=lambda item: (-len(item), item)))
 
     def redact_text(self, value: str) -> str:
         """Redact all registered text matches without rescanning replacements."""
@@ -102,9 +98,7 @@ def prepare_event(
 ) -> SandboxEvent:
     """Classify, redact, and validate an event before a sink can observe it."""
     if len(event.attributes) > limits.max_attributes:
-        raise EventPayloadRejected(
-            f"event payload exceeds {limits.max_attributes} attributes"
-        )
+        raise EventPayloadRejected(f"event payload exceeds {limits.max_attributes} attributes")
     for attribute in event.attributes:
         if attribute.sensitivity is EventSensitivity.SECRET:
             raise EventPayloadRejected("secret event attributes are not allowed")
@@ -124,13 +118,8 @@ def prepare_event(
     ):
         if original.sensitivity is not EventSensitivity.PROTECTED:
             continue
-        if (
-            not isinstance(original.value, str)
-            or original.value == redacted.value
-        ):
-            raise EventPayloadRejected(
-                "protected event attributes must be structurally redacted"
-            )
+        if not isinstance(original.value, str) or original.value == redacted.value:
+            raise EventPayloadRejected("protected event attributes must be structurally redacted")
     _validate_field_limits(prepared.attributes, limits)
     if len(canonical_event_bytes(prepared)) > limits.max_event_bytes:
         raise EventPayloadRejected(
@@ -146,8 +135,7 @@ def _validate_field_limits(
     for attribute in attributes:
         if len(attribute.name.encode("utf-8")) > limits.max_attribute_name_bytes:
             raise EventPayloadRejected(
-                "event attribute name exceeds "
-                f"{limits.max_attribute_name_bytes} UTF-8 bytes"
+                f"event attribute name exceeds {limits.max_attribute_name_bytes} UTF-8 bytes"
             )
         if (
             isinstance(attribute.value, str)

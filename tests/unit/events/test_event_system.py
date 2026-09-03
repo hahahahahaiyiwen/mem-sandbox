@@ -70,10 +70,7 @@ def test_event_identity_categories_and_attributes_are_immutable_and_canonical() 
     assert str(value.event_id) == f"{SESSION_A}:1"
     assert value.event_type.category is EventCategory.OPERATION
     assert SandboxEventType.SNAPSHOT_CREATED.category is EventCategory.SNAPSHOT
-    assert (
-        SandboxEventType.SANDBOX_CREATED.category
-        is EventCategory.SERVICE_LIFECYCLE
-    )
+    assert SandboxEventType.SANDBOX_CREATED.category is EventCategory.SERVICE_LIFECYCLE
     assert [attribute.name for attribute in value.attributes] == ["alpha", "zeta"]
     assert dict(value.data) == {"alpha": "value", "zeta": 2}
     with pytest.raises(FrozenInstanceError):
@@ -101,12 +98,15 @@ def test_canonical_payload_is_order_independent_and_has_exact_aggregate_limit() 
     encoded = canonical_event_bytes(first)
 
     assert encoded == canonical_event_bytes(second)
-    assert prepare_event(
-        first,
-        redactor=ProtectedValueRedactor(),
-        payload_policy=EventPayloadPolicy(),
-        limits=EventPayloadLimits(max_event_bytes=len(encoded)),
-    ) == first
+    assert (
+        prepare_event(
+            first,
+            redactor=ProtectedValueRedactor(),
+            payload_policy=EventPayloadPolicy(),
+            limits=EventPayloadLimits(max_event_bytes=len(encoded)),
+        )
+        == first
+    )
     with pytest.raises(EventPayloadRejected, match="payload"):
         prepare_event(
             first,
@@ -211,16 +211,19 @@ def test_payload_count_name_and_string_limits_have_exact_boundaries() -> None:
     attributes = (internal("é", "é"), internal("b", 2))
     value = event(attributes=attributes)
 
-    assert prepare_event(
-        value,
-        redactor=ProtectedValueRedactor(),
-        payload_policy=EventPayloadPolicy(),
-        limits=EventPayloadLimits(
-            max_attributes=2,
-            max_attribute_name_bytes=2,
-            max_string_bytes=2,
-        ),
-    ) == value
+    assert (
+        prepare_event(
+            value,
+            redactor=ProtectedValueRedactor(),
+            payload_policy=EventPayloadPolicy(),
+            limits=EventPayloadLimits(
+                max_attributes=2,
+                max_attribute_name_bytes=2,
+                max_string_bytes=2,
+            ),
+        )
+        == value
+    )
     with pytest.raises(EventPayloadRejected, match="attributes"):
         prepare_event(
             value,
@@ -271,9 +274,7 @@ async def test_in_memory_sink_rejects_one_byte_overflow_without_advancing_sequen
     first = event(sequence=1)
     second = event(sequence=2)
     oversized = event(sequence=2, attributes=(internal("large", "x" * 10),))
-    byte_limit = (
-        len(canonical_event_bytes(first)) + len(canonical_event_bytes(oversized)) - 1
-    )
+    byte_limit = len(canonical_event_bytes(first)) + len(canonical_event_bytes(oversized)) - 1
     sink = InMemoryEventSink(max_events=3, max_payload_bytes=byte_limit)
 
     await sink.emit(first)
@@ -330,8 +331,7 @@ async def test_in_memory_sink_validates_sequences_and_deterministic_queries() ->
 async def test_in_memory_sink_serializes_concurrent_emissions() -> None:
     sink = InMemoryEventSink(max_events=10, max_payload_bytes=100_000)
     values = tuple(
-        event(session_id=SessionId(UUID(int=index)), sequence=1)
-        for index in range(1, 6)
+        event(session_id=SessionId(UUID(int=index)), sequence=1) for index in range(1, 6)
     )
 
     await asyncio.gather(*(sink.emit(value) for value in values))
@@ -371,11 +371,7 @@ async def test_required_dispatch_prepares_and_redacts_before_sink_invocation() -
         redactor=ProtectedValueRedactor(text_values=("token",)),
     )
     await dispatcher.emit(
-        event(
-            attributes=(
-                EventAttribute("value", "token", EventSensitivity.PROTECTED),
-            )
-        )
+        event(attributes=(EventAttribute("value", "token", EventSensitivity.PROTECTED),))
     )
 
     assert seen[0].data["value"] == "[REDACTED]"
@@ -407,9 +403,7 @@ async def test_best_effort_reports_preparation_and_timeout_failures_once_each() 
     await dispatcher.emit(
         event(
             sequence=1,
-            attributes=(
-                EventAttribute("secret", "value", EventSensitivity.SECRET),
-            ),
+            attributes=(EventAttribute("secret", "value", EventSensitivity.SECRET),),
         )
     )
     await dispatcher.emit(event(sequence=2))

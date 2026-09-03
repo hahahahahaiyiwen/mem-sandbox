@@ -132,9 +132,7 @@ class SandboxEvent:
         if not isinstance(attributes_value, tuple):
             raise TypeError("attributes must contain EventAttribute values")
         attribute_values = cast(tuple[object, ...], attributes_value)
-        if any(
-            not isinstance(attribute, EventAttribute) for attribute in attribute_values
-        ):
+        if any(not isinstance(attribute, EventAttribute) for attribute in attribute_values):
             raise TypeError("attributes must contain EventAttribute values")
         attributes = cast(tuple[EventAttribute, ...], attribute_values)
         ordered = tuple(sorted(attributes, key=lambda attribute: attribute.name.encode("utf-8")))
@@ -274,13 +272,9 @@ def canonical_event_bytes(event: SandboxEvent) -> bytes:
         "event_type": event.event_type.value,
         "occurred_at": _canonical_timestamp(event.occurred_at),
         "operation_id": None if event.operation_id is None else str(event.operation_id),
-        "operation_kind": (
-            None if event.operation_kind is None else event.operation_kind.value
-        ),
+        "operation_kind": (None if event.operation_kind is None else event.operation_kind.value),
         "parent_operation_id": (
-            None
-            if event.parent_operation_id is None
-            else str(event.parent_operation_id)
+            None if event.parent_operation_id is None else str(event.parent_operation_id)
         ),
         "sequence": event.sequence,
         "session_id": str(event.session_id),

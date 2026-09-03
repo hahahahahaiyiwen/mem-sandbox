@@ -61,14 +61,10 @@ class EventDispatcher:
         delivery_policy = delivery_policy or EventDeliveryPolicy()
         payload_policy = payload_policy or EventPayloadPolicy()
         payload_limits = payload_limits or EventPayloadLimits()
-        if (
-            delivery_policy.mode is EventDeliveryMode.BEST_EFFORT
-            and diagnostic_handler is None
-        ):
+        if delivery_policy.mode is EventDeliveryMode.BEST_EFFORT and diagnostic_handler is None:
             raise ValueError("best-effort delivery requires a diagnostic handler")
-        if (
-            diagnostic_handler is not None
-            and inspect.iscoroutinefunction(diagnostic_handler.report)
+        if diagnostic_handler is not None and inspect.iscoroutinefunction(
+            diagnostic_handler.report
         ):
             raise TypeError("event diagnostic handler must be synchronous")
         self._sink = sink
@@ -198,9 +194,7 @@ class EventDispatcher:
                         continue
                     event = queued
                     try:
-                        async with asyncio.timeout(
-                            self._delivery_policy.sink_timeout_seconds
-                        ):
+                        async with asyncio.timeout(self._delivery_policy.sink_timeout_seconds):
                             await self._sink.emit(event)
                     except asyncio.CancelledError as error:
                         current = asyncio.current_task()
@@ -251,9 +245,7 @@ class EventDispatcher:
             return
         code_value = getattr(type(error), "code", None)
         code = (
-            code_value
-            if isinstance(code_value, str) and code_value
-            else EventDeliveryFailed.code
+            code_value if isinstance(code_value, str) and code_value else EventDeliveryFailed.code
         )
         message = (
             str(error)
