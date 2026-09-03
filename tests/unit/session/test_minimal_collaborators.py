@@ -6,7 +6,13 @@ from uuid import UUID
 import pytest
 
 from mem_sandbox.core import OperationId, OperationKind, OperationLimits, SessionId
-from mem_sandbox.events import NoOpEventSink, SandboxEvent
+from mem_sandbox.events import (
+    EventAttribute,
+    EventSensitivity,
+    NoOpEventSink,
+    SandboxEvent,
+    SandboxEventType,
+)
 from mem_sandbox.policy import AllowAllPolicyEngine, PolicyRequest
 from mem_sandbox.secrets import (
     NoSecretBroker,
@@ -42,14 +48,20 @@ async def test_allow_all_returns_an_explicit_unchanged_decision() -> None:
 async def test_noop_event_sink_accepts_and_discards_a_valid_event() -> None:
     await NoOpEventSink().emit(
         SandboxEvent(
-            event_type="operation.started",
+            event_type=SandboxEventType.OPERATION_STARTED,
             occurred_at=datetime(2026, 9, 1, tzinfo=UTC),
             session_id=SESSION_ID,
             sequence=1,
             operation_id=OPERATION_ID,
             parent_operation_id=None,
             operation_kind=OperationKind.READ_FILE,
-            data={"path": "/workspace/file.txt"},
+            attributes=(
+                EventAttribute(
+                    "path",
+                    "/workspace/file.txt",
+                    EventSensitivity.INTERNAL,
+                ),
+            ),
         )
     )
 

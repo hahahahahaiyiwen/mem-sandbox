@@ -614,15 +614,29 @@ boundary exists.
 
 #### 4.3 Event sink
 
-- [ ] **4.3.1** Define structured event envelopes, event categories, per-session
-  sequence numbers, and sensitivity classifications.
-- [ ] **4.3.2** Write ordering and redaction tests for lifecycle, operation, policy,
-  snapshot, timeout, cancellation, and failure events.
-- [ ] **4.3.3** Implement the process-local event sink and emit events from the session
-  orchestration boundary.
-- [ ] **4.3.4** Bound event payloads and reject secret or unbounded content.
-- [ ] **4.3.5** Implement explicit required/best-effort delivery selection and a
-  diagnostic failure handler for best-effort sink failures.
+- [x] **4.3.1** Define derived event identity, complete lifecycle/operation/snapshot
+  categories, per-session sequence behavior, and explicitly classified immutable
+  attributes.
+- [x] **4.3.2** Write the approved
+  [behavior-first event matrix](./components/event-sink/README.md#behavior-first-test-matrix)
+  for canonical payload bounds, sensitivity admission, structural redaction, deterministic
+  collection, delivery modes, snapshot ordering, timeout, cancellation, and failure
+  behavior. Policy and secret events remain deferred with those features.
+- [x] **4.3.3** Implement structural redaction and deterministic canonical payload
+  validation before concrete sink invocation. Reject `SECRET` attributes, require
+  explicit opt-in for `PROTECTED`, and keep default payloads free of file content, full
+  command text, stdout/stderr, environment values, host paths, and secrets.
+- [x] **4.3.4** Implement the process-local in-memory sink with exact count and aggregate
+  payload-byte limits, atomic overflow rejection without eviction, per-session monotonic
+  sequence validation, deterministic queries, and owner-controlled idempotent
+  flush/close.
+- [x] **4.3.5** Implement immutable per-session `REQUIRED` or `BEST_EFFORT` dispatch.
+  Keep required delivery as the default. Require a synchronous diagnostic handler for
+  best effort, use an owner-managed serial queue so failures do not alter session
+  outcomes, and route handler failures to the asyncio loop exception handler.
+- [x] **4.3.6** Add the session post-commit event hook and emit
+  `snapshot.created`/`snapshot.restored` before `operation.completed`, using the terminal
+  event budget and preserving already committed state on required delivery failure.
 
 #### 4.4 Snapshot store completion
 
