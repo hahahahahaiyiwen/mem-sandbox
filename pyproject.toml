@@ -30,6 +30,11 @@ classifiers = [
 ]
 dependencies = []
 
+[project.optional-dependencies]
+openai-agents = [
+  "openai-agents>=0.22,<0.23",
+]
+
 [project.urls]
 Documentation = "https://github.com/hahahahahaiyiwen/mem-sandbox/tree/main/docs"
 Issues = "https://github.com/hahahahahaiyiwen/mem-sandbox/issues"
@@ -38,6 +43,7 @@ Repository = "https://github.com/hahahahahaiyiwen/mem-sandbox"
 [dependency-groups]
 dev = [
   "hypothesis>=6.112,<7",
+  "openai-agents==0.22.0",
   "pyright>=1.1.400,<2",
   "pytest>=8.3,<10",
   "pytest-asyncio>=0.25,<2",

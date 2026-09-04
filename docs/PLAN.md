@@ -755,18 +755,18 @@ committing to additional framework adapters.
 
 #### 5.1 OpenAI contract and package boundary
 
-- [ ] **5.1.1** Support `openai-agents>=0.22,<0.23`, test exactly `0.22.0`, and verify
+- [x] **5.1.1** Support `openai-agents>=0.22,<0.23`, test exactly `0.22.0`, and verify
   `BaseSandboxClientOptions`, `SandboxSessionState`,
   `BaseSandboxClient`, `BaseSandboxSession`, `Capability`, `SandboxRunConfig`, and
   `SnapshotBase` against that version.
-- [ ] **5.1.2** Add `mem_sandbox.integrations.openai_agents` behind an optional
+- [x] **5.1.2** Add `mem_sandbox.integrations.openai_agents` behind an optional
   integration extra and prove importing or constructing the core does not import or
   require `openai-agents`. Add a module `README.md` recording boundary ownership and
   maintenance rules.
-- [ ] **5.1.3** Record the beta compatibility policy: fail contract tests on changed
+- [x] **5.1.3** Record the beta compatibility policy: fail contract tests on changed
   abstract methods, state fields, lifecycle ordering, serialization, capability binding,
   or snapshot semantics; support only the documented pinned range.
-- [ ] **5.1.4** Audit the implemented public core against the pinned contract. Reuse the
+- [x] **5.1.4** Audit the implemented public core against the pinned contract. Reuse the
   existing binary read/write, stat/list, lifecycle, and snapshot behavior; add only the
   smallest owning-module ports needed for native directory mutation or portable workspace
   persistence. Do not implement filesystem or archive semantics inside the adapter.
