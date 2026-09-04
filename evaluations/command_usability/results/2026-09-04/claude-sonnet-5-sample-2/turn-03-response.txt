@@ -1,0 +1,1 @@
+{"actions":[{"task_id":"T9","tool":"execute","arguments":{"command":"cd /workspace/data && wc -c * | grep -v total | sort -rn | head -2"}}]}

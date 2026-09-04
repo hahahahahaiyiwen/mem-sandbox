@@ -1,0 +1,97 @@
+{
+  "totalPremiumRequestCost": 2,
+  "totalUserRequests": 1,
+  "totalNanoAiu": 14144620000,
+  "tokenDetails": {
+    "input": {
+      "tokenCount": 6
+    },
+    "cache_read": {
+      "tokenCount": 20268
+    },
+    "cache_write": {
+      "tokenCount": 21623
+    },
+    "output": {
+      "tokenCount": 1260
+    }
+  },
+  "totalApiDurationMs": 16141,
+  "sessionStartTime": "2026-09-04T04:57:00.938Z",
+  "codeChanges": {
+    "linesAdded": 0,
+    "linesRemoved": 0,
+    "filesModifiedCount": 0,
+    "filesModified": []
+  },
+  "modelMetrics": {
+    "gpt-5.6-sol": {
+      "requests": {
+        "count": 2,
+        "cost": 2
+      },
+      "usage": {
+        "inputTokens": 41897,
+        "outputTokens": 1260,
+        "cacheReadTokens": 20268,
+        "cacheWriteTokens": 21623,
+        "reasoningTokens": 593
+      },
+      "cacheExpiresAt": "2026-09-04T05:27:41.606Z",
+      "totalNanoAiu": 14144620000,
+      "tokenDetails": {
+        "input": {
+          "tokenCount": 6
+        },
+        "cache_read": {
+          "tokenCount": 20268
+        },
+        "cache_write": {
+          "tokenCount": 21623
+        },
+        "output": {
+          "tokenCount": 1260
+        }
+      }
+    }
+  },
+  "agentMetrics": {
+    "main": {
+      "totalApiDurationMs": 16141,
+      "totalNanoAiu": 14144620000,
+      "modelMetrics": {
+        "gpt-5.6-sol": {
+          "requests": {
+            "count": 2,
+            "cost": 2
+          },
+          "usage": {
+            "inputTokens": 41897,
+            "outputTokens": 1260,
+            "cacheReadTokens": 20268,
+            "cacheWriteTokens": 21623,
+            "reasoningTokens": 593
+          },
+          "totalNanoAiu": 14144620000,
+          "tokenDetails": {
+            "input": {
+              "tokenCount": 6
+            },
+            "cache_read": {
+              "tokenCount": 20268
+            },
+            "cache_write": {
+              "tokenCount": 21623
+            },
+            "output": {
+              "tokenCount": 1260
+            }
+          }
+        }
+      }
+    }
+  },
+  "currentModel": "gpt-5.6-sol",
+  "lastCallInputTokens": 21626,
+  "lastCallOutputTokens": 461
+}

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from typing import cast
 from uuid import UUID
 
 import pytest
@@ -23,7 +25,12 @@ from mem_sandbox.snapshots import (
     SnapshotStoreLimits,
     SnapshotTooLarge,
 )
-from mem_sandbox.workspace import AnyCurrentState, MemoryWorkspace, WorkspaceWriteRequest
+from mem_sandbox.workspace import (
+    AnyCurrentState,
+    ContentHash,
+    MemoryWorkspace,
+    WorkspaceWriteRequest,
+)
 
 SESSION_ID = SessionId(UUID("12345678-1234-5678-1234-567812345678"))
 SNAPSHOT_ID = SnapshotId(UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"))
@@ -93,6 +100,38 @@ async def test_session_snapshot_codec_enforces_complete_payload_limit() -> None:
     assert JsonSessionSnapshotCodec(max_payload_bytes=len(payload.payload)).encode(state)
     with pytest.raises(SnapshotTooLarge):
         JsonSessionSnapshotCodec(max_payload_bytes=len(payload.payload) - 1).encode(state)
+
+
+@pytest.mark.asyncio
+async def test_session_snapshot_codec_normalizes_invalid_cwd_as_corrupt() -> None:
+    state = await _state()
+    codec = JsonSessionSnapshotCodec()
+    encoded = codec.encode(state)
+    value = json.loads(encoded.payload)
+    assert isinstance(value, dict)
+    payload_value = cast(dict[str, object], value)
+    payload_value["cwd"] = "/workspace/../escape"
+    payload = json.dumps(
+        payload_value,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    snapshot = SandboxSnapshot(
+        snapshot_id=SNAPSHOT_ID,
+        schema_version=1,
+        created_at=datetime(2026, 9, 1, tzinfo=UTC),
+        expires_at=datetime(2026, 9, 2, tzinfo=UTC),
+        source_session_id=SESSION_ID,
+        workspace_revision=state.workspace.workspace_revision,
+        content_hash=ContentHash.from_bytes(payload),
+        payload=payload,
+        metadata=SnapshotMetadata("json", len(payload), True),
+        created_by=None,
+    )
+
+    with pytest.raises(SnapshotCorrupt, match="invalid state"):
+        codec.decode(snapshot)
 
 
 @pytest.mark.asyncio

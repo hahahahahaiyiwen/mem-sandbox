@@ -1,6 +1,6 @@
 # Product Validation and Benchmark Design
 
-**Status:** Proposed design for the Milestone 5 exit
+**Status:** Milestone 4 direct reference implemented; Milestone 5 adapters and benchmarks proposed
 
 ## Purpose
 
@@ -156,6 +156,17 @@ participate in equivalence.
 The mandatory reference scenario is scripted and model-free. It validates the sandbox
 and adapters without model variability, API credentials, network latency, or token cost.
 
+Issue #21 implements the direct `SandboxService`/`SandboxSession` reference during
+Milestone 4. Milestone 5 adapters reuse the same logical scenario through drivers and
+compare their normalized traces with that direct reference. The direct test retains
+public codec, store, gateway, and sink fixtures only to observe persisted hashes,
+provenance, and events; runtime actions remain limited to public service/session methods.
+
+The complete direct contract and category matrix are defined in
+[Direct Core Conformance](../../tests/conformance/README.md). Generated component
+invariants are defined separately in
+[Property and Stateful Test Design](../../tests/property/README.md).
+
 ### Reference lifecycle scenario
 
 Each driver performs the following logical sequence:
@@ -166,18 +177,32 @@ Each driver performs the following logical sequence:
 4. Read a bounded range and retain its content hash.
 5. Apply a hash-guarded patch and verify the revision and file content-hash transition.
 6. Attempt one stale mutation and verify the expected stable conflict.
-7. Create a named reference snapshot containing workspace, cwd, and approved environment
+7. Create a reference snapshot containing workspace, cwd, and approved environment
    state, and retain its revision and root hash.
-8. Close or delete the original live session.
+8. Close the original live session, prove later session operations fail, and then delete
+   its service handle because session close does not unregister the record.
 9. Attempt an operation through the closed original session and verify the stable
    lifecycle rejection.
 10. Resume the step 7 reference snapshot into a new session identity.
 11. Verify files, hashes, snapshot root hash, cwd, environment, limits, and unsupported
    capability behavior.
+
+   `CreateSnapshotResult.content_hash` is the canonical complete-session state hash. The
+   workspace root hash used at checkpoints is obtained by loading and decoding the
+   persisted snapshot through the retained public store and codec; the two hashes are not
+   interchangeable.
 12. Continue executing, reading, writing, and patching restored state.
 13. Resume the same step 7 reference snapshot two more times and prove the sessions are
-   independent forks.
-14. Delete every live session and verify lifecycle cleanup.
+   independent forks. There is no separate fork API.
+14. Delete every live handle, close the service, and clean retained snapshots through
+   their independent store lifecycle.
+
+The Milestone 4 direct suite adds one core-only assertion after step 7: mutate the live
+session beyond the checkpoint, call `SandboxSession.restore_snapshot()` on the same
+identity, and verify atomic workspace, cwd, environment, revision, root-hash, and
+`snapshot.restored` behavior. This host lifecycle operation is not part of the common
+adapter driver protocol, so later adapter equivalence compares the shared trace
+projection while the direct suite retains the additional core assertion.
 
 The shared scenario uses only the common lifecycle and four-operation surface supported
 by tool/capability and workspace/backend adapters. Binary round trips, streaming, and
@@ -218,10 +243,13 @@ normalized away.
 
 ### Real-agent acceptance
 
-An optional real-agent evaluation may run representative tasks through pinned model and
-SDK versions. It measures tool selection, repair turns, tokens, and task completion, but
-it is not a correctness or provisioning regression gate because model behavior and
-provider latency vary independently of MemSandbox.
+The Milestone 4
+[command-usability evaluation](../../evaluations/command_usability/README.md) runs
+representative tasks through pinned model versions and the public direct-session tool
+surface. It measures tool selection, repair turns, tokens, output size, truncation, and
+task completion. Its results are design evidence rather than a correctness or
+provisioning regression gate because model behavior and provider latency vary
+independently of MemSandbox.
 
 ## Benchmark workloads
 

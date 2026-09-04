@@ -201,3 +201,38 @@ real tool loop and record:
 Use multiple samples per model. The current pilot used coding-agent wrappers rather than
 raw provider APIs, one sample per condition, synthetic tasks, and no execution, so its
 percentages are directional rather than statistically stable.
+
+## Executable Milestone 4 evaluation
+
+Issue #21 implemented the follow-up as a real public-session tool loop with a versioned
+12-task corpus. Two samples each were run with GPT-5.6 Sol, Claude Sonnet 5, and Gemini
+3.7 Flash. Each task used an independent sandbox, model actions were executed only
+through `execute`, `read_file`, `write_file`, and `apply_patch`, and corpus-owned oracles
+verified final answers and workspace state.
+
+The committed results are in
+[`evaluations/command_usability/results/2026-09-04`](../../../evaluations/command_usability/results/2026-09-04/REPORT.md).
+
+| Metric | Result |
+|---|---:|
+| Completed tasks | 72/72 |
+| First-attempt parser/registry acceptance | 70/72 |
+| Sandbox tool calls | 91 |
+| Parser/registry repair turns | 2 |
+| Input tokens | 744,481 |
+| Output tokens | 8,919 |
+| Provider latency | 127,128 ms |
+| Tool-output bytes | 2,894 |
+| Tasks with truncated output | 0 |
+
+The two parser/registry rejections came from multiline `printf` syntax and a
+`find -printf` plan; both repaired successfully. Additional accepted-but-invalid first
+attempts used unsupported `sort -t`/`-k`, `ls -l`/`-S`, and shell glob assumptions. The
+147,000-byte log also caused bounded `read_file` attempts to fail by line count, after
+which models switched to the supported `grep | sort | uniq | head` pipeline.
+
+The results confirm that the complete command profile makes the corpus practical, while
+also confirming the documentation requirements from the pilot: describe the executor
+as a constrained virtual command set, advertise exact option support, avoid implying
+shell glob or multiline-script behavior, and keep `write_file` as the preferred
+exact-content path.

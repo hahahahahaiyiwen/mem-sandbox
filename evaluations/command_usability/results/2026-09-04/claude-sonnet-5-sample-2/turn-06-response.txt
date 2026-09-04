@@ -1,0 +1,1 @@
+{"actions":[{"task_id":"T9","tool":"final","arguments":{"answer":"b.bin\nc.log"}}]}

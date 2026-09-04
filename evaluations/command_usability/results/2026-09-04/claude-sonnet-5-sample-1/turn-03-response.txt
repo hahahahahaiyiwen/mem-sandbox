@@ -1,0 +1,4 @@
+{"actions":[
+{"task_id":"T9","tool":"final","arguments":{"task_id":"T9","answer":"b.bin\nc.log"}},
+{"task_id":"T11","tool":"final","arguments":{"task_id":"T11","answer":"4500 ERROR timeout\n3000 ERROR disk"}}
+]}

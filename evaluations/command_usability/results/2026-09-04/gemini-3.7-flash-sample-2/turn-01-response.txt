@@ -1,0 +1,14 @@
+{"actions":[
+  {"task_id":"T1","tool":"write_file","arguments":{"path":"/workspace/project/notes.txt","content":"alpha\nbeta\n","create_parents":true}},
+  {"task_id":"T2","tool":"execute","arguments":{"command":"cd /workspace/project && echo done > result.txt"}},
+  {"task_id":"T3","tool":"execute","arguments":{"command":"cp -r /workspace/src /workspace/backup"}},
+  {"task_id":"T4","tool":"execute","arguments":{"command":"mv /workspace/draft.txt /workspace/final.txt"}},
+  {"task_id":"T5","tool":"execute","arguments":{"command":"ls /workspace/items | sort"}},
+  {"task_id":"T6","tool":"execute","arguments":{"command":"rm -r /workspace/cache"}},
+  {"task_id":"T7","tool":"execute","arguments":{"command":"find /workspace/repo -name '*.py' | wc -l"}},
+  {"task_id":"T8","tool":"execute","arguments":{"command":"grep -n -E 'TODO|FIXME' /workspace/repo/* | head -n 3"}},
+  {"task_id":"T9","tool":"execute","arguments":{"command":"ls -l /workspace/data"}},
+  {"task_id":"T10","tool":"read_file","arguments":{"path":"/workspace/config.json"}},
+  {"task_id":"T11","tool":"read_file","arguments":{"path":"/workspace/app.log"}},
+  {"task_id":"T12","tool":"write_file","arguments":{"path":"/workspace/scripts/check.py","content":"import sys\nprint(sys.version_info.major)\nprint('done')\n","create_parents":true}}
+]}

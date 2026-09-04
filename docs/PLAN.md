@@ -594,7 +594,7 @@ boundary exists.
   `;` and `&&` behavior around that result. Add an explicit stdin-connection marker,
   stage-count limit, per-intermediate limit, and aggregate-materialization limit. Do not
   use host processes or concurrent stage execution.
-- [ ] **4.1.7** Run an executable multi-model command-usability evaluation before the
+- [x] **4.1.7** Run an executable multi-model command-usability evaluation before the
   first framework adapter, including acceptance, repair turns, tool calls, tokens,
   latency, output size, and truncation.
 
@@ -673,11 +673,33 @@ boundary exists.
 
 #### 4.6 Core conformance
 
-- [ ] **4.6.1** Run one shared behavior suite against direct `SandboxSession`.
-- [ ] **4.6.2** Add generated operation-sequence tests for paths, quota accounting,
-  mutation invariants, snapshots, parser tokenization, and deterministic execution.
-- [ ] **4.6.3** Update every affected component `README.md` in the same change as its
-  behavior.
+- [x] **4.6.1** Implement the
+  [public direct-core reference scenario](../tests/conformance/README.md) through
+  `SandboxService` and `SandboxSession`: create, mutate, hash-guarded patch, stale
+  rejection, snapshot, same-identity in-place restore, close, resume, continue,
+  repeated-resume forks, and cleanup. Normalize unstable identifiers, timestamps, and
+  durations while preserving identity relationships, revisions, hashes, errors, event
+  ordering, and provenance.
+- [x] **4.6.2** Cover direct public-operation behavior by category: happy path,
+  policy/safety denial, dependency failure, exact and one-over boundary,
+  timeout/cancellation, deterministic replay, and unsupported behavior before mutation
+  with no host fallback.
+- [x] **4.6.3** Add Hypothesis 6.x to the development dependency group, register bounded
+  local/CI/extended profiles, use deterministic CI generation on every supported
+  Python/OS job, and retain shrunk counterexamples as focused regression tests.
+- [x] **4.6.4** Implement the
+  [generated path and workspace models](../tests/property/README.md) for confinement,
+  UTF-8 limits, quota accounting, revisions, hashes, mutation atomicity, copy/move, and
+  deterministic workspace export.
+- [x] **4.6.5** Implement generated workspace-snapshot, snapshot-store, and pure session
+  codec properties for canonical round trip, restore isolation, integrity,
+  compatibility, expiry, purge, count, and byte-capacity behavior.
+- [x] **4.6.6** Implement generated command grammar, pipeline, redirection, limit, and
+  twin-execution models without private parser tokens, host shell comparison, custom
+  randomness, timing generation, or unbounded operation sequences.
+- [x] **4.6.7** Update every affected component `README.md` in the same change as its
+  generated or conformance behavior and keep the direct trace reusable by later adapter
+  drivers.
 
 #### 4.7 Sandbox service and session factory
 
@@ -696,23 +718,29 @@ boundary exists.
 
 ### Exit criteria
 
-- [ ] **4.9.1** `python -m pytest tests/unit tests/integration -q` passes.
-- [ ] **4.9.2** `python -m pytest tests/conformance/test_direct_session.py -q` passes.
-- [ ] **4.9.3** `python -m ruff check src tests` and
-  `python -m pyright src tests` pass.
-- [ ] **4.9.4** The minimal explicit admission seam remains covered and no current
+- [x] **4.9.1** `python -m pytest tests/unit tests/integration -q` passes.
+- [x] **4.9.2** `python -m pytest tests/conformance/test_direct_session.py -q` passes.
+- [x] **4.9.3** `python -m ruff check evaluations src tests` and
+  `python -m pyright evaluations src tests` pass.
+- [x] **4.9.4** The minimal explicit admission seam remains covered and no current
   release behavior depends on a speculative composed policy engine.
-- [ ] **4.9.5** Functional secret materialization follows the issue #20 approved
+- [x] **4.9.5** Functional secret materialization follows the issue #20 approved
   policy-before-source, operation-local overlay, lease cleanup, persistence guard, and
   canary-redaction contract.
-- [ ] **4.9.6** Unsupported behavior tests prove failure occurs before mutation and
+- [x] **4.9.6** Unsupported behavior tests prove failure occurs before mutation and
   without host fallback.
-- [ ] **4.9.7** The dependency-boundary test still proves no agent-framework dependency
+- [x] **4.9.7** The dependency-boundary test still proves no agent-framework dependency
   is present in core.
-- [ ] **4.9.8** Pipeline tests prove precedence, pipeline-safe producer/consumer
+- [x] **4.9.8** Pipeline tests prove precedence, pipeline-safe producer/consumer
   admission, fixed pipefail status, final-only stdout, ordered stderr,
   descriptor-gated final-stage-only redirection, structured limit-failure sequencing,
   and exact intermediate, aggregate, timeout, and cancellation boundaries.
+- [x] **4.9.9** `HYPOTHESIS_PROFILE=ci python -m pytest tests/property -q` passes with
+  bounded deterministic generation and no host-resource access.
+- [x] **4.9.10** The direct conformance trace and dedicated secret-canary suite together
+  prove snapshot state/root-hash relationships, same-identity in-place restore, resume
+  identity, fork isolation, event correlation, policy-before-collaborator ordering,
+  secret non-persistence, and complete cleanup through public contracts only.
 
 ## 9. Milestone 5: native integrations
 

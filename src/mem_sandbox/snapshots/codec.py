@@ -19,7 +19,13 @@ from mem_sandbox.snapshots.models import (
     SessionSnapshotState,
     SnapshotPayload,
 )
-from mem_sandbox.workspace import ContentHash, SandboxPath, WorkspaceSnapshotData
+from mem_sandbox.workspace import (
+    ContentHash,
+    InvalidPathError,
+    PathOutsideWorkspaceError,
+    SandboxPath,
+    WorkspaceSnapshotData,
+)
 
 
 class JsonSessionSnapshotCodec:
@@ -139,7 +145,12 @@ class JsonSessionSnapshotCodec:
         try:
             cwd = SandboxPath(cwd_value)
             environment = _environment(value["approved_environment"])
-        except (TypeError, ValueError) as error:
+        except (
+            InvalidPathError,
+            PathOutsideWorkspaceError,
+            TypeError,
+            ValueError,
+        ) as error:
             raise SnapshotCorrupt("session snapshot contains invalid state") from error
         return SessionSnapshotState(
             workspace=workspace,
@@ -165,6 +176,8 @@ def _workspace_snapshot(value: dict[str, object]) -> WorkspaceSnapshotData:
         encoded = base64.b64decode(encoded_value, validate=True)
     except (binascii.Error, ValueError) as error:
         raise SnapshotCorrupt("workspace encoded bytes are not valid base64") from error
+    if base64.b64encode(encoded).decode("ascii") != encoded_value:
+        raise SnapshotCorrupt("workspace encoded bytes are not canonical base64")
     try:
         return WorkspaceSnapshotData(
             encoded=encoded,
@@ -193,6 +206,9 @@ def _environment(value: object) -> CommandEnvironment:
                 _text(item["value"], "environment value"),
             )
         )
+    names = [entry.name for entry in result]
+    if names != sorted(names):
+        raise SnapshotCorrupt("approved_environment entries must be sorted by name")
     return CommandEnvironment(tuple(result))
 
 

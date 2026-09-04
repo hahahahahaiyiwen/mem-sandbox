@@ -1,0 +1,1 @@
+{"actions":[{"task_id":"T9","tool":"execute","arguments":{"command":"wc -c /workspace/data/a.txt /workspace/data/b.bin /workspace/data/c.log /workspace/data/d.txt | sort -rn"}}]}

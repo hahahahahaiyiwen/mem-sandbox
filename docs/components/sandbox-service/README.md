@@ -504,6 +504,11 @@ snapshot payload bytes, environment values, or secrets.
 - No automatic live-session expiry task or timer is created.
 - `sandbox.created` and `sandbox.deleted` remain unproduced.
 - Core and service modules import no agent framework or transport dependency.
+- The public create, mutate, snapshot, close, resume, repeated-resume fork, delete, and
+  service-close sequence is composed in
+  [Direct Core Conformance](../../../tests/conformance/README.md). Session close alone
+  does not unregister a service handle, and live-session deletion does not delete
+  independently retained snapshots.
 
 ## Maintenance rule
 
