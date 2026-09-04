@@ -1,6 +1,6 @@
 # Product Validation and Benchmark Design
 
-**Status:** Milestone 4 direct reference implemented; Milestone 5 adapters and benchmarks proposed
+**Status:** Milestone 4 direct reference implemented; OpenAI-first Milestone 5 proposed
 
 ## Purpose
 
@@ -133,9 +133,8 @@ Drivers translate only lifecycle and operation shapes:
 reference scenario
   -> product-validation driver
     -> direct SandboxSession
-    -> PydanticAI capability
-    -> Deep Agents backend
-    -> OpenAI Agents SDK sandbox adapter
+    -> OpenAI Agents SDK sandbox client/session
+    -> OpenAI Agents SDK custom capability
 ```
 
 Every driver produces a normalized trace containing domain-relevant outcomes:
@@ -452,9 +451,8 @@ benchmarks/
   profiles/
   drivers/
     direct.py
-    pydantic_ai.py
-    deep_agents.py
-    openai_agents.py
+    openai_sandbox.py
+    openai_capability.py
   cases/
     provisioning.py
     snapshot_resume.py
@@ -475,8 +473,8 @@ packages; production modules never import the benchmark package.
 
 Milestone 5 is not complete until:
 
-- the scripted stateful scenario passes through the direct session and every supported
-  adapter;
+- the scripted stateful scenario passes through the direct session, OpenAI sandbox
+  client/session, and OpenAI capability drivers;
 - cold, warm, first-operation, snapshot, resume, memory, and adapter-overhead cases are
   executable;
 - one controlled baseline artifact is captured for every required driver and profile;
@@ -486,6 +484,9 @@ Milestone 5 is not complete until:
 
 Comparative evaluation may occur after the Milestone 5 engineering exit, but a public
 "fastest" claim remains blocked until that evaluation passes.
+
+PydanticAI, Deep Agents, and other SDK drivers are added only with their own approved
+adapter work. Their absence does not block the OpenAI-first Milestone 5 engineering exit.
 
 Milestone 6 consumes the baseline to decide whether workspace content offload or a
 simpler optimization addresses a measured constraint.

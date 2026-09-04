@@ -59,6 +59,9 @@ through its own APIs, but it is not an operating-system isolation boundary.
 - Support two integration levels in the current design:
   - tool/capability adapters
   - workspace/backend adapters
+- Prove both levels first through the OpenAI Agents SDK: a custom four-tool capability
+  and a process-local sandbox client/session adapter. Select later SDKs from evidence
+  after that integration passes conformance; do not pre-build a global framework layer.
 - Treat MCP as a possible future integration point, not part of the current architecture
   or implementation phase.
 

@@ -3,7 +3,7 @@
 **Pinned SDK:** `openai-agents==0.22.0`
 **Pinned source:** commit
 [`89c02c8`](https://github.com/openai/openai-agents-python/tree/89c02c828ee8510fe9a84ee6675608193aa13b02)
-**Status:** Sandbox Agents are beta.
+**Status:** Milestone 5 first integration target; Sandbox Agents are beta.
 
 ## Direct answer
 
@@ -228,17 +228,19 @@ This is enough to expose the original four tools to any agent framework.
 
 ### OpenAI session compatibility
 
-The OpenAI adapter additionally needs:
+Milestone 4 already provides complete binary reads and writes, stat/list operations,
+service-owned lifecycle, process-local snapshots, and deterministic constrained command
+execution through public core contracts.
 
-- complete binary file reads, because `read()` returns an `io.IOBase`, not line-oriented
-  text
-- complete binary writes for images, archives, and manifest entries
-- directory listing, creation, and removal, either as native operations or faithfully
-  supported commands
+The OpenAI adapter still needs:
+
+- native directory creation and removal through an owning core/session boundary, or an
+  explicitly approved translation through the constrained executor
 - POSIX path normalization and confinement, including safe symlink behavior if symlinks
   are supported
-- workspace-wide export and import for snapshot persistence
-- create, start, running, stop, shutdown, delete, and resume lifecycle behavior
+- bounded workspace-wide export and import for OpenAI snapshot persistence
+- exact mapping of OpenAI create, start, running, stop, close, delete, serialized state,
+  and resume behavior onto `SandboxService` ownership
 - manifest materialization or explicit rejection of unsupported manifest features
 - a deliberate choice between POSIX-compatible `sh -lc` execution and custom
   model-facing capabilities
@@ -255,10 +257,13 @@ manifest features add more commands and semantics.
 
 This level is not required for the first Python version. A cleaner first milestone is:
 
-1. Keep the original four operations as explicit typed tools.
-2. Add private binary read/write and native directory operations.
+1. Keep the original four operations as explicit typed tools in a custom OpenAI
+   capability.
+2. Reuse the existing public binary read/write and stat/list operations; add only the
+   missing native directory and portable workspace-persistence ports.
 3. Implement the OpenAI client/session lifecycle and snapshot bridge.
-4. Use a custom OpenAI capability instead of claiming support for the default POSIX shell.
+4. Replace the default OpenAI shell/filesystem capabilities instead of claiming support
+   for their POSIX assumptions.
 5. Add POSIX compatibility incrementally only where it provides concrete value.
 
 This makes the design functionally complete without pretending that the in-memory
@@ -841,24 +846,29 @@ finally:
 Keep this adapter outside the framework-neutral core:
 
 ```text
-core/
-  session.py
-  workspace.py
-  executor.py
-  snapshots.py
+src/mem_sandbox/
+  integrations/
+    openai_agents/
+      __init__.py
+      client.py
+      session.py
+      state.py
+      capabilities.py
+      snapshots.py
 
-adapters/
-  openai_agents/
-    client.py
-    session.py
-    state.py
-    capabilities.py
-    tests/
+tests/
+  integrations/
+    openai_agents/
+      test_client.py
+      test_session.py
+      test_state.py
+      test_capabilities.py
 ```
 
-Pin the supported OpenAI SDK minor version and run adapter contract tests against it. The
-Sandbox Agents API is explicitly beta, and methods that are concrete today may become
-abstract or change semantics before general availability.
+Expose the adapter through an optional integration extra supporting
+`openai-agents>=0.22,<0.23`, and run contract tests against exactly `0.22.0`. The Sandbox
+Agents API is explicitly beta, and methods that are concrete today may become abstract or
+change semantics before general availability.
 
 ## Official references
 

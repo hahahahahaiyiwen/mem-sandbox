@@ -746,57 +746,88 @@ boundary exists.
 
 ### Goal
 
-Integrate the proven core with Python agent frameworks while preserving core ownership of
-filesystem, command, lifecycle, and snapshot behavior. Adapters must not invent their own
-authorization system while composed policy remains deferred.
+Deliver the first native integration through the OpenAI Agents SDK while preserving core
+ownership of filesystem, command, lifecycle, snapshot, policy, secret, and event behavior.
+Prove both integration levels through one SDK before extracting cross-framework helpers or
+committing to additional framework adapters.
 
 ### Work
 
-#### 5.1 Shared tool/capability adapter
+#### 5.1 OpenAI contract and package boundary
 
-- [ ] **5.1.1** Define framework-neutral tool schemas for `execute`, `read_file`,
-  `write_file`, and `apply_patch`.
-- [ ] **5.1.2** Implement shared request, result, correctable-error, terminal-error, and
-  cancellation translation.
-- [ ] **5.1.3** Write adapter conformance tests proving no filesystem, command,
-  lifecycle, or snapshot behavior is reimplemented in the adapter and no unapproved
-  adapter-specific authorization behavior is introduced.
+- [ ] **5.1.1** Support `openai-agents>=0.22,<0.23`, test exactly `0.22.0`, and verify
+  `BaseSandboxClientOptions`, `SandboxSessionState`,
+  `BaseSandboxClient`, `BaseSandboxSession`, `Capability`, `SandboxRunConfig`, and
+  `SnapshotBase` against that version.
+- [ ] **5.1.2** Add `mem_sandbox.integrations.openai_agents` behind an optional
+  integration extra and prove importing or constructing the core does not import or
+  require `openai-agents`. Add a module `README.md` recording boundary ownership and
+  maintenance rules.
+- [ ] **5.1.3** Record the beta compatibility policy: fail contract tests on changed
+  abstract methods, state fields, lifecycle ordering, serialization, capability binding,
+  or snapshot semantics; support only the documented pinned range.
+- [ ] **5.1.4** Audit the implemented public core against the pinned contract. Reuse the
+  existing binary read/write, stat/list, lifecycle, and snapshot behavior; add only the
+  smallest owning-module ports needed for native directory mutation or portable workspace
+  persistence. Do not implement filesystem or archive semantics inside the adapter.
 
-#### 5.2 PydanticAI capability
+#### 5.2 OpenAI Agents SDK sandbox client and session
 
-- [ ] **5.2.1** Pin and document the supported PydanticAI version range.
-- [ ] **5.2.2** Implement a constructor-injected PydanticAI capability with exactly the
-  four approved tools.
-- [ ] **5.2.3** Run the shared conformance scenario through the capability and assert the
-  same domain outcomes and workspace hashes as direct `SandboxSession`.
+- [ ] **5.2.1** Implement immutable client options and serializable session state without
+  live Python objects, resolved secrets, host credentials, or untrusted host paths.
+- [ ] **5.2.2** Implement the sandbox client and session adapter over one owned
+  `SandboxService` handle and `SandboxSession`, including create, running, stop/close,
+  delete, state serialization, live reattachment when safe, and snapshot-backed
+  replacement resume.
+- [ ] **5.2.3** Define and implement a versioned manifest support matrix. Accept only
+  synthetic files, directories, and configuration that map losslessly to public core
+  behavior. Reject non-empty manifest environment, users, groups, host/local paths,
+  mounts, ports, PTY, Git entries, symlinks, devices, and executable hooks before core
+  allocation or mutation unless separately implemented and approved.
+- [ ] **5.2.4** Implement complete binary stream translation and the portable workspace
+  persistence/hydration bridge with bounded input, decompressed-size, entry-count, and
+  path validation owned by the appropriate core boundary.
+- [ ] **5.2.5** Override inherited POSIX-assuming behavior required by the supported
+  profile, including native path validation and directory operations. Disable or replace
+  shell-based fingerprinting and never fall back to `sh`, a host process, or the host
+  filesystem.
+- [ ] **5.2.6** Run client/session contract, lifecycle idempotency, binary round-trip,
+  manifest atomicity, snapshot round-trip, resume/fork, unsupported-feature, cancellation,
+  timeout, and no-host-fallback tests.
 
-#### 5.3 Deep Agents workspace/backend adapter
+#### 5.3 OpenAI sandbox capability
 
-- [ ] **5.3.1** Pin and document the supported Deep Agents version and backend support
-  matrix.
-- [ ] **5.3.2** Map backend lifecycle and filesystem operations to one owned core
-  session.
-- [ ] **5.3.3** Write tests for binary round-trip, lifecycle cleanup, snapshots,
-  unsupported features, and absence of host fallback.
-- [ ] **5.3.4** Run the shared conformance scenario through the Deep Agents backend.
+- [ ] **5.3.1** Implement an adapter-owned OpenAI `Capability` exposing exactly
+  `execute`, `read_file`, `write_file`, and `apply_patch` through the bound in-memory
+  sandbox session.
+- [ ] **5.3.2** Map existing domain requests, results, correctable errors, terminal
+  denials, dependency failures, timeouts, and cancellation without adding a second
+  framework-neutral schema layer.
+- [ ] **5.3.3** Replace the default OpenAI shell/filesystem capability set for the first
+  profile. Do not advertise `sh -lc`, PTY, arbitrary shell, image viewing, or another SDK
+  feature until its complete semantics pass explicit conformance.
+- [ ] **5.3.4** Run the shared model-free conformance scenario through the capability and
+  assert the same normalized domain outcomes, revisions, file hashes, snapshot root
+  hashes, restored state, fork isolation, and cleanup as direct `SandboxSession`.
+- [ ] **5.3.5** Add one deterministic runner integration test proving capability
+  cloning/binding, trusted session selection, tool registration, safe output/error
+  translation, and cleanup without a live model or provider network call.
 
-#### 5.4 OpenAI Agents SDK sandbox adapter
+#### 5.4 Additional agent SDKs
 
-- [ ] **5.4.1** Pin the OpenAI Agents SDK version and verify the documented abstract
-  client, session, state, options, and snapshot contracts against that version.
-- [ ] **5.4.2** Implement the sandbox client and session adapter over one owned core
-  session.
-- [ ] **5.4.3** Override inherited POSIX-assuming behavior required for the supported
-  capability profile.
-- [ ] **5.4.4** Reject unsupported manifests, users, groups, mounts, ports, PTY, and Git
-  entries before mutation.
-- [ ] **5.4.5** Run lifecycle, binary stream, snapshot, unsupported-feature, and shared
-  conformance tests.
+- [ ] **5.4.1** Keep PydanticAI, LangChain Deep Agents, Microsoft Agent Framework,
+  Google ADK, and other SDK adapters outside the Milestone 5 completion gate.
+- [ ] **5.4.2** After the OpenAI adapter passes conformance and product validation,
+  review actual duplication and missing semantics before selecting the next SDK.
+- [ ] **5.4.3** Open a separate approved design/implementation issue for each additional
+  adapter. Extract shared helpers only from behavior proven identical by at least two
+  adapters; do not create a global framework abstraction in anticipation of future SDKs.
 
 #### 5.5 Deferred integrations
 
 - [ ] **5.5.1** Keep MCP, HTTP/OpenAPI, A2A, local subprocesses, Docker, and hosted
-  providers outside this implementation phase.
+  sandbox providers outside this implementation phase. OpenAI's provider interface is in
+  scope only for the process-local MemSandbox client.
 - [ ] **5.5.2** Require a new approved design decision and support matrix before adding
   any deferred integration.
 
@@ -806,8 +837,8 @@ authorization system while composed policy remains deferred.
   [stateful execution reference scenario](./product-validation/README.md#stateful-execution-conformance)
   through a product-validation driver owned outside framework adapters.
 - [ ] **5.6.2** Run the same normalized create, mutate, snapshot, close, resume,
-  continue, fork, and delete scenario through the direct session and every supported
-  adapter.
+  continue, fork, and delete scenario through the direct session, OpenAI sandbox
+  client/session driver, and OpenAI capability driver.
 - [ ] **5.6.3** Implement versioned cold, warm, create-to-ready, first-operation,
   snapshot, resume, burst, memory, and adapter-overhead benchmark cases without model or
   provider network calls.
@@ -819,38 +850,47 @@ authorization system while composed policy remains deferred.
 - [ ] **5.6.6** Keep comparative benchmarks separate from CI regression gates and require
   the documented methodology before publishing any "fastest provisioning" claim.
 
-#### 5.7 Policy and secret re-evaluation
+#### 5.7 Trust-boundary re-evaluation
 
-- [ ] **5.7.1** After `SandboxService` and at least one framework adapter are implemented,
-  review whether a concrete owner, secret, network, host-execution, or shared-state trust
-  boundary exists.
-- [ ] **5.7.2** If no concrete authorization requirement exists, keep the minimal
-  allow-all admission seam and continue deferring composed policy.
+- [ ] **5.7.1** Review the implemented OpenAI boundary for concrete authority introduced
+  by caller-to-handle mapping, serialized session state, manifests, environment values,
+  path grants, snapshots, or future mount/network options.
+- [ ] **5.7.2** If the supported profile introduces no new protected action beyond the
+  implemented core policy and secret contracts, keep application-owned authorization and
+  continue deferring composed policy.
 - [ ] **5.7.3** If a trigger exists, open a new design issue that defines authority,
   identity, protected actions, enforcement ownership, prepared artifacts, fail-closed
   behavior, and behavior-first coverage before implementation.
 
 ### Exit criteria
 
-- [ ] **5.9.1** `python -m pytest tests/conformance -q` passes for direct session and
-  every implemented adapter.
-- [ ] **5.9.2** PydanticAI produces the same domain outcomes and workspace hashes as the
-  direct-session reference scenario.
-- [ ] **5.9.3** Each implemented workspace/backend adapter passes lifecycle, binary
-  stream, snapshot round-trip, unsupported-feature, and no-host-fallback tests.
+- [ ] **5.9.1** `python -m pytest tests/conformance -q` passes for the direct session,
+  OpenAI sandbox client/session, and OpenAI capability drivers.
+- [ ] **5.9.2** The OpenAI capability produces the same normalized domain outcomes,
+  revisions, file hashes, snapshot root hashes, restored state, fork behavior, and
+  cleanup as the direct-session reference scenario.
+- [ ] **5.9.3** The OpenAI sandbox client/session passes pinned SDK contract, lifecycle,
+  binary stream, manifest atomicity, state serialization, snapshot round-trip,
+  resume/fork, unsupported-feature, timeout/cancellation, and no-host-fallback tests.
 - [ ] **5.9.4** Adapter dependency tests prove framework packages are isolated from core.
-- [ ] **5.9.5** Each integration `README.md` records its pinned version, support matrix,
+- [ ] **5.9.5** The OpenAI integration `README.md` records its supported SDK range,
+  exact tested version, beta compatibility policy, manifest/capability support matrix,
   ownership model, unsupported behavior, and conformance results.
 - [ ] **5.9.6** The stateful reference scenario produces equivalent normalized outcomes,
   file hashes, revisions, snapshot root hashes, lifecycle rejection, restored state,
-  fork behavior, and cleanup through every supported driver.
+  fork behavior, and cleanup through the direct and both OpenAI drivers.
 - [ ] **5.9.7** The benchmark suite reports cold and warm provisioning, first operation,
-  snapshot, resume, burst, memory, and adapter overhead with exact workload and
-  environment metadata.
+  snapshot, resume, burst, memory, backend-adapter overhead, and capability-adapter
+  overhead for the direct and OpenAI drivers with exact workload and environment metadata.
 - [ ] **5.9.8** A controlled baseline, measured noise floor, and approved regression
-  budget exist for every required release-gating case.
+  budget exist for every stable direct/OpenAI release-gating case. A case whose runner
+  noise prevents a defensible budget remains reported but non-gating with the limitation
+  documented.
 - [ ] **5.9.9** Product documentation uses only performance claims supported by current
   artifacts; an unqualified "fastest sandbox" claim is prohibited.
+- [ ] **5.9.10** PydanticAI, Deep Agents, MCP, and other deferred integrations are not
+  required for Milestone 5 completion, and no production abstraction exists solely for a
+  deferred SDK.
 
 ## 10. Milestone 6: workspace scalability decision
 
