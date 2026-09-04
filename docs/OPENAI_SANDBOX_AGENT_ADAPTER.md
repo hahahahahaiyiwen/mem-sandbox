@@ -3,7 +3,20 @@
 **Pinned SDK:** `openai-agents==0.22.0`
 **Pinned source:** commit
 [`89c02c8`](https://github.com/openai/openai-agents-python/tree/89c02c828ee8510fe9a84ee6675608193aa13b02)
-**Status:** Milestone 5 first integration target; Sandbox Agents are beta.
+**Status:** Milestone 5.1 contract and optional package boundary complete; Sandbox Agents
+are beta.
+
+## Package boundary
+
+Install the integration dependency with:
+
+```text
+pip install "mem-sandbox[openai-agents]"
+```
+
+The production namespace is `mem_sandbox.integrations.openai_agents`. Milestone 5.1
+creates that isolated boundary but intentionally exports no client, session, or capability
+implementation before the owning core prerequisites are complete.
 
 ## Direct answer
 
@@ -228,25 +241,26 @@ This is enough to expose the original four tools to any agent framework.
 
 ### OpenAI session compatibility
 
-Milestone 4 already provides complete binary reads and writes, stat/list operations,
-service-owned lifecycle, process-local snapshots, and deterministic constrained command
-execution through public core contracts.
+The completed Milestone 5.1 audit confirms that the public core already provides complete
+binary reads and writes, stat/list operations, service-owned lifecycle, process-local
+snapshots, and deterministic constrained command execution.
 
-The OpenAI adapter still needs:
+The remaining owning-module prerequisites are:
 
-- native directory creation and removal through an owning core/session boundary, or an
-  explicitly approved translation through the constrained executor
+- native directory creation and removal through an owning core/session boundary
+  (issue #31)
 - POSIX path normalization and confinement, including safe symlink behavior if symlinks
   are supported
-- bounded workspace-wide export and import for OpenAI snapshot persistence
+- bounded workspace-wide export and import for OpenAI snapshot persistence (issue #32)
 - exact mapping of OpenAI create, start, running, stop, close, delete, serialized state,
   and resume behavior onto `SandboxService` ownership
 - manifest materialization or explicit rejection of unsupported manifest features
 - a deliberate choice between POSIX-compatible `sh -lc` execution and custom
   model-facing capabilities
 
-The old ranged-read API should remain model-facing because it controls context size, but
-the core or adapter also needs a private full-byte read operation for the OpenAI contract.
+The ranged-read API should remain model-facing because it controls context size. OpenAI
+backend reads should translate through the existing public `SandboxSession.read_bytes`
+operation rather than introducing a private full-byte path.
 
 ### Drop-in compatibility with default `SandboxAgent` capabilities
 

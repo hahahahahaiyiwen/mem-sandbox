@@ -9,17 +9,6 @@ from pathlib import Path
 from mem_sandbox import __version__
 
 ALLOWED_CORE_IMPORT_ROOTS = frozenset(sys.stdlib_module_names) | {"mem_sandbox"}
-CORE_DIRECTORIES = (
-    "core",
-    "workspace",
-    "command_executor",
-    "commands",
-    "policy",
-    "secrets",
-    "events",
-    "snapshots",
-    "session",
-)
 
 
 def _absolute_import_roots(path: Path) -> set[str]:
@@ -42,6 +31,46 @@ def _unexpected_core_import_roots(path: Path) -> set[str]:
 def test_package_imports_in_an_isolated_interpreter() -> None:
     completed = subprocess.run(
         [sys.executable, "-I", "-c", "import mem_sandbox"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+
+
+def test_importing_core_does_not_import_openai_agents() -> None:
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            "-c",
+            "import sys; import mem_sandbox; assert 'agents' not in sys.modules",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+
+
+def test_package_imports_when_openai_agents_is_unavailable() -> None:
+    script = """
+import builtins
+
+original_import = builtins.__import__
+
+def import_without_openai_agents(name, *args, **kwargs):
+    if name == "agents" or name.startswith("agents."):
+        raise ModuleNotFoundError(name)
+    return original_import(name, *args, **kwargs)
+
+builtins.__import__ = import_without_openai_agents
+import mem_sandbox
+"""
+    completed = subprocess.run(
+        [sys.executable, "-I", "-c", script],
         check=False,
         capture_output=True,
         text=True,
@@ -75,12 +104,10 @@ def test_import_guard_detects_any_third_party_package(tmp_path: Path) -> None:
 def test_core_modules_import_only_stdlib_and_mem_sandbox() -> None:
     repository_root = Path(__file__).parents[3]
     package_root = repository_root / "src" / "mem_sandbox"
-    source_files = [package_root / "__init__.py"]
-
-    for directory_name in CORE_DIRECTORIES:
-        directory = package_root / directory_name
-        if directory.exists():
-            source_files.extend(directory.rglob("*.py"))
+    integrations_root = package_root / "integrations"
+    source_files = [
+        path for path in package_root.rglob("*.py") if not path.is_relative_to(integrations_root)
+    ]
 
     violations: dict[str, list[str]] = {}
     for path in source_files:
