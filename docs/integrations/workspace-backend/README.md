@@ -1,6 +1,6 @@
 # Workspace/Backend Integration Design
 
-**Status:** Proposed detailed design under the approved high-level architecture
+**Status:** OpenAI-first Milestone 5 design; other framework backends deferred
 
 ## Purpose
 
@@ -23,10 +23,12 @@ as:
 - execution environment
 - snapshot or resume state
 
-Current targets:
+Current implementation target:
 
-- LangChain Deep Agents backend protocols
 - OpenAI Agents SDK `BaseSandboxClient` and `BaseSandboxSession`
+
+LangChain Deep Agents remains a possible follow-up after the OpenAI adapter proves which
+backend behavior and translation helpers are genuinely reusable.
 
 ## Architecture
 
@@ -192,10 +194,10 @@ It must not contain:
 Resume first attempts safe reattachment when the service owns a live session. Otherwise
 it creates a replacement from the snapshot.
 
-## LangChain Deep Agents treatment
+## Deferred LangChain Deep Agents treatment
 
-The adapter implements the expected backend file operations and, when enabled, execution
-by delegating to one `SandboxSession`.
+If selected after the OpenAI integration, the adapter implements the expected backend
+file operations and, when enabled, execution by delegating to one `SandboxSession`.
 
 LangGraph checkpointer state and sandbox snapshots remain separate:
 
@@ -203,7 +205,7 @@ LangGraph checkpointer state and sandbox snapshots remain separate:
 - sandbox snapshot: workspace and command-environment state
 
 The adapter may place an opaque snapshot reference in workflow state but does not merge
-the two formats.
+the two formats. Deep Agents does not gate Milestone 5.
 
 ## OpenAI Agents SDK treatment
 

@@ -1,6 +1,6 @@
 # Tool/Capability Integration Design
 
-**Status:** Proposed detailed design under the approved high-level architecture
+**Status:** OpenAI-first Milestone 5 design; other framework capabilities deferred
 
 ## Purpose
 
@@ -20,6 +20,11 @@ Use this integration when a framework provides:
 
 Examples include PydanticAI, Microsoft Agent Framework, Google ADK, Strands, LlamaIndex,
 CrewAI, Haystack, Agno, and smolagents.
+
+The first implementation is an OpenAI Agents SDK custom `Capability`. Do not implement a
+framework-neutral `FrameworkTool` layer before that adapter exists. Reuse the core request
+and result contracts directly, and extract a shared helper only after a second framework
+adapter demonstrates identical behavior.
 
 ## Architecture
 
@@ -139,30 +144,33 @@ Output uses `FileMutationResult`.
 Framework schemas may add descriptions and examples, but they must preserve domain
 semantics.
 
-## Capability object
+## First capability object
 
-A lifecycle-aware framework should receive one adapter object:
+The first implementation follows the OpenAI SDK's capability lifecycle:
 
 ```python
-class SandboxToolsCapability:
-    def __init__(
-        self,
-        session: SandboxSession,
-        *,
-        profile: ToolProfile,
-        error_mapper: ToolErrorMapper,
-    ) -> None:
-        ...
+from typing import Literal
 
-    def tools(self) -> Sequence[FrameworkTool]:
-        ...
+from agents.sandbox.capabilities import Capability
+from agents.tool import Tool
 
-    async def close(self) -> None:
+
+class MemSandboxCapability(Capability):
+    type: Literal["mem_sandbox"] = "mem_sandbox"
+
+    def tools(self) -> list[Tool]:
         ...
 ```
 
-Constructor injection is mandatory. The capability may own framework tool wrappers, but
-it does not own a host-managed session unless the host explicitly transfers ownership.
+The host injects the sandbox client or live session through `SandboxRunConfig`. The
+OpenAI runner then clones and binds the capability through the SDK-required `bind` hook.
+This framework-owned hook is the only exception to the project's constructor-injection
+default; the capability never performs global lookup and the model cannot provide a
+session handle.
+
+The capability owns framework tool wrappers but not the underlying core service, handle,
+or session. Future framework adapters own their native wrapper types rather than
+implementing a shared `FrameworkTool` abstraction.
 
 ## Capability profiles
 
@@ -222,9 +230,27 @@ If a framework supports per-run dependencies, inject the session there. If it su
 capability startup and cleanup hooks, use them only for adapter resources and correlation,
 not for hidden global session creation.
 
-## PydanticAI treatment
+## OpenAI Agents SDK treatment
 
-The PydanticAI adapter should be a native capability or toolset that:
+The OpenAI adapter should define a custom sandbox `Capability` that:
+
+- is cloned and bound by the SDK to the live in-memory sandbox session;
+- contributes exactly `execute`, `read_file`, `write_file`, and `apply_patch`;
+- replaces the default shell/filesystem capability set for the first supported profile;
+- calls explicit adapter operations backed by one core `SandboxSession`;
+- maps correctable inputs and stale hashes into safe tool errors without encouraging
+  retries for policy or secret denials;
+- leaves client/session creation, snapshot, resume, and deletion with the host and OpenAI
+  sandbox lifecycle.
+
+The first profile does not advertise `sh -lc`, PTY, arbitrary shell, image viewing, or
+other built-in capability behavior whose complete semantics the in-memory backend does
+not implement.
+
+## Deferred PydanticAI treatment
+
+If selected after the OpenAI integration, the PydanticAI adapter should be a native
+capability or toolset that:
 
 - receives `SandboxSession` in its constructor or run dependencies
 - contributes the selected tool profile
@@ -233,7 +259,7 @@ The PydanticAI adapter should be a native capability or toolset that:
 - leaves session ownership with the host
 
 PydanticAI's capability is a tool packaging and lifecycle seam, not a generic workspace
-provider.
+provider. It does not gate Milestone 5.
 
 ## Security
 

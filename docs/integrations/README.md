@@ -11,6 +11,16 @@ Both levels delegate to the same framework-neutral `SandboxService` and
 `SandboxSession`. Neither level may reimplement workspace, command, policy, secret,
 snapshot, or event behavior.
 
+Milestone 5 proves both levels first through the OpenAI Agents SDK:
+
+- an OpenAI custom `Capability` exposes the approved four model-facing tools;
+- an OpenAI sandbox client/session implements the native workspace and lifecycle
+  contract.
+
+PydanticAI, LangChain Deep Agents, and other SDKs are evidence-driven follow-ups, not
+Milestone 5 completion requirements. Shared production helpers are extracted only after
+two adapters prove that the behavior is actually identical.
+
 ## Selection guide
 
 | Framework capability | Integration level |
@@ -41,18 +51,19 @@ A framework may support both. In that case:
 
 | Framework | Initial integration |
 |---|---|
-| PydanticAI | Tool/capability |
-| LangChain Deep Agents | Workspace/backend |
-| OpenAI Agents SDK `SandboxAgent` | Workspace/backend, experimental while beta |
-| Microsoft Agent Framework | Tool/capability |
-| Google ADK | Tool/capability |
-| Strands, LlamaIndex, CrewAI, Haystack, Agno, smolagents | Tool/capability examples as needed |
+| OpenAI Agents SDK `SandboxAgent` | **Milestone 5 priority:** custom capability plus workspace/backend client and session |
+| PydanticAI | Deferred tool/capability follow-up |
+| LangChain Deep Agents | Deferred workspace/backend follow-up |
+| Microsoft Agent Framework | Deferred tool/capability follow-up |
+| Google ADK | Deferred tool/capability follow-up |
+| Strands, LlamaIndex, CrewAI, Haystack, Agno, smolagents | Examples only when a concrete use case requires them |
 
 ## Deferred integrations
 
 MCP is a possible future interoperability adapter. It is intentionally excluded from the
-current architecture and implementation phase. Reconsider it only after both native
-integration levels pass shared conformance scenarios without changing the core contracts.
+current architecture and implementation phase. Reconsider it only after the OpenAI
+capability and sandbox backend pass shared conformance without changing the core
+contracts.
 
 HTTP/OpenAPI, A2A, hosted sandbox providers, and remote multi-tenant services are also
 deferred.

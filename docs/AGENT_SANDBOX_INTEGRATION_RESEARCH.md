@@ -1,6 +1,7 @@
 # Python Agent Sandbox Integration Research
 
 **Research date:** 2026-08-28
+**Implementation priority updated:** 2026-09-04
 
 **Question:** Where should a stateful, in-memory virtual filesystem and constrained shell
 integrate with the Python server-side agent ecosystem?
@@ -17,15 +18,17 @@ The recommended design is:
 3. The current design supports two native integration levels:
    - tool/capability adapters
    - workspace/backend adapters
-4. Initial adapters target frameworks that expose useful examples of those seams:
-   - PydanticAI `Capability`
-   - LangChain Deep Agents backend protocol
-   - OpenAI Agents SDK sandbox client/session, initially marked experimental because
-     Sandbox Agents are beta
-5. Other frameworks use a very small function-tool or capability wrapper when needed.
-6. Real process, container, VM, or WASM execution is a separate pluggable backend. The
+4. The first implementation target is the OpenAI Agents SDK because one integration can
+   prove both seams:
+   - a custom OpenAI `Capability` for the four approved typed tools
+   - an OpenAI sandbox client/session for workspace lifecycle, binary I/O, manifests,
+     persistence, and resume
+5. PydanticAI, LangChain Deep Agents, and other framework adapters remain useful
+   follow-up candidates, but they do not gate the first native integration milestone.
+6. Other frameworks use a very small function-tool or capability wrapper when needed.
+7. Real process, container, VM, or WASM execution is a separate pluggable backend. The
    in-memory implementation must not claim OS-level isolation.
-7. MCP is retained as a possible future interoperability adapter but is not part of the
+8. MCP is retained as a possible future interoperability adapter but is not part of the
    current design or implementation phase.
 
 Across the Python ecosystem there are two useful extension patterns, but **not every
