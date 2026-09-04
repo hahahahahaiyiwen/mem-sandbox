@@ -1,0 +1,842 @@
+{
+  "model": "gpt-5.6-sol",
+  "sample": 2,
+  "session_id": "01db84ac-02c6-4a60-a068-cffce0e2eee4",
+  "completed_tasks": 12,
+  "task_count": 12,
+  "tasks": [
+    {
+      "task_id": "T1",
+      "completed": true,
+      "first_attempt_parser_registry_accepted": true,
+      "tool_calls": 1,
+      "repair_turns": 0,
+      "output_bytes": 0,
+      "truncated": false,
+      "tool_latency_ms": 0.9923998732119799,
+      "failures": [],
+      "final_answer": ""
+    },
+    {
+      "task_id": "T10",
+      "completed": true,
+      "first_attempt_parser_registry_accepted": true,
+      "tool_calls": 1,
+      "repair_turns": 0,
+      "output_bytes": 53,
+      "truncated": false,
+      "tool_latency_ms": 0.5685000214725733,
+      "failures": [],
+      "final_answer": "staging"
+    },
+    {
+      "task_id": "T11",
+      "completed": true,
+      "first_attempt_parser_registry_accepted": true,
+      "tool_calls": 1,
+      "repair_turns": 0,
+      "output_bytes": 41,
+      "truncated": false,
+      "tool_latency_ms": 32.645100029185414,
+      "failures": [],
+      "final_answer": "4500 ERROR timeout\n3000 ERROR disk"
+    },
+    {
+      "task_id": "T12",
+      "completed": true,
+      "first_attempt_parser_registry_accepted": true,
+      "tool_calls": 1,
+      "repair_turns": 0,
+      "output_bytes": 0,
+      "truncated": false,
+      "tool_latency_ms": 0.6667000707238913,
+      "failures": [],
+      "final_answer": ""
+    },
+    {
+      "task_id": "T2",
+      "completed": true,
+      "first_attempt_parser_registry_accepted": true,
+      "tool_calls": 1,
+      "repair_turns": 0,
+      "output_bytes": 0,
+      "truncated": false,
+      "tool_latency_ms": 1.662899972870946,
+      "failures": [],
+      "final_answer": ""
+    },
+    {
+      "task_id": "T3",
+      "completed": true,
+      "first_attempt_parser_registry_accepted": true,
+      "tool_calls": 1,
+      "repair_turns": 0,
+      "output_bytes": 0,
+      "truncated": false,
+      "tool_latency_ms": 1.6642000991851091,
+      "failures": [],
+      "final_answer": ""
+    },
+    {
+      "task_id": "T4",
+      "completed": true,
+      "first_attempt_parser_registry_accepted": true,
+      "tool_calls": 1,
+      "repair_turns": 0,
+      "output_bytes": 0,
+      "truncated": false,
+      "tool_latency_ms": 1.1024000123143196,
+      "failures": [],
+      "final_answer": ""
+    },
+    {
+      "task_id": "T5",
+      "completed": true,
+      "first_attempt_parser_registry_accepted": true,
+      "tool_calls": 1,
+      "repair_turns": 0,
+      "output_bytes": 30,
+      "truncated": false,
+      "tool_latency_ms": 1.155500067397952,
+      "failures": [],
+      "final_answer": "alpha.txt\nmiddle.txt\nzeta.txt"
+    },
+    {
+      "task_id": "T6",
+      "completed": true,
+      "first_attempt_parser_registry_accepted": true,
+      "tool_calls": 1,
+      "repair_turns": 0,
+      "output_bytes": 0,
+      "truncated": false,
+      "tool_latency_ms": 0.9836000390350819,
+      "failures": [],
+      "final_answer": ""
+    },
+    {
+      "task_id": "T7",
+      "completed": true,
+      "first_attempt_parser_registry_accepted": true,
+      "tool_calls": 1,
+      "repair_turns": 0,
+      "output_bytes": 2,
+      "truncated": false,
+      "tool_latency_ms": 1.7660001758486032,
+      "failures": [],
+      "final_answer": "3"
+    },
+    {
+      "task_id": "T8",
+      "completed": true,
+      "first_attempt_parser_registry_accepted": true,
+      "tool_calls": 1,
+      "repair_turns": 0,
+      "output_bytes": 102,
+      "truncated": false,
+      "tool_latency_ms": 1.9832998514175415,
+      "failures": [],
+      "final_answer": "/workspace/repo/a.py:2:TODO alpha\n/workspace/repo/b.py:1:FIXME beta\n/workspace/repo/b.py:3:TODO gamma"
+    },
+    {
+      "task_id": "T9",
+      "completed": true,
+      "first_attempt_parser_registry_accepted": true,
+      "tool_calls": 2,
+      "repair_turns": 0,
+      "output_bytes": 136,
+      "truncated": false,
+      "tool_latency_ms": 2.799100009724498,
+      "failures": [],
+      "final_answer": "b.bin\nc.log"
+    }
+  ],
+  "model_turns": [
+    {
+      "turn": 1,
+      "latency_ms": 36077.62279990129,
+      "response_bytes": 1356,
+      "usage": {
+        "totalPremiumRequestCost": 1,
+        "totalUserRequests": 1,
+        "totalNanoAiu": 11110700000,
+        "tokenDetails": {
+          "input": {
+            "tokenCount": 3
+          },
+          "cache_read": {
+            "tokenCount": 0
+          },
+          "cache_write": {
+            "tokenCount": 20271
+          },
+          "output": {
+            "tokenCount": 487
+          }
+        },
+        "totalApiDurationMs": 15819,
+        "sessionStartTime": "2026-09-04T04:58:47.177Z",
+        "codeChanges": {
+          "linesAdded": 0,
+          "linesRemoved": 0,
+          "filesModifiedCount": 0,
+          "filesModified": []
+        },
+        "modelMetrics": {
+          "gpt-5.6-sol": {
+            "requests": {
+              "count": 1,
+              "cost": 1
+            },
+            "usage": {
+              "inputTokens": 20274,
+              "outputTokens": 487,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 20271,
+              "reasoningTokens": 111
+            },
+            "cacheExpiresAt": "2026-09-04T05:28:59.146Z",
+            "totalNanoAiu": 11110700000,
+            "tokenDetails": {
+              "input": {
+                "tokenCount": 3
+              },
+              "cache_read": {
+                "tokenCount": 0
+              },
+              "cache_write": {
+                "tokenCount": 20271
+              },
+              "output": {
+                "tokenCount": 487
+              }
+            }
+          }
+        },
+        "agentMetrics": {
+          "main": {
+            "totalApiDurationMs": 15819,
+            "totalNanoAiu": 11110700000,
+            "modelMetrics": {
+              "gpt-5.6-sol": {
+                "requests": {
+                  "count": 1,
+                  "cost": 1
+                },
+                "usage": {
+                  "inputTokens": 20274,
+                  "outputTokens": 487,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 20271,
+                  "reasoningTokens": 111
+                },
+                "totalNanoAiu": 11110700000,
+                "tokenDetails": {
+                  "input": {
+                    "tokenCount": 3
+                  },
+                  "cache_read": {
+                    "tokenCount": 0
+                  },
+                  "cache_write": {
+                    "tokenCount": 20271
+                  },
+                  "output": {
+                    "tokenCount": 487
+                  }
+                }
+              }
+            }
+          }
+        },
+        "currentModel": "gpt-5.6-sol",
+        "lastCallInputTokens": 20274,
+        "lastCallOutputTokens": 487
+      }
+    },
+    {
+      "turn": 2,
+      "latency_ms": 26984.64129981585,
+      "response_bytes": 1024,
+      "usage": {
+        "totalPremiumRequestCost": 2,
+        "totalUserRequests": 1,
+        "totalNanoAiu": 13640740000,
+        "tokenDetails": {
+          "input": {
+            "tokenCount": 6
+          },
+          "cache_read": {
+            "tokenCount": 20271
+          },
+          "cache_write": {
+            "tokenCount": 21671
+          },
+          "output": {
+            "tokenCount": 996
+          }
+        },
+        "totalApiDurationMs": 22919,
+        "sessionStartTime": "2026-09-04T04:58:47.177Z",
+        "codeChanges": {
+          "linesAdded": 0,
+          "linesRemoved": 0,
+          "filesModifiedCount": 0,
+          "filesModified": []
+        },
+        "modelMetrics": {
+          "gpt-5.6-sol": {
+            "requests": {
+              "count": 2,
+              "cost": 2
+            },
+            "usage": {
+              "inputTokens": 41948,
+              "outputTokens": 996,
+              "cacheReadTokens": 20271,
+              "cacheWriteTokens": 21671,
+              "reasoningTokens": 317
+            },
+            "cacheExpiresAt": "2026-09-04T05:29:30.107Z",
+            "totalNanoAiu": 13640740000,
+            "tokenDetails": {
+              "input": {
+                "tokenCount": 6
+              },
+              "cache_read": {
+                "tokenCount": 20271
+              },
+              "cache_write": {
+                "tokenCount": 21671
+              },
+              "output": {
+                "tokenCount": 996
+              }
+            }
+          }
+        },
+        "agentMetrics": {
+          "main": {
+            "totalApiDurationMs": 22919,
+            "totalNanoAiu": 13640740000,
+            "modelMetrics": {
+              "gpt-5.6-sol": {
+                "requests": {
+                  "count": 2,
+                  "cost": 2
+                },
+                "usage": {
+                  "inputTokens": 41948,
+                  "outputTokens": 996,
+                  "cacheReadTokens": 20271,
+                  "cacheWriteTokens": 21671,
+                  "reasoningTokens": 317
+                },
+                "totalNanoAiu": 13640740000,
+                "tokenDetails": {
+                  "input": {
+                    "tokenCount": 6
+                  },
+                  "cache_read": {
+                    "tokenCount": 20271
+                  },
+                  "cache_write": {
+                    "tokenCount": 21671
+                  },
+                  "output": {
+                    "tokenCount": 996
+                  }
+                }
+              }
+            }
+          }
+        },
+        "currentModel": "gpt-5.6-sol",
+        "lastCallInputTokens": 21674,
+        "lastCallOutputTokens": 509
+      }
+    },
+    {
+      "turn": 3,
+      "latency_ms": 25483.765400014818,
+      "response_bytes": 83,
+      "usage": {
+        "totalPremiumRequestCost": 3,
+        "totalUserRequests": 1,
+        "totalNanoAiu": 14910280000,
+        "tokenDetails": {
+          "input": {
+            "tokenCount": 9
+          },
+          "cache_read": {
+            "tokenCount": 41942
+          },
+          "cache_write": {
+            "tokenCount": 22358
+          },
+          "output": {
+            "tokenCount": 1025
+          }
+        },
+        "totalApiDurationMs": 25975,
+        "sessionStartTime": "2026-09-04T04:58:47.177Z",
+        "codeChanges": {
+          "linesAdded": 0,
+          "linesRemoved": 0,
+          "filesModifiedCount": 0,
+          "filesModified": []
+        },
+        "modelMetrics": {
+          "gpt-5.6-sol": {
+            "requests": {
+              "count": 3,
+              "cost": 3
+            },
+            "usage": {
+              "inputTokens": 64309,
+              "outputTokens": 1025,
+              "cacheReadTokens": 41942,
+              "cacheWriteTokens": 22358,
+              "reasoningTokens": 317
+            },
+            "cacheExpiresAt": "2026-09-04T05:29:58.486Z",
+            "totalNanoAiu": 14910280000,
+            "tokenDetails": {
+              "input": {
+                "tokenCount": 9
+              },
+              "cache_read": {
+                "tokenCount": 41942
+              },
+              "cache_write": {
+                "tokenCount": 22358
+              },
+              "output": {
+                "tokenCount": 1025
+              }
+            }
+          }
+        },
+        "agentMetrics": {
+          "main": {
+            "totalApiDurationMs": 25975,
+            "totalNanoAiu": 14910280000,
+            "modelMetrics": {
+              "gpt-5.6-sol": {
+                "requests": {
+                  "count": 3,
+                  "cost": 3
+                },
+                "usage": {
+                  "inputTokens": 64309,
+                  "outputTokens": 1025,
+                  "cacheReadTokens": 41942,
+                  "cacheWriteTokens": 22358,
+                  "reasoningTokens": 317
+                },
+                "totalNanoAiu": 14910280000,
+                "tokenDetails": {
+                  "input": {
+                    "tokenCount": 9
+                  },
+                  "cache_read": {
+                    "tokenCount": 41942
+                  },
+                  "cache_write": {
+                    "tokenCount": 22358
+                  },
+                  "output": {
+                    "tokenCount": 1025
+                  }
+                }
+              }
+            }
+          }
+        },
+        "currentModel": "gpt-5.6-sol",
+        "lastCallInputTokens": 22361,
+        "lastCallOutputTokens": 29
+      }
+    }
+  ],
+  "transcript": [
+    {
+      "turn": 1,
+      "task_id": "T1",
+      "tool": "write_file",
+      "arguments": {
+        "path": "/workspace/project/notes.txt",
+        "content": "alpha\nbeta\n",
+        "create_parents": true
+      },
+      "result": {
+        "ok": true,
+        "path": "/workspace/project/notes.txt",
+        "created": true,
+        "changed": true,
+        "latency_ms": 0.9923998732119799
+      }
+    },
+    {
+      "turn": 1,
+      "task_id": "T2",
+      "tool": "execute",
+      "arguments": {
+        "command": "cd /workspace/project && echo done > result.txt"
+      },
+      "result": {
+        "ok": true,
+        "exit_code": 0,
+        "failure_code": null,
+        "stdout": "",
+        "stderr": "",
+        "stdout_original_bytes": 0,
+        "stderr_original_bytes": 0,
+        "stdout_truncated": false,
+        "stderr_truncated": false,
+        "resulting_cwd": "/workspace/project",
+        "latency_ms": 1.662899972870946
+      }
+    },
+    {
+      "turn": 1,
+      "task_id": "T3",
+      "tool": "execute",
+      "arguments": {
+        "command": "cp -r /workspace/src /workspace/backup"
+      },
+      "result": {
+        "ok": true,
+        "exit_code": 0,
+        "failure_code": null,
+        "stdout": "",
+        "stderr": "",
+        "stdout_original_bytes": 0,
+        "stderr_original_bytes": 0,
+        "stdout_truncated": false,
+        "stderr_truncated": false,
+        "resulting_cwd": "/workspace",
+        "latency_ms": 1.6642000991851091
+      }
+    },
+    {
+      "turn": 1,
+      "task_id": "T4",
+      "tool": "execute",
+      "arguments": {
+        "command": "mv /workspace/draft.txt /workspace/final.txt"
+      },
+      "result": {
+        "ok": true,
+        "exit_code": 0,
+        "failure_code": null,
+        "stdout": "",
+        "stderr": "",
+        "stdout_original_bytes": 0,
+        "stderr_original_bytes": 0,
+        "stdout_truncated": false,
+        "stderr_truncated": false,
+        "resulting_cwd": "/workspace",
+        "latency_ms": 1.1024000123143196
+      }
+    },
+    {
+      "turn": 1,
+      "task_id": "T5",
+      "tool": "execute",
+      "arguments": {
+        "command": "cd /workspace/items && ls | sort"
+      },
+      "result": {
+        "ok": true,
+        "exit_code": 0,
+        "failure_code": null,
+        "stdout": "alpha.txt\nmiddle.txt\nzeta.txt\n",
+        "stderr": "",
+        "stdout_original_bytes": 30,
+        "stderr_original_bytes": 0,
+        "stdout_truncated": false,
+        "stderr_truncated": false,
+        "resulting_cwd": "/workspace/items",
+        "latency_ms": 1.155500067397952
+      }
+    },
+    {
+      "turn": 1,
+      "task_id": "T6",
+      "tool": "execute",
+      "arguments": {
+        "command": "rm -r /workspace/cache"
+      },
+      "result": {
+        "ok": true,
+        "exit_code": 0,
+        "failure_code": null,
+        "stdout": "",
+        "stderr": "",
+        "stdout_original_bytes": 0,
+        "stderr_original_bytes": 0,
+        "stdout_truncated": false,
+        "stderr_truncated": false,
+        "resulting_cwd": "/workspace",
+        "latency_ms": 0.9836000390350819
+      }
+    },
+    {
+      "turn": 1,
+      "task_id": "T7",
+      "tool": "execute",
+      "arguments": {
+        "command": "find /workspace/repo -type f -name '*.py' | wc -l"
+      },
+      "result": {
+        "ok": true,
+        "exit_code": 0,
+        "failure_code": null,
+        "stdout": "3\n",
+        "stderr": "",
+        "stdout_original_bytes": 2,
+        "stderr_original_bytes": 0,
+        "stdout_truncated": false,
+        "stderr_truncated": false,
+        "resulting_cwd": "/workspace",
+        "latency_ms": 1.7660001758486032
+      }
+    },
+    {
+      "turn": 1,
+      "task_id": "T8",
+      "tool": "execute",
+      "arguments": {
+        "command": "grep -R -n -E 'TODO|FIXME' /workspace/repo | sort | head -n 3"
+      },
+      "result": {
+        "ok": true,
+        "exit_code": 0,
+        "failure_code": null,
+        "stdout": "/workspace/repo/a.py:2:TODO alpha\n/workspace/repo/b.py:1:FIXME beta\n/workspace/repo/b.py:3:TODO gamma\n",
+        "stderr": "",
+        "stdout_original_bytes": 102,
+        "stderr_original_bytes": 0,
+        "stdout_truncated": false,
+        "stderr_truncated": false,
+        "resulting_cwd": "/workspace",
+        "latency_ms": 1.9832998514175415
+      }
+    },
+    {
+      "turn": 1,
+      "task_id": "T9",
+      "tool": "execute",
+      "arguments": {
+        "command": "find /workspace/data -type f"
+      },
+      "result": {
+        "ok": true,
+        "exit_code": 0,
+        "failure_code": null,
+        "stdout": "/workspace/data/a.txt\n/workspace/data/b.bin\n/workspace/data/c.log\n/workspace/data/d.txt\n",
+        "stderr": "",
+        "stdout_original_bytes": 88,
+        "stderr_original_bytes": 0,
+        "stdout_truncated": false,
+        "stderr_truncated": false,
+        "resulting_cwd": "/workspace",
+        "latency_ms": 1.1597999837249517
+      }
+    },
+    {
+      "turn": 1,
+      "task_id": "T10",
+      "tool": "read_file",
+      "arguments": {
+        "path": "/workspace/config.json"
+      },
+      "result": {
+        "ok": true,
+        "path": "/workspace/config.json",
+        "content": "{\"deployment\":{\"environment\":\"staging\",\"replicas\":3}}",
+        "total_lines": 1,
+        "latency_ms": 0.5685000214725733
+      }
+    },
+    {
+      "turn": 1,
+      "task_id": "T11",
+      "tool": "execute",
+      "arguments": {
+        "command": "grep 'ERROR' /workspace/app.log | sort | uniq -c | sort -r | head -n 2"
+      },
+      "result": {
+        "ok": true,
+        "exit_code": 0,
+        "failure_code": null,
+        "stdout": "   4500 ERROR timeout\n   3000 ERROR disk\n",
+        "stderr": "",
+        "stdout_original_bytes": 41,
+        "stderr_original_bytes": 0,
+        "stdout_truncated": false,
+        "stderr_truncated": false,
+        "resulting_cwd": "/workspace",
+        "latency_ms": 32.645100029185414
+      }
+    },
+    {
+      "turn": 1,
+      "task_id": "T12",
+      "tool": "write_file",
+      "arguments": {
+        "path": "/workspace/scripts/check.py",
+        "content": "import sys\nprint(sys.version_info.major)\nprint('done')\n",
+        "create_parents": true
+      },
+      "result": {
+        "ok": true,
+        "path": "/workspace/scripts/check.py",
+        "created": true,
+        "changed": true,
+        "latency_ms": 0.6667000707238913
+      }
+    },
+    {
+      "turn": 2,
+      "task_id": "T1",
+      "tool": "final",
+      "arguments": {
+        "answer": ""
+      },
+      "accepted": true,
+      "failures": []
+    },
+    {
+      "turn": 2,
+      "task_id": "T2",
+      "tool": "final",
+      "arguments": {
+        "answer": ""
+      },
+      "accepted": true,
+      "failures": []
+    },
+    {
+      "turn": 2,
+      "task_id": "T3",
+      "tool": "final",
+      "arguments": {
+        "answer": ""
+      },
+      "accepted": true,
+      "failures": []
+    },
+    {
+      "turn": 2,
+      "task_id": "T4",
+      "tool": "final",
+      "arguments": {
+        "answer": ""
+      },
+      "accepted": true,
+      "failures": []
+    },
+    {
+      "turn": 2,
+      "task_id": "T5",
+      "tool": "final",
+      "arguments": {
+        "answer": "alpha.txt\nmiddle.txt\nzeta.txt"
+      },
+      "accepted": true,
+      "failures": []
+    },
+    {
+      "turn": 2,
+      "task_id": "T6",
+      "tool": "final",
+      "arguments": {
+        "answer": ""
+      },
+      "accepted": true,
+      "failures": []
+    },
+    {
+      "turn": 2,
+      "task_id": "T7",
+      "tool": "final",
+      "arguments": {
+        "answer": "3"
+      },
+      "accepted": true,
+      "failures": []
+    },
+    {
+      "turn": 2,
+      "task_id": "T8",
+      "tool": "final",
+      "arguments": {
+        "answer": "/workspace/repo/a.py:2:TODO alpha\n/workspace/repo/b.py:1:FIXME beta\n/workspace/repo/b.py:3:TODO gamma"
+      },
+      "accepted": true,
+      "failures": []
+    },
+    {
+      "turn": 2,
+      "task_id": "T9",
+      "tool": "execute",
+      "arguments": {
+        "command": "wc -c /workspace/data/a.txt /workspace/data/b.bin /workspace/data/c.log /workspace/data/d.txt | grep -v total | sort -nr | head -n 2"
+      },
+      "result": {
+        "ok": true,
+        "exit_code": 0,
+        "failure_code": null,
+        "stdout": "9 /workspace/data/b.bin\n6 /workspace/data/c.log\n",
+        "stderr": "",
+        "stdout_original_bytes": 48,
+        "stderr_original_bytes": 0,
+        "stdout_truncated": false,
+        "stderr_truncated": false,
+        "resulting_cwd": "/workspace",
+        "latency_ms": 1.639300025999546
+      }
+    },
+    {
+      "turn": 2,
+      "task_id": "T10",
+      "tool": "final",
+      "arguments": {
+        "answer": "staging"
+      },
+      "accepted": true,
+      "failures": []
+    },
+    {
+      "turn": 2,
+      "task_id": "T11",
+      "tool": "final",
+      "arguments": {
+        "answer": "4500 ERROR timeout\n3000 ERROR disk"
+      },
+      "accepted": true,
+      "failures": []
+    },
+    {
+      "turn": 2,
+      "task_id": "T12",
+      "tool": "final",
+      "arguments": {
+        "answer": ""
+      },
+      "accepted": true,
+      "failures": []
+    },
+    {
+      "turn": 3,
+      "task_id": "T9",
+      "tool": "final",
+      "arguments": {
+        "answer": "b.bin\nc.log"
+      },
+      "accepted": true,
+      "failures": []
+    }
+  ]
+}

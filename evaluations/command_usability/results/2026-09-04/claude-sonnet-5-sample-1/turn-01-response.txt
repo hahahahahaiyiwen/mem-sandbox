@@ -1,0 +1,14 @@
+{"actions":[
+{"task_id":"T1","tool":"write_file","arguments":{"task_id":"T1","path":"/workspace/project/notes.txt","content":"alpha\nbeta\n","create_parents":true}},
+{"task_id":"T2","tool":"execute","arguments":{"task_id":"T2","command":"cd /workspace/project && echo done > result.txt"}},
+{"task_id":"T3","tool":"execute","arguments":{"task_id":"T3","command":"cp -r /workspace/src /workspace/backup"}},
+{"task_id":"T4","tool":"execute","arguments":{"task_id":"T4","command":"mv /workspace/draft.txt /workspace/final.txt"}},
+{"task_id":"T5","tool":"execute","arguments":{"task_id":"T5","command":"ls /workspace/items"}},
+{"task_id":"T6","tool":"execute","arguments":{"task_id":"T6","command":"rm -r /workspace/cache"}},
+{"task_id":"T7","tool":"execute","arguments":{"task_id":"T7","command":"find /workspace/repo -name '*.py' | wc -l"}},
+{"task_id":"T8","tool":"execute","arguments":{"task_id":"T8","command":"grep -rn -E 'TODO|FIXME' /workspace/repo"}},
+{"task_id":"T9","tool":"execute","arguments":{"task_id":"T9","command":"find /workspace/data -type f"}},
+{"task_id":"T10","tool":"read_file","arguments":{"task_id":"T10","path":"/workspace/config.json"}},
+{"task_id":"T11","tool":"read_file","arguments":{"task_id":"T11","path":"/workspace/app.log"}},
+{"task_id":"T12","tool":"write_file","arguments":{"task_id":"T12","path":"/workspace/scripts/check.py","content":"import sys\nprint(sys.version_info.major)\nprint('done')\n","create_parents":true}}
+]}

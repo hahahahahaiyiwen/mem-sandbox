@@ -67,6 +67,8 @@ evaluation before the first framework adapter.
 The cross-model evidence and roadmap implications for pipelines, scripts, and structured
 file tools are recorded in
 [Command Composition Usability Pilot](./PIPELINE_EVALUATION.md).
+The executable Milestone 4 corpus, runner, transcripts, and measurements are in
+[`evaluations/command_usability`](../../../evaluations/command_usability/README.md).
 
 The parser dependency comparison and decision to continue with the constrained parser
 are recorded in
@@ -762,6 +764,9 @@ non-finite, zero, or negative timeout and limit values are invalid requests.
   stage, remains a structured non-zero result, permits following `;` execution, and
   prevents following `&&` execution.
 - Run the same script before and after snapshot restore and compare results.
+- Run the bounded generated grammar, pipeline, limit, redirection, and twin-execution
+  models defined in
+  [Property and Stateful Test Design](../../../tests/property/README.md).
 - Verify duplicate and invalid command registrations fail fast.
 - Compare supported command behavior with POSIX-shaped golden cases and document every
   intentional compatibility deviation.

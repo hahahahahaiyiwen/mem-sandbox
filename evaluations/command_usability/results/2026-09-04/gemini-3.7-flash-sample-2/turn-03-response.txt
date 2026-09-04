@@ -1,0 +1,5 @@
+{"actions":[
+  {"task_id":"T8","tool":"execute","arguments":{"command":"grep -n -E 'TODO|FIXME' /workspace/repo/a.py /workspace/repo/b.py /workspace/repo/c.txt"}},
+  {"task_id":"T9","tool":"execute","arguments":{"command":"wc -c /workspace/data/a.txt /workspace/data/b.bin /workspace/data/c.log /workspace/data/d.txt"}},
+  {"task_id":"T11","tool":"final","arguments":{"answer":"4500 ERROR timeout\n3000 ERROR disk"}}
+]}

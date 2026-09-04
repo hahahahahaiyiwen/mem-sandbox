@@ -685,6 +685,12 @@ the session to `FAILED`.
 - Startup event failure reaches `FAILED`; closing an unstarted `CREATED` session remains
   legal.
 - Close is idempotent and closes the session resource scope exactly once.
+- The public cross-module lifecycle and normalized trace are defined in
+  [Direct Core Conformance](../../../tests/conformance/README.md), including both
+  same-identity `restore_snapshot()` and new-identity service resume. Snapshot result
+  `content_hash` is the complete session state hash; conformance obtains the distinct
+  workspace root hash by decoding the persisted snapshot through retained public
+  fixtures.
 
 ## Maintenance rule
 

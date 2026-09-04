@@ -347,7 +347,9 @@ Stable workspace errors include:
 - Verify atomic write, append, patch, copy, move, and restore behavior.
 - Verify replacement quota accounting and max-boundary values.
 - Verify stable listing order, revisions, and content hashes.
-- Run property tests over path normalization and random operation sequences.
+- Run the bounded Hypothesis path and workspace state machines defined in
+  [Property and Stateful Test Design](../../../tests/property/README.md); do not use
+  custom random operation loops or production-private state as the oracle.
 - Confirm failed mutations leave tree, counters, and revision unchanged.
 - Confirm concurrent callers are serialized, cancelled lock waiters do not mutate state,
   and independent workspaces do not block one another.

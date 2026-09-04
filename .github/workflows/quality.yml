@@ -38,16 +38,18 @@ jobs:
         run: uv sync --locked --all-groups
 
       - name: Check formatting
-        run: uv run ruff format --check src tests
+        run: uv run ruff format --check evaluations src tests
 
       - name: Lint
-        run: uv run ruff check src tests
+        run: uv run ruff check evaluations src tests
 
       - name: Type check
-        run: uv run pyright src tests
+        run: uv run pyright evaluations src tests
 
       - name: Test
         run: uv run pytest
+        env:
+          HYPOTHESIS_PROFILE: ci
 
       - name: Build distributions
         run: uv build

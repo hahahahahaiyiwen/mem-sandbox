@@ -209,7 +209,9 @@ The store-wide aggregate byte limit is independent of:
 - checks its per-payload size limit;
 - verifies metadata payload size;
 - verifies payload content hash;
-- rejects non-canonical or malformed JSON;
+- rejects non-canonical or malformed JSON and non-canonical embedded Base64;
+- rejects non-canonical approved-environment ordering so every accepted logical state
+  re-encodes to the same payload and state hash;
 - checks session schema and capability versions;
 - reconstructs typed workspace, cwd, and approved environment state.
 
@@ -339,7 +341,8 @@ Creator provenance adds no `SnapshotOwnershipDenied` error.
 
 - Single-byte payload corruption is detected before workspace preparation.
 - Metadata payload length, outer content hash, schema version, workspace revision,
-  canonical JSON, environment, and cwd mismatches fail before mutation.
+  canonical JSON, environment, and cwd mismatches fail as `SnapshotCorrupt` before
+  mutation.
 - Unsupported session/capability versions raise `SnapshotIncompatible`.
 - Target workspace quota or schema incompatibility fails during prepare and leaves live
   state unchanged.
@@ -365,6 +368,10 @@ Creator provenance adds no `SnapshotOwnershipDenied` error.
 - Purge racing save evaluates both operations under serialized clock snapshots.
 - Failed save, load, decode, prepare, or commit never exposes a partial snapshot or live
   workspace state.
+- The bounded generated store and workspace-snapshot models are defined in
+  [Property and Stateful Test Design](../../../tests/property/README.md); clocks are
+  logical and generated tests assert only public stats, records, and workspace
+  projections.
 
 ## Maintenance rule
 

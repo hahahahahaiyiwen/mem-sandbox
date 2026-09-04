@@ -1,0 +1,270 @@
+{
+  "schema_version": 1,
+  "tasks": [
+    {
+      "id": "T1",
+      "category": "basic-workspace",
+      "prompt": "Create /workspace/project/notes.txt with the exact UTF-8 text alpha, then beta, each on its own line.",
+      "seed_files": [],
+      "checks": [
+        {
+          "kind": "file_text",
+          "path": "/workspace/project/notes.txt",
+          "expected": "alpha\nbeta\n"
+        }
+      ]
+    },
+    {
+      "id": "T2",
+      "category": "basic-workspace",
+      "prompt": "Using the command tool, change to /workspace/project and create result.txt containing exactly done followed by a newline.",
+      "seed_files": [
+        {
+          "path": "/workspace/project/input.txt",
+          "content": "input\n"
+        }
+      ],
+      "checks": [
+        {
+          "kind": "file_text",
+          "path": "/workspace/project/result.txt",
+          "expected": "done\n"
+        }
+      ]
+    },
+    {
+      "id": "T3",
+      "category": "basic-workspace",
+      "prompt": "Using the command tool, recursively copy /workspace/src to /workspace/backup.",
+      "seed_files": [
+        {
+          "path": "/workspace/src/a.txt",
+          "content": "a\n"
+        },
+        {
+          "path": "/workspace/src/nested/b.txt",
+          "content": "bb\n"
+        }
+      ],
+      "checks": [
+        {
+          "kind": "file_text",
+          "path": "/workspace/backup/a.txt",
+          "expected": "a\n"
+        },
+        {
+          "kind": "file_text",
+          "path": "/workspace/backup/nested/b.txt",
+          "expected": "bb\n"
+        }
+      ]
+    },
+    {
+      "id": "T4",
+      "category": "basic-workspace",
+      "prompt": "Using the command tool, move /workspace/draft.txt to /workspace/final.txt.",
+      "seed_files": [
+        {
+          "path": "/workspace/draft.txt",
+          "content": "ready\n"
+        }
+      ],
+      "checks": [
+        {
+          "kind": "file_text",
+          "path": "/workspace/final.txt",
+          "expected": "ready\n"
+        },
+        {
+          "kind": "absent",
+          "path": "/workspace/draft.txt"
+        }
+      ]
+    },
+    {
+      "id": "T5",
+      "category": "basic-workspace",
+      "prompt": "Return the names directly inside /workspace/items in lexical order, one per line.",
+      "seed_files": [
+        {
+          "path": "/workspace/items/zeta.txt",
+          "content": "z\n"
+        },
+        {
+          "path": "/workspace/items/alpha.txt",
+          "content": "a\n"
+        },
+        {
+          "path": "/workspace/items/middle.txt",
+          "content": "m\n"
+        }
+      ],
+      "checks": [
+        {
+          "kind": "answer_equals",
+          "expected": "alpha.txt\nmiddle.txt\nzeta.txt"
+        }
+      ]
+    },
+    {
+      "id": "T6",
+      "category": "basic-workspace",
+      "prompt": "Using the command tool, remove /workspace/cache and all of its contents.",
+      "seed_files": [
+        {
+          "path": "/workspace/cache/a.txt",
+          "content": "a\n"
+        },
+        {
+          "path": "/workspace/cache/nested/b.txt",
+          "content": "b\n"
+        }
+      ],
+      "checks": [
+        {
+          "kind": "absent",
+          "path": "/workspace/cache"
+        }
+      ]
+    },
+    {
+      "id": "T7",
+      "category": "recursive-analysis",
+      "prompt": "Count all files ending in .py under /workspace/repo recursively. Return only the integer count.",
+      "seed_files": [
+        {
+          "path": "/workspace/repo/app.py",
+          "content": "print('app')\n"
+        },
+        {
+          "path": "/workspace/repo/pkg/a.py",
+          "content": "A = 1\n"
+        },
+        {
+          "path": "/workspace/repo/pkg/nested/b.py",
+          "content": "B = 2\n"
+        },
+        {
+          "path": "/workspace/repo/README.md",
+          "content": "# repo\n"
+        },
+        {
+          "path": "/workspace/repo/pkg/data.json",
+          "content": "{}\n"
+        }
+      ],
+      "checks": [
+        {
+          "kind": "answer_equals",
+          "expected": "3"
+        }
+      ]
+    },
+    {
+      "id": "T8",
+      "category": "recursive-analysis",
+      "prompt": "Find the first three TODO or FIXME records under /workspace/repo in deterministic path and line order. Return the matching records with path and line number.",
+      "seed_files": [
+        {
+          "path": "/workspace/repo/a.py",
+          "content": "start\nTODO alpha\nend\n"
+        },
+        {
+          "path": "/workspace/repo/b.py",
+          "content": "FIXME beta\nok\nTODO gamma\n"
+        },
+        {
+          "path": "/workspace/repo/c.txt",
+          "content": "TODO delta\n"
+        }
+      ],
+      "checks": [
+        {
+          "kind": "answer_contains_all",
+          "expected": [
+            "a.py:2:TODO alpha",
+            "b.py:1:FIXME beta",
+            "b.py:3:TODO gamma"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "T9",
+      "category": "recursive-analysis",
+      "prompt": "Return the two largest files under /workspace/data in descending byte-size order. Return only their basenames, one per line.",
+      "seed_files": [
+        {
+          "path": "/workspace/data/a.txt",
+          "content": "1234"
+        },
+        {
+          "path": "/workspace/data/b.bin",
+          "content": "123456789"
+        },
+        {
+          "path": "/workspace/data/c.log",
+          "content": "123456"
+        },
+        {
+          "path": "/workspace/data/d.txt",
+          "content": "12"
+        }
+      ],
+      "checks": [
+        {
+          "kind": "answer_equals",
+          "expected": "b.bin\nc.log"
+        }
+      ]
+    },
+    {
+      "id": "T10",
+      "category": "structured-data",
+      "prompt": "Read /workspace/config.json and return only the string value at deployment.environment.",
+      "seed_files": [
+        {
+          "path": "/workspace/config.json",
+          "content": "{\"deployment\":{\"environment\":\"staging\",\"replicas\":3}}\n"
+        }
+      ],
+      "checks": [
+        {
+          "kind": "answer_equals",
+          "expected": "staging"
+        }
+      ]
+    },
+    {
+      "id": "T11",
+      "category": "log-analysis",
+      "prompt": "Find the two most frequent ERROR messages in /workspace/app.log. Return count and complete message, highest count first, one result per line.",
+      "seed_files": [
+        {
+          "path": "/workspace/app.log",
+          "content": "INFO boot\nERROR timeout\nERROR disk\nERROR timeout\nWARN retry\nERROR denied\nERROR disk\nERROR timeout\n",
+          "repeat": 1500
+        }
+      ],
+      "checks": [
+        {
+          "kind": "answer_equals",
+          "expected": "4500 ERROR timeout\n3000 ERROR disk"
+        }
+      ]
+    },
+    {
+      "id": "T12",
+      "category": "multiline-write",
+      "prompt": "Create /workspace/scripts/check.py with exactly these three lines: import sys; print(sys.version_info.major); print('done'). Include a final newline.",
+      "seed_files": [],
+      "checks": [
+        {
+          "kind": "file_text",
+          "path": "/workspace/scripts/check.py",
+          "expected": "import sys\nprint(sys.version_info.major)\nprint('done')\n"
+        }
+      ]
+    }
+  ]
+}

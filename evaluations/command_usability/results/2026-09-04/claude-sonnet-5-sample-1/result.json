@@ -1,0 +1,884 @@
+{
+  "model": "claude-sonnet-5",
+  "sample": 1,
+  "session_id": "a4572579-9dd3-40e4-b3e9-7b1444e43a2e",
+  "completed_tasks": 12,
+  "task_count": 12,
+  "tasks": [
+    {
+      "task_id": "T1",
+      "completed": true,
+      "first_attempt_parser_registry_accepted": true,
+      "tool_calls": 1,
+      "repair_turns": 0,
+      "output_bytes": 0,
+      "truncated": false,
+      "tool_latency_ms": 1.2461000587791204,
+      "failures": [],
+      "final_answer": ""
+    },
+    {
+      "task_id": "T10",
+      "completed": true,
+      "first_attempt_parser_registry_accepted": true,
+      "tool_calls": 1,
+      "repair_turns": 0,
+      "output_bytes": 53,
+      "truncated": false,
+      "tool_latency_ms": 0.5010999739170074,
+      "failures": [],
+      "final_answer": "staging"
+    },
+    {
+      "task_id": "T11",
+      "completed": true,
+      "first_attempt_parser_registry_accepted": true,
+      "tool_calls": 2,
+      "repair_turns": 0,
+      "output_bytes": 62,
+      "truncated": false,
+      "tool_latency_ms": 33.98700011894107,
+      "failures": [
+        "read_limit_exceeded"
+      ],
+      "final_answer": "4500 ERROR timeout\n3000 ERROR disk"
+    },
+    {
+      "task_id": "T12",
+      "completed": true,
+      "first_attempt_parser_registry_accepted": true,
+      "tool_calls": 1,
+      "repair_turns": 0,
+      "output_bytes": 0,
+      "truncated": false,
+      "tool_latency_ms": 0.6172000430524349,
+      "failures": [],
+      "final_answer": ""
+    },
+    {
+      "task_id": "T2",
+      "completed": true,
+      "first_attempt_parser_registry_accepted": true,
+      "tool_calls": 1,
+      "repair_turns": 0,
+      "output_bytes": 0,
+      "truncated": false,
+      "tool_latency_ms": 1.3180000241845846,
+      "failures": [],
+      "final_answer": ""
+    },
+    {
+      "task_id": "T3",
+      "completed": true,
+      "first_attempt_parser_registry_accepted": true,
+      "tool_calls": 1,
+      "repair_turns": 0,
+      "output_bytes": 0,
+      "truncated": false,
+      "tool_latency_ms": 1.3852999545633793,
+      "failures": [],
+      "final_answer": ""
+    },
+    {
+      "task_id": "T4",
+      "completed": true,
+      "first_attempt_parser_registry_accepted": true,
+      "tool_calls": 1,
+      "repair_turns": 0,
+      "output_bytes": 0,
+      "truncated": false,
+      "tool_latency_ms": 1.019099960103631,
+      "failures": [],
+      "final_answer": ""
+    },
+    {
+      "task_id": "T5",
+      "completed": true,
+      "first_attempt_parser_registry_accepted": true,
+      "tool_calls": 1,
+      "repair_turns": 0,
+      "output_bytes": 30,
+      "truncated": false,
+      "tool_latency_ms": 0.8996000979095697,
+      "failures": [],
+      "final_answer": "alpha.txt\nmiddle.txt\nzeta.txt"
+    },
+    {
+      "task_id": "T6",
+      "completed": true,
+      "first_attempt_parser_registry_accepted": true,
+      "tool_calls": 1,
+      "repair_turns": 0,
+      "output_bytes": 0,
+      "truncated": false,
+      "tool_latency_ms": 0.9457999840378761,
+      "failures": [],
+      "final_answer": ""
+    },
+    {
+      "task_id": "T7",
+      "completed": true,
+      "first_attempt_parser_registry_accepted": true,
+      "tool_calls": 1,
+      "repair_turns": 0,
+      "output_bytes": 2,
+      "truncated": false,
+      "tool_latency_ms": 1.5085998456925154,
+      "failures": [],
+      "final_answer": "3"
+    },
+    {
+      "task_id": "T8",
+      "completed": true,
+      "first_attempt_parser_registry_accepted": true,
+      "tool_calls": 1,
+      "repair_turns": 0,
+      "output_bytes": 137,
+      "truncated": false,
+      "tool_latency_ms": 1.120799919590354,
+      "failures": [],
+      "final_answer": "/workspace/repo/a.py:2:TODO alpha\n/workspace/repo/b.py:1:FIXME beta\n/workspace/repo/b.py:3:TODO gamma"
+    },
+    {
+      "task_id": "T9",
+      "completed": true,
+      "first_attempt_parser_registry_accepted": true,
+      "tool_calls": 2,
+      "repair_turns": 0,
+      "output_bytes": 193,
+      "truncated": false,
+      "tool_latency_ms": 2.948200097307563,
+      "failures": [],
+      "final_answer": "b.bin\nc.log"
+    }
+  ],
+  "model_turns": [
+    {
+      "turn": 1,
+      "latency_ms": 29367.060499964282,
+      "response_bytes": 1457,
+      "usage": {
+        "totalPremiumRequestCost": 1,
+        "totalUserRequests": 1,
+        "totalNanoAiu": 8897900000,
+        "tokenDetails": {
+          "input": {
+            "tokenCount": 2
+          },
+          "cache_read": {
+            "tokenCount": 0
+          },
+          "cache_write": {
+            "tokenCount": 32522
+          },
+          "output": {
+            "tokenCount": 767
+          }
+        },
+        "totalApiDurationMs": 6333,
+        "sessionStartTime": "2026-09-04T05:00:15.908Z",
+        "codeChanges": {
+          "linesAdded": 0,
+          "linesRemoved": 0,
+          "filesModifiedCount": 0,
+          "filesModified": []
+        },
+        "modelMetrics": {
+          "claude-sonnet-5": {
+            "requests": {
+              "count": 1,
+              "cost": 1
+            },
+            "usage": {
+              "inputTokens": 32524,
+              "outputTokens": 767,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 32522,
+              "reasoningTokens": 71
+            },
+            "cacheExpiresAt": "2026-09-04T05:05:30.417Z",
+            "totalNanoAiu": 8897900000,
+            "tokenDetails": {
+              "input": {
+                "tokenCount": 2
+              },
+              "cache_read": {
+                "tokenCount": 0
+              },
+              "cache_write": {
+                "tokenCount": 32522
+              },
+              "output": {
+                "tokenCount": 767
+              }
+            }
+          }
+        },
+        "agentMetrics": {
+          "main": {
+            "totalApiDurationMs": 6333,
+            "totalNanoAiu": 8897900000,
+            "modelMetrics": {
+              "claude-sonnet-5": {
+                "requests": {
+                  "count": 1,
+                  "cost": 1
+                },
+                "usage": {
+                  "inputTokens": 32524,
+                  "outputTokens": 767,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 32522,
+                  "reasoningTokens": 71
+                },
+                "totalNanoAiu": 8897900000,
+                "tokenDetails": {
+                  "input": {
+                    "tokenCount": 2
+                  },
+                  "cache_read": {
+                    "tokenCount": 0
+                  },
+                  "cache_write": {
+                    "tokenCount": 32522
+                  },
+                  "output": {
+                    "tokenCount": 767
+                  }
+                }
+              }
+            }
+          }
+        },
+        "currentModel": "claude-sonnet-5",
+        "lastCallInputTokens": 32524,
+        "lastCallOutputTokens": 767
+      }
+    },
+    {
+      "turn": 2,
+      "latency_ms": 25702.6412000414,
+      "response_bytes": 1217,
+      "usage": {
+        "totalPremiumRequestCost": 2,
+        "totalUserRequests": 1,
+        "totalNanoAiu": 10976740000,
+        "tokenDetails": {
+          "input": {
+            "tokenCount": 4
+          },
+          "cache_read": {
+            "tokenCount": 32522
+          },
+          "cache_write": {
+            "tokenCount": 34914
+          },
+          "output": {
+            "tokenCount": 1597
+          }
+        },
+        "totalApiDurationMs": 13290,
+        "sessionStartTime": "2026-09-04T05:00:15.908Z",
+        "codeChanges": {
+          "linesAdded": 0,
+          "linesRemoved": 0,
+          "filesModifiedCount": 0,
+          "filesModified": []
+        },
+        "modelMetrics": {
+          "claude-sonnet-5": {
+            "requests": {
+              "count": 2,
+              "cost": 2
+            },
+            "usage": {
+              "inputTokens": 67440,
+              "outputTokens": 1597,
+              "cacheReadTokens": 32522,
+              "cacheWriteTokens": 34914,
+              "reasoningTokens": 268
+            },
+            "cacheExpiresAt": "2026-09-04T05:05:53.080Z",
+            "totalNanoAiu": 10976740000,
+            "tokenDetails": {
+              "input": {
+                "tokenCount": 4
+              },
+              "cache_read": {
+                "tokenCount": 32522
+              },
+              "cache_write": {
+                "tokenCount": 34914
+              },
+              "output": {
+                "tokenCount": 1597
+              }
+            }
+          }
+        },
+        "agentMetrics": {
+          "main": {
+            "totalApiDurationMs": 13290,
+            "totalNanoAiu": 10976740000,
+            "modelMetrics": {
+              "claude-sonnet-5": {
+                "requests": {
+                  "count": 2,
+                  "cost": 2
+                },
+                "usage": {
+                  "inputTokens": 67440,
+                  "outputTokens": 1597,
+                  "cacheReadTokens": 32522,
+                  "cacheWriteTokens": 34914,
+                  "reasoningTokens": 268
+                },
+                "totalNanoAiu": 10976740000,
+                "tokenDetails": {
+                  "input": {
+                    "tokenCount": 4
+                  },
+                  "cache_read": {
+                    "tokenCount": 32522
+                  },
+                  "cache_write": {
+                    "tokenCount": 34914
+                  },
+                  "output": {
+                    "tokenCount": 1597
+                  }
+                }
+              }
+            }
+          }
+        },
+        "currentModel": "claude-sonnet-5",
+        "lastCallInputTokens": 34916,
+        "lastCallOutputTokens": 830
+      }
+    },
+    {
+      "turn": 3,
+      "latency_ms": 24043.343799887225,
+      "response_bytes": 211,
+      "usage": {
+        "totalPremiumRequestCost": 3,
+        "totalUserRequests": 1,
+        "totalNanoAiu": 12208420000,
+        "tokenDetails": {
+          "input": {
+            "tokenCount": 6
+          },
+          "cache_read": {
+            "tokenCount": 67436
+          },
+          "cache_write": {
+            "tokenCount": 36346
+          },
+          "output": {
+            "tokenCount": 1772
+          }
+        },
+        "totalApiDurationMs": 16258,
+        "sessionStartTime": "2026-09-04T05:00:15.908Z",
+        "codeChanges": {
+          "linesAdded": 0,
+          "linesRemoved": 0,
+          "filesModifiedCount": 0,
+          "filesModified": []
+        },
+        "modelMetrics": {
+          "claude-sonnet-5": {
+            "requests": {
+              "count": 3,
+              "cost": 3
+            },
+            "usage": {
+              "inputTokens": 103788,
+              "outputTokens": 1772,
+              "cacheReadTokens": 67436,
+              "cacheWriteTokens": 36346,
+              "reasoningTokens": 326
+            },
+            "cacheExpiresAt": "2026-09-04T05:06:18.580Z",
+            "totalNanoAiu": 12208420000,
+            "tokenDetails": {
+              "input": {
+                "tokenCount": 6
+              },
+              "cache_read": {
+                "tokenCount": 67436
+              },
+              "cache_write": {
+                "tokenCount": 36346
+              },
+              "output": {
+                "tokenCount": 1772
+              }
+            }
+          }
+        },
+        "agentMetrics": {
+          "main": {
+            "totalApiDurationMs": 16258,
+            "totalNanoAiu": 12208420000,
+            "modelMetrics": {
+              "claude-sonnet-5": {
+                "requests": {
+                  "count": 3,
+                  "cost": 3
+                },
+                "usage": {
+                  "inputTokens": 103788,
+                  "outputTokens": 1772,
+                  "cacheReadTokens": 67436,
+                  "cacheWriteTokens": 36346,
+                  "reasoningTokens": 326
+                },
+                "totalNanoAiu": 12208420000,
+                "tokenDetails": {
+                  "input": {
+                    "tokenCount": 6
+                  },
+                  "cache_read": {
+                    "tokenCount": 67436
+                  },
+                  "cache_write": {
+                    "tokenCount": 36346
+                  },
+                  "output": {
+                    "tokenCount": 1772
+                  }
+                }
+              }
+            }
+          }
+        },
+        "currentModel": "claude-sonnet-5",
+        "lastCallInputTokens": 36348,
+        "lastCallOutputTokens": 175
+      }
+    }
+  ],
+  "transcript": [
+    {
+      "turn": 1,
+      "task_id": "T1",
+      "tool": "write_file",
+      "arguments": {
+        "task_id": "T1",
+        "path": "/workspace/project/notes.txt",
+        "content": "alpha\nbeta\n",
+        "create_parents": true
+      },
+      "result": {
+        "ok": true,
+        "path": "/workspace/project/notes.txt",
+        "created": true,
+        "changed": true,
+        "latency_ms": 1.2461000587791204
+      }
+    },
+    {
+      "turn": 1,
+      "task_id": "T2",
+      "tool": "execute",
+      "arguments": {
+        "task_id": "T2",
+        "command": "cd /workspace/project && echo done > result.txt"
+      },
+      "result": {
+        "ok": true,
+        "exit_code": 0,
+        "failure_code": null,
+        "stdout": "",
+        "stderr": "",
+        "stdout_original_bytes": 0,
+        "stderr_original_bytes": 0,
+        "stdout_truncated": false,
+        "stderr_truncated": false,
+        "resulting_cwd": "/workspace/project",
+        "latency_ms": 1.3180000241845846
+      }
+    },
+    {
+      "turn": 1,
+      "task_id": "T3",
+      "tool": "execute",
+      "arguments": {
+        "task_id": "T3",
+        "command": "cp -r /workspace/src /workspace/backup"
+      },
+      "result": {
+        "ok": true,
+        "exit_code": 0,
+        "failure_code": null,
+        "stdout": "",
+        "stderr": "",
+        "stdout_original_bytes": 0,
+        "stderr_original_bytes": 0,
+        "stdout_truncated": false,
+        "stderr_truncated": false,
+        "resulting_cwd": "/workspace",
+        "latency_ms": 1.3852999545633793
+      }
+    },
+    {
+      "turn": 1,
+      "task_id": "T4",
+      "tool": "execute",
+      "arguments": {
+        "task_id": "T4",
+        "command": "mv /workspace/draft.txt /workspace/final.txt"
+      },
+      "result": {
+        "ok": true,
+        "exit_code": 0,
+        "failure_code": null,
+        "stdout": "",
+        "stderr": "",
+        "stdout_original_bytes": 0,
+        "stderr_original_bytes": 0,
+        "stdout_truncated": false,
+        "stderr_truncated": false,
+        "resulting_cwd": "/workspace",
+        "latency_ms": 1.019099960103631
+      }
+    },
+    {
+      "turn": 1,
+      "task_id": "T5",
+      "tool": "execute",
+      "arguments": {
+        "task_id": "T5",
+        "command": "ls /workspace/items"
+      },
+      "result": {
+        "ok": true,
+        "exit_code": 0,
+        "failure_code": null,
+        "stdout": "alpha.txt\nmiddle.txt\nzeta.txt\n",
+        "stderr": "",
+        "stdout_original_bytes": 30,
+        "stderr_original_bytes": 0,
+        "stdout_truncated": false,
+        "stderr_truncated": false,
+        "resulting_cwd": "/workspace",
+        "latency_ms": 0.8996000979095697
+      }
+    },
+    {
+      "turn": 1,
+      "task_id": "T6",
+      "tool": "execute",
+      "arguments": {
+        "task_id": "T6",
+        "command": "rm -r /workspace/cache"
+      },
+      "result": {
+        "ok": true,
+        "exit_code": 0,
+        "failure_code": null,
+        "stdout": "",
+        "stderr": "",
+        "stdout_original_bytes": 0,
+        "stderr_original_bytes": 0,
+        "stdout_truncated": false,
+        "stderr_truncated": false,
+        "resulting_cwd": "/workspace",
+        "latency_ms": 0.9457999840378761
+      }
+    },
+    {
+      "turn": 1,
+      "task_id": "T7",
+      "tool": "execute",
+      "arguments": {
+        "task_id": "T7",
+        "command": "find /workspace/repo -name '*.py' | wc -l"
+      },
+      "result": {
+        "ok": true,
+        "exit_code": 0,
+        "failure_code": null,
+        "stdout": "3\n",
+        "stderr": "",
+        "stdout_original_bytes": 2,
+        "stderr_original_bytes": 0,
+        "stdout_truncated": false,
+        "stderr_truncated": false,
+        "resulting_cwd": "/workspace",
+        "latency_ms": 1.5085998456925154
+      }
+    },
+    {
+      "turn": 1,
+      "task_id": "T8",
+      "tool": "execute",
+      "arguments": {
+        "task_id": "T8",
+        "command": "grep -rn -E 'TODO|FIXME' /workspace/repo"
+      },
+      "result": {
+        "ok": true,
+        "exit_code": 0,
+        "failure_code": null,
+        "stdout": "/workspace/repo/a.py:2:TODO alpha\n/workspace/repo/b.py:1:FIXME beta\n/workspace/repo/b.py:3:TODO gamma\n/workspace/repo/c.txt:1:TODO delta\n",
+        "stderr": "",
+        "stdout_original_bytes": 137,
+        "stderr_original_bytes": 0,
+        "stdout_truncated": false,
+        "stderr_truncated": false,
+        "resulting_cwd": "/workspace",
+        "latency_ms": 1.120799919590354
+      }
+    },
+    {
+      "turn": 1,
+      "task_id": "T9",
+      "tool": "execute",
+      "arguments": {
+        "task_id": "T9",
+        "command": "find /workspace/data -type f"
+      },
+      "result": {
+        "ok": true,
+        "exit_code": 0,
+        "failure_code": null,
+        "stdout": "/workspace/data/a.txt\n/workspace/data/b.bin\n/workspace/data/c.log\n/workspace/data/d.txt\n",
+        "stderr": "",
+        "stdout_original_bytes": 88,
+        "stderr_original_bytes": 0,
+        "stdout_truncated": false,
+        "stderr_truncated": false,
+        "resulting_cwd": "/workspace",
+        "latency_ms": 1.0174000635743141
+      }
+    },
+    {
+      "turn": 1,
+      "task_id": "T10",
+      "tool": "read_file",
+      "arguments": {
+        "task_id": "T10",
+        "path": "/workspace/config.json"
+      },
+      "result": {
+        "ok": true,
+        "path": "/workspace/config.json",
+        "content": "{\"deployment\":{\"environment\":\"staging\",\"replicas\":3}}",
+        "total_lines": 1,
+        "latency_ms": 0.5010999739170074
+      }
+    },
+    {
+      "turn": 1,
+      "task_id": "T11",
+      "tool": "read_file",
+      "arguments": {
+        "task_id": "T11",
+        "path": "/workspace/app.log"
+      },
+      "result": {
+        "ok": false,
+        "error_code": "read_limit_exceeded",
+        "error": "range contains 12000 lines; limit is 2000 lines",
+        "latency_ms": 1.074400031939149
+      }
+    },
+    {
+      "turn": 1,
+      "task_id": "T12",
+      "tool": "write_file",
+      "arguments": {
+        "task_id": "T12",
+        "path": "/workspace/scripts/check.py",
+        "content": "import sys\nprint(sys.version_info.major)\nprint('done')\n",
+        "create_parents": true
+      },
+      "result": {
+        "ok": true,
+        "path": "/workspace/scripts/check.py",
+        "created": true,
+        "changed": true,
+        "latency_ms": 0.6172000430524349
+      }
+    },
+    {
+      "turn": 2,
+      "task_id": "T1",
+      "tool": "final",
+      "arguments": {
+        "task_id": "T1",
+        "answer": ""
+      },
+      "accepted": true,
+      "failures": []
+    },
+    {
+      "turn": 2,
+      "task_id": "T2",
+      "tool": "final",
+      "arguments": {
+        "task_id": "T2",
+        "answer": ""
+      },
+      "accepted": true,
+      "failures": []
+    },
+    {
+      "turn": 2,
+      "task_id": "T3",
+      "tool": "final",
+      "arguments": {
+        "task_id": "T3",
+        "answer": ""
+      },
+      "accepted": true,
+      "failures": []
+    },
+    {
+      "turn": 2,
+      "task_id": "T4",
+      "tool": "final",
+      "arguments": {
+        "task_id": "T4",
+        "answer": ""
+      },
+      "accepted": true,
+      "failures": []
+    },
+    {
+      "turn": 2,
+      "task_id": "T5",
+      "tool": "final",
+      "arguments": {
+        "task_id": "T5",
+        "answer": "alpha.txt\nmiddle.txt\nzeta.txt"
+      },
+      "accepted": true,
+      "failures": []
+    },
+    {
+      "turn": 2,
+      "task_id": "T6",
+      "tool": "final",
+      "arguments": {
+        "task_id": "T6",
+        "answer": ""
+      },
+      "accepted": true,
+      "failures": []
+    },
+    {
+      "turn": 2,
+      "task_id": "T7",
+      "tool": "final",
+      "arguments": {
+        "task_id": "T7",
+        "answer": "3"
+      },
+      "accepted": true,
+      "failures": []
+    },
+    {
+      "turn": 2,
+      "task_id": "T8",
+      "tool": "final",
+      "arguments": {
+        "task_id": "T8",
+        "answer": "/workspace/repo/a.py:2:TODO alpha\n/workspace/repo/b.py:1:FIXME beta\n/workspace/repo/b.py:3:TODO gamma"
+      },
+      "accepted": true,
+      "failures": []
+    },
+    {
+      "turn": 2,
+      "task_id": "T9",
+      "tool": "execute",
+      "arguments": {
+        "task_id": "T9",
+        "command": "wc -c /workspace/data/a.txt /workspace/data/b.bin /workspace/data/c.log /workspace/data/d.txt | sort -rn"
+      },
+      "result": {
+        "ok": true,
+        "exit_code": 0,
+        "failure_code": null,
+        "stdout": "21 total\n9 /workspace/data/b.bin\n6 /workspace/data/c.log\n4 /workspace/data/a.txt\n2 /workspace/data/d.txt\n",
+        "stderr": "",
+        "stdout_original_bytes": 105,
+        "stderr_original_bytes": 0,
+        "stdout_truncated": false,
+        "stderr_truncated": false,
+        "resulting_cwd": "/workspace",
+        "latency_ms": 1.9308000337332487
+      }
+    },
+    {
+      "turn": 2,
+      "task_id": "T10",
+      "tool": "final",
+      "arguments": {
+        "task_id": "T10",
+        "answer": "staging"
+      },
+      "accepted": true,
+      "failures": []
+    },
+    {
+      "turn": 2,
+      "task_id": "T11",
+      "tool": "execute",
+      "arguments": {
+        "task_id": "T11",
+        "command": "grep ERROR /workspace/app.log | sort | uniq -c | sort -rn"
+      },
+      "result": {
+        "ok": true,
+        "exit_code": 0,
+        "failure_code": null,
+        "stdout": "   4500 ERROR timeout\n   3000 ERROR disk\n   1500 ERROR denied\n",
+        "stderr": "",
+        "stdout_original_bytes": 62,
+        "stderr_original_bytes": 0,
+        "stdout_truncated": false,
+        "stderr_truncated": false,
+        "resulting_cwd": "/workspace",
+        "latency_ms": 32.91260008700192
+      }
+    },
+    {
+      "turn": 2,
+      "task_id": "T12",
+      "tool": "final",
+      "arguments": {
+        "task_id": "T12",
+        "answer": ""
+      },
+      "accepted": true,
+      "failures": []
+    },
+    {
+      "turn": 3,
+      "task_id": "T9",
+      "tool": "final",
+      "arguments": {
+        "task_id": "T9",
+        "answer": "b.bin\nc.log"
+      },
+      "accepted": true,
+      "failures": []
+    },
+    {
+      "turn": 3,
+      "task_id": "T11",
+      "tool": "final",
+      "arguments": {
+        "task_id": "T11",
+        "answer": "4500 ERROR timeout\n3000 ERROR disk"
+      },
+      "accepted": true,
+      "failures": []
+    }
+  ]
+}
