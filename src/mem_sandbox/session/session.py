@@ -40,7 +40,11 @@ from mem_sandbox.events import (
     SandboxEvent,
     SandboxEventType,
 )
-from mem_sandbox.policy import PolicyDecision, PolicyRequest
+from mem_sandbox.policy import (
+    PathMutationPolicyContext,
+    PolicyDecision,
+    PolicyRequest,
+)
 from mem_sandbox.secrets import (
     SecretAccessRequest,
     SecretLease,
@@ -64,16 +68,19 @@ from mem_sandbox.session.errors import (
 )
 from mem_sandbox.session.models import (
     ApplyPatchRequest,
+    CreateDirectoryRequest,
     CreateSnapshotRequest,
     CreateSnapshotResult,
     FileMutationResult,
     ListEntriesRequest,
     ListEntriesResult,
     PatchMutationResult,
+    PathMutationResult,
     ReadBytesRequest,
     ReadBytesResult,
     ReadFileRequest,
     ReadFileResult,
+    RemoveEntryRequest,
     RestoreSnapshotRequest,
     RestoreSnapshotResult,
     SandboxSessionState,
@@ -110,7 +117,9 @@ from mem_sandbox.snapshots import (
 from mem_sandbox.workspace import (
     ContentHash,
     ExpectedFileHash,
+    MakeDirectoryRequest,
     PreparedWorkspaceRestore,
+    RemovePathRequest,
     SandboxPath,
     WorkspaceBinaryResult,
     WorkspaceEntry,
@@ -140,6 +149,20 @@ class _OperationContext:
 class _OperationOutcome[T]:
     value: T
     metadata: OperationResultMetadata
+
+
+def _path_mutation_result(
+    outcome: _OperationOutcome[WorkspaceMutation],
+) -> PathMutationResult:
+    result = outcome.value
+    return PathMutationResult(
+        outcome.metadata,
+        result.path,
+        result.created,
+        result.changed,
+        result.previous_hash,
+        result.current_hash,
+    )
 
 
 class _LeaseOverlayValue:
@@ -485,6 +508,85 @@ class SandboxSession:
             request.cancellation,
         )
 
+    async def create_directory(
+        self,
+        request: CreateDirectoryRequest,
+    ) -> PathMutationResult:
+        path_box: list[SandboxPath] = []
+
+        def normalize() -> SandboxPath:
+            path = self._workspace_reader.resolve_path(request.path, cwd=self._cwd)
+            path_box.append(path)
+            return path
+
+        async def action(context: _OperationContext) -> tuple[WorkspaceMutation, Revision]:
+            result = await self._await_collaborator(
+                lambda: self._workspace_mutator.mkdir(
+                    MakeDirectoryRequest(
+                        path_box[0],
+                        create_parents=request.create_parents,
+                        exist_ok=request.exist_ok,
+                    )
+                ),
+                context.collaborator_deadline,
+                request.cancellation,
+                context.operation_id,
+                completed_result_is_authoritative=True,
+            )
+            return result, result.stats.revision
+
+        outcome = await self._run_operation(
+            OperationKind.CREATE_DIRECTORY,
+            request.limits,
+            request.cancellation,
+            normalize,
+            action,
+            policy_path_mutation=PathMutationPolicyContext(
+                create_parents=request.create_parents,
+                exist_ok=request.exist_ok,
+            ),
+            completed_result_is_authoritative=True,
+        )
+        return _path_mutation_result(outcome)
+
+    async def remove_path(self, request: RemoveEntryRequest) -> PathMutationResult:
+        path_box: list[SandboxPath] = []
+
+        def normalize() -> SandboxPath:
+            path = self._workspace_reader.resolve_path(request.path, cwd=self._cwd)
+            path_box.append(path)
+            return path
+
+        async def action(context: _OperationContext) -> tuple[WorkspaceMutation, Revision]:
+            result = await self._await_collaborator(
+                lambda: self._workspace_mutator.remove(
+                    RemovePathRequest(
+                        path_box[0],
+                        recursive=request.recursive,
+                        missing_ok=request.missing_ok,
+                    )
+                ),
+                context.collaborator_deadline,
+                request.cancellation,
+                context.operation_id,
+                completed_result_is_authoritative=True,
+            )
+            return result, result.stats.revision
+
+        outcome = await self._run_operation(
+            OperationKind.REMOVE_PATH,
+            request.limits,
+            request.cancellation,
+            normalize,
+            action,
+            policy_path_mutation=PathMutationPolicyContext(
+                recursive=request.recursive,
+                missing_ok=request.missing_ok,
+            ),
+            completed_result_is_authoritative=True,
+        )
+        return _path_mutation_result(outcome)
+
     async def _write(
         self,
         kind: OperationKind,
@@ -515,6 +617,7 @@ class SandboxSession:
                 context.collaborator_deadline,
                 cancellation,
                 context.operation_id,
+                completed_result_is_authoritative=True,
             )
             return result, result.stats.revision
 
@@ -524,6 +627,7 @@ class SandboxSession:
             cancellation,
             normalize,
             action,
+            completed_result_is_authoritative=True,
         )
         result = outcome.value
         return FileMutationResult(
@@ -556,6 +660,7 @@ class SandboxSession:
                 context.collaborator_deadline,
                 request.cancellation,
                 context.operation_id,
+                completed_result_is_authoritative=True,
             )
             return result, result.stats.revision
 
@@ -565,6 +670,7 @@ class SandboxSession:
             request.cancellation,
             normalize,
             action,
+            completed_result_is_authoritative=True,
         )
         result = outcome.value
         return PatchMutationResult(outcome.metadata, result.files)
@@ -910,6 +1016,8 @@ class SandboxSession:
         | None = None,
         *,
         policy_secret_refs: tuple[SecretRef, ...] = (),
+        policy_path_mutation: PathMutationPolicyContext | None = None,
+        completed_result_is_authoritative: bool = False,
     ) -> _OperationOutcome[_T]:
         self._reject_non_running()
         loop = asyncio.get_running_loop()
@@ -945,13 +1053,14 @@ class SandboxSession:
             decision = await self._await_collaborator(
                 lambda: self._policy_engine.evaluate(
                     PolicyRequest(
-                        self._session_id,
-                        operation_id,
-                        kind,
-                        path,
-                        None,
-                        limits,
-                        policy_secret_refs,
+                        session_id=self._session_id,
+                        operation_id=operation_id,
+                        operation_kind=kind,
+                        path=path,
+                        command_name=None,
+                        requested_limits=limits,
+                        secret_refs=policy_secret_refs,
+                        path_mutation=policy_path_mutation,
                     )
                 ),
                 policy_deadline,
@@ -1049,7 +1158,7 @@ class SandboxSession:
                     raise terminal_error from unexpected
             raise unexpected from error
         else:
-            await self._emit_terminal(
+            completion = self._emit_terminal(
                 SandboxEventType.OPERATION_COMPLETED,
                 kind,
                 operation_id,
@@ -1062,6 +1171,10 @@ class SandboxSession:
                     ),
                 ),
             )
+            if completed_result_is_authoritative:
+                await _await_despite_native_cancellation(completion)
+            else:
+                await completion
             return _OperationOutcome(value, metadata)
         finally:
             self._operation_gate.release()
@@ -1094,6 +1207,8 @@ class SandboxSession:
         deadline: float,
         cancellation: CancellationSignal | None,
         operation_id: OperationId,
+        *,
+        completed_result_is_authoritative: bool = False,
     ) -> _T:
         self._remaining(deadline, operation_id)
         self._check_cooperative_cancellation(cancellation, operation_id)
@@ -1104,23 +1219,49 @@ class SandboxSession:
                 remaining = deadline - asyncio.get_running_loop().time()
                 if remaining <= 0:
                     task.cancel()
-                    await _await_cancelled_task(task)
-                    raise SessionOperationTimeout(
+                    timeout = SessionOperationTimeout(
                         "operation exceeded its protected collaborator budget",
                         operation_id=operation_id,
                     )
+                    secondary = await _settle_cancelled_task(task)
+                    if secondary is not None:
+                        timeout.add_note(f"collaborator also failed during timeout: {secondary}")
+                    raise timeout
                 await asyncio.wait((task,), timeout=min(remaining, _POLL_SECONDS))
             result = await task
-            self._remaining(deadline, operation_id)
-            self._check_cooperative_cancellation(cancellation, operation_id)
+            if not completed_result_is_authoritative:
+                self._remaining(deadline, operation_id)
+                self._check_cooperative_cancellation(cancellation, operation_id)
             return result
-        except asyncio.CancelledError:
+        except asyncio.CancelledError as cancellation_error:
+            if (
+                completed_result_is_authoritative
+                and task.done()
+                and not task.cancelled()
+                and task.exception() is None
+            ):
+                return task.result()
             task.cancel()
-            await _await_cancelled_task(task)
+            secondary = await _settle_cancelled_task(task)
+            if secondary is not None:
+                cancellation_error.add_note(
+                    f"collaborator also failed during cancellation: {secondary}"
+                )
             raise
-        except SessionOperationCancelled:
+        except SessionOperationCancelled as cancellation_error:
+            if (
+                completed_result_is_authoritative
+                and task.done()
+                and not task.cancelled()
+                and task.exception() is None
+            ):
+                return task.result()
             task.cancel()
-            await _await_cancelled_task(task)
+            secondary = await _settle_cancelled_task(task)
+            if secondary is not None:
+                cancellation_error.add_note(
+                    f"collaborator also failed during cancellation: {secondary}"
+                )
             raise
 
     async def _publish_restore(
@@ -1419,11 +1560,26 @@ async def _close_secret_leases(leases: tuple[SecretLease, ...]) -> bool:
     return failed
 
 
-async def _await_cancelled_task[T](task: asyncio.Future[T]) -> None:
+async def _settle_cancelled_task[T](
+    task: asyncio.Future[T],
+) -> Exception | None:
     try:
         await task
     except asyncio.CancelledError:
-        return
+        return None
+    except Exception as error:
+        return error
+    return None
+
+
+async def _await_despite_native_cancellation[T](awaitable: Awaitable[T]) -> T:
+    task = asyncio.ensure_future(awaitable)
+    while not task.done():
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            continue
+    return task.result()
 
 
 async def _finish_timed_out_cleanup(

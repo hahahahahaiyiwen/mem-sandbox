@@ -1,6 +1,7 @@
 # Sandbox Session Design
 
-**Status:** Core lifecycle and issue #20 secret execution behavior implemented
+**Status:** Core lifecycle and issue #20 secret execution behavior implemented; issue #31
+native directory operation contract designed and under test
 
 ## Purpose
 
@@ -98,12 +99,86 @@ async def read_bytes(request: ReadBytesRequest) -> ReadBytesResult: ...
 async def write_bytes(request: WriteBytesRequest) -> FileMutationResult: ...
 async def stat(request: StatRequest) -> StatResult: ...
 async def list_entries(request: ListEntriesRequest) -> ListEntriesResult: ...
+async def create_directory(request: CreateDirectoryRequest) -> PathMutationResult: ...
+async def remove_path(request: RemoveEntryRequest) -> PathMutationResult: ...
 async def create_snapshot(request: CreateSnapshotRequest) -> CreateSnapshotResult: ...
 async def restore_snapshot(request: RestoreSnapshotRequest) -> RestoreSnapshotResult: ...
 async def close() -> None: ...
 ```
 
 Adapters decide which methods become model-visible tools.
+
+### Native directory mutation contract
+
+Issue #31 adds session-owned directory creation and path removal without routing these
+operations through the command parser:
+
+```python
+@dataclass(frozen=True, slots=True, kw_only=True)
+class CreateDirectoryRequest:
+    path: str
+    create_parents: bool = False
+    exist_ok: bool = False
+    limits: OperationLimits = field(default_factory=OperationLimits)
+    cancellation: CancellationSignal | None = None
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class RemoveEntryRequest:
+    path: str
+    recursive: bool = False
+    missing_ok: bool = False
+    limits: OperationLimits = field(default_factory=OperationLimits)
+    cancellation: CancellationSignal | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class PathMutationResult:
+    metadata: OperationResultMetadata
+    path: SandboxPath
+    created: bool
+    changed: bool
+    previous_hash: ContentHash | None
+    current_hash: ContentHash | None
+
+
+FileMutationResult = PathMutationResult
+```
+
+`RemoveEntryRequest` deliberately avoids colliding with the workspace-owned
+`RemovePathRequest`. `PathMutationResult` is the canonical mutation result for file and
+path changes; `FileMutationResult` remains a public alias so existing callers keep one
+runtime result type. The alias means the canonical runtime class name and representation
+are `PathMutationResult`. Request construction validates `path` and every boolean option
+before session orchestration begins, consistent with existing session request validation.
+
+The session methods use `OperationKind.CREATE_DIRECTORY` and
+`OperationKind.REMOVE_PATH`. They normalize the model-independent string path against
+the session working directory, perform the existing lifecycle gate, operation event,
+policy, deadline, and cancellation sequence, and then invoke exactly one owning
+workspace mutation.
+
+`create_directory` delegates to workspace `MakeDirectoryRequest`; `remove_path`
+delegates to workspace `RemovePathRequest`. The session does not recreate parent
+handling, recursive removal, missing-path, quota, hash, revision, or atomicity rules.
+The returned metadata uses the workspace revision supplied by the mutation. A successful
+workspace change advances revision exactly once. `exist_ok=True` succeeds unchanged when
+the target is already a directory, including the workspace root; it returns the existing
+directory hash as both `previous_hash` and `current_hash`. An existing file still raises
+`PathAlreadyExistsError`. `exist_ok=False` remains strict for every existing directory,
+including root. Missing removal with `missing_ok=True` returns `None` for both hashes.
+Both idempotent paths preserve the current revision.
+
+Non-recursive removal succeeds for a file or an empty directory and rejects a non-empty
+directory. Recursive removal is required only when deleting a directory tree.
+
+Admission includes a typed `PathMutationPolicyContext` so policy can distinguish parent
+creation, existing-directory idempotence, recursive removal, and missing-path
+idempotence. Other operation kinds set this policy field to `None`.
+
+The methods never invoke `SessionCommandExecutor`. OpenAI's `mkdir` and `rm` adapter
+methods translate to this public session seam, while command-language `mkdir` and `rm`
+continue using the same workspace operations through the command executor.
 
 ## Collaborator ports
 
@@ -125,8 +200,10 @@ class SessionWorkspaceReader(Protocol):
 
 
 class SessionWorkspaceMutator(Protocol):
+    async def mkdir(self, request: MakeDirectoryRequest) -> WorkspaceMutation: ...
     async def write(self, request: WorkspaceWriteRequest) -> WorkspaceMutation: ...
     async def patch(self, request: WorkspacePatchRequest) -> WorkspacePatchResult: ...
+    async def remove(self, request: RemovePathRequest) -> WorkspaceMutation: ...
 
 
 class SessionCommandExecutor(Protocol):
@@ -178,6 +255,20 @@ class SessionResourceScope(Protocol):
 
 Concrete components may implement several compatible protocols, but the session must not
 depend on one broad infrastructure interface.
+
+Issue #31 widens the session-owned mutator port with required `mkdir` and `remove`
+methods. Custom session compositions must implement those methods even if their workspace
+object already provides compatible operations.
+
+Workspace mutation collaborators have an explicit publication invariant: they may
+suspend while waiting to publish, but after publishing live state they return their
+mutation result without another suspension point. A completed mutation result is
+authoritative even if cancellation is requested or its collaborator budget expires
+before the session observes that result. The session then reports completion rather than
+misreporting an already-published mutation as cancelled or timed out. Required
+`operation.completed` delivery is protected from native cancellation after that commit
+boundary; delivery still uses the original operation deadline and still surfaces a
+required-event failure explicitly.
 
 The snapshot module implements a deterministic `JsonSessionSnapshotCodec`; the session
 depends only on the session-owned codec protocol. Encoding produces the payload and state

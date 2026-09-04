@@ -16,6 +16,8 @@ class OperationKind(StrEnum):
     WRITE_BYTES = "write_bytes"
     STAT = "stat"
     LIST_ENTRIES = "list_entries"
+    CREATE_DIRECTORY = "create_directory"
+    REMOVE_PATH = "remove_path"
     CREATE_SNAPSHOT = "create_snapshot"
     RESTORE_SNAPSHOT = "restore_snapshot"
 

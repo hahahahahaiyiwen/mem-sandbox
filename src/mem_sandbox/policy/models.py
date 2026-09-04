@@ -8,6 +8,21 @@ from mem_sandbox.secrets import SecretRef
 from mem_sandbox.workspace import SandboxPath
 
 
+@dataclass(frozen=True, slots=True, kw_only=True)
+class PathMutationPolicyContext:
+    """Typed directory and path-mutation options visible during admission."""
+
+    create_parents: bool = False
+    exist_ok: bool = False
+    recursive: bool = False
+    missing_ok: bool = False
+
+    def __post_init__(self) -> None:
+        for name in ("create_parents", "exist_ok", "recursive", "missing_ok"):
+            if not isinstance(cast(object, getattr(self, name)), bool):
+                raise TypeError(f"{name} must be a boolean")
+
+
 @dataclass(frozen=True, slots=True)
 class PolicyRequest:
     """Normalized operation admission facts."""
@@ -19,6 +34,7 @@ class PolicyRequest:
     command_name: str | None
     requested_limits: OperationLimits
     secret_refs: tuple[SecretRef, ...] = ()
+    path_mutation: PathMutationPolicyContext | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(cast(object, self.secret_refs), tuple):
@@ -30,6 +46,11 @@ class PolicyRequest:
             raise ValueError("secret_refs must be sorted by reference name")
         if len(set(self.secret_refs)) != len(self.secret_refs):
             raise ValueError("secret_refs must not contain duplicates")
+        if self.path_mutation is not None and not isinstance(
+            cast(object, self.path_mutation),
+            PathMutationPolicyContext,
+        ):
+            raise TypeError("path_mutation must be PathMutationPolicyContext or None")
 
 
 @dataclass(frozen=True, slots=True)

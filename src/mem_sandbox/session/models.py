@@ -165,13 +165,44 @@ class WriteBytesRequest:
 
 
 @dataclass(frozen=True, slots=True)
-class FileMutationResult:
+class PathMutationResult:
     metadata: OperationResultMetadata
     path: SandboxPath
     created: bool
     changed: bool
     previous_hash: ContentHash | None
     current_hash: ContentHash | None
+
+
+FileMutationResult = PathMutationResult
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class CreateDirectoryRequest:
+    path: str
+    create_parents: bool = False
+    exist_ok: bool = False
+    limits: OperationLimits = field(default_factory=OperationLimits)
+    cancellation: CancellationSignal | None = None
+
+    def __post_init__(self) -> None:
+        _require_text("path", self.path)
+        _require_boolean("create_parents", self.create_parents)
+        _require_boolean("exist_ok", self.exist_ok)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class RemoveEntryRequest:
+    path: str
+    recursive: bool = False
+    missing_ok: bool = False
+    limits: OperationLimits = field(default_factory=OperationLimits)
+    cancellation: CancellationSignal | None = None
+
+    def __post_init__(self) -> None:
+        _require_text("path", self.path)
+        _require_boolean("recursive", self.recursive)
+        _require_boolean("missing_ok", self.missing_ok)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -279,6 +310,11 @@ def _require_text(name: str, value: object) -> str:
     if not isinstance(value, str):
         raise TypeError(f"{name} must be a string")
     return value
+
+
+def _require_boolean(name: str, value: object) -> None:
+    if not isinstance(value, bool):
+        raise TypeError(f"{name} must be a boolean")
 
 
 def _require_utf8(name: str, value: object) -> str:

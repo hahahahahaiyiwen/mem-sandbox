@@ -1,6 +1,6 @@
 # Policy Admission Design
 
-**Status:** Minimal admission seam and issue #20 reference-aware extension implemented
+**Status:** Minimal admission seam implemented; issue #31 path-mutation facts designed
 
 ## Decision
 
@@ -44,6 +44,15 @@ class PolicyRequest:
     command_name: str | None
     requested_limits: OperationLimits
     secret_refs: tuple[SecretRef, ...] = ()
+    path_mutation: PathMutationPolicyContext | None = None
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class PathMutationPolicyContext:
+    create_parents: bool = False
+    exist_ok: bool = False
+    recursive: bool = False
+    missing_ok: bool = False
 
 
 @dataclass(frozen=True)
@@ -58,7 +67,10 @@ class SessionPolicyEngine(Protocol):
 ```
 
 The explicit seam preserves dependency injection and fail-closed session ordering
-without committing the project to a speculative policy language. `secret_refs` contains
+without committing the project to a speculative policy language. `path_mutation`
+contains the typed options for native directory creation and removal, allowing policy to
+distinguish recursive or idempotent operations without parsing commands or accepting raw
+dictionaries. It is `None` for all other operation kinds. `secret_refs` contains
 the unique references declared by an execute request, sorted by `SecretRef.name`, and
 never contains resolved values or environment overlay material. The default empty tuple
 preserves existing positional construction and non-execute behavior.
@@ -83,6 +95,7 @@ project does not yet advertise a general authorization framework.
 - A denial occurs before the workspace, command executor, snapshot store, or secret
   broker operation.
 - Secret references are policy facts; secret values are never policy facts.
+- Native path-mutation options are policy facts; workspace state and file content are not.
 - Denied secret-bearing execute requests call neither broker nor source.
 - Multiple bindings of one reference are normalized into one sorted policy fact.
 - Policy may narrow only `timeout_seconds`.

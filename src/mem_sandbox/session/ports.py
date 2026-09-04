@@ -18,7 +18,9 @@ from mem_sandbox.snapshots import (
     SnapshotRef,
 )
 from mem_sandbox.workspace import (
+    MakeDirectoryRequest,
     PreparedWorkspaceRestore,
+    RemovePathRequest,
     SandboxPath,
     WorkspaceBinaryResult,
     WorkspaceEntry,
@@ -43,8 +45,10 @@ class SessionWorkspaceReader(Protocol):
 
 
 class SessionWorkspaceMutator(Protocol):
+    async def mkdir(self, request: MakeDirectoryRequest) -> WorkspaceMutation: ...
     async def write(self, request: WorkspaceWriteRequest) -> WorkspaceMutation: ...
     async def patch(self, request: WorkspacePatchRequest) -> WorkspacePatchResult: ...
+    async def remove(self, request: RemovePathRequest) -> WorkspaceMutation: ...
 
 
 class SessionCommandExecutor(Protocol):
