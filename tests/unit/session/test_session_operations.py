@@ -75,9 +75,11 @@ from mem_sandbox.snapshots import (
 )
 from mem_sandbox.workspace import (
     ContentHash,
+    MakeDirectoryRequest,
     NodeKind,
     PatchedFile,
     PreparedWorkspaceRestore,
+    RemovePathRequest,
     SandboxPath,
     WorkspaceBinaryResult,
     WorkspaceEntry,
@@ -166,6 +168,9 @@ class Workspace:
             WorkspaceStats(1, 2, self.revision, current_hash),
         )
 
+    async def mkdir(self, request: MakeDirectoryRequest) -> WorkspaceMutation:
+        raise AssertionError
+
     async def patch(self, request: object) -> WorkspacePatchResult:
         self.revision = self.revision.next()
         path = SandboxPath.resolve("/workspace/file.txt")
@@ -174,6 +179,9 @@ class Workspace:
             (PatchedFile(path, self.hash, current),),
             WorkspaceStats(7, 2, self.revision, current),
         )
+
+    async def remove(self, request: RemovePathRequest) -> WorkspaceMutation:
+        raise AssertionError
 
     async def export(self) -> WorkspaceSnapshotData:
         raise AssertionError

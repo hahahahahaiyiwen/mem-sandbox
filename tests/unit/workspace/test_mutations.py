@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from typing import cast
 
 import pytest
 
@@ -52,6 +53,56 @@ async def test_mkdir_and_write_can_create_parents_in_one_revision() -> None:
     assert file_mutation.stats.node_count == 6
     assert file_mutation.created
     assert file_mutation.previous_hash is None
+
+
+def test_make_directory_request_validates_exist_ok() -> None:
+    with pytest.raises(TypeError, match="exist_ok must be a boolean"):
+        MakeDirectoryRequest(
+            SandboxPath.resolve("/workspace/path"),
+            exist_ok=cast(bool, 1),
+        )
+
+
+@pytest.mark.asyncio
+async def test_mkdir_exist_ok_preserves_existing_directory_identity() -> None:
+    workspace = MemoryWorkspace()
+    path = SandboxPath.resolve("/workspace/existing")
+    await workspace.mkdir(MakeDirectoryRequest(path))
+    entry = await workspace.stat(path)
+    before = await workspace.stats()
+
+    existing = await workspace.mkdir(MakeDirectoryRequest(path, exist_ok=True))
+
+    assert not existing.created
+    assert not existing.changed
+    assert existing.previous_hash == existing.current_hash == entry.content_hash
+    assert existing.stats == before
+
+    with pytest.raises(PathAlreadyExistsError):
+        await workspace.mkdir(MakeDirectoryRequest(path))
+    assert await workspace.stats() == before
+
+
+@pytest.mark.asyncio
+async def test_mkdir_exist_ok_preserves_root_but_rejects_existing_files() -> None:
+    workspace = MemoryWorkspace()
+    root = SandboxPath.root()
+    root_entry = await workspace.stat(root)
+    before_root = await workspace.stats()
+
+    existing_root = await workspace.mkdir(MakeDirectoryRequest(root, exist_ok=True))
+
+    assert not existing_root.created
+    assert not existing_root.changed
+    assert existing_root.previous_hash == existing_root.current_hash == root_entry.content_hash
+    assert existing_root.stats == before_root
+
+    file_path = SandboxPath.resolve("/workspace/file")
+    await workspace.write(WorkspaceWriteRequest(file_path, b"x", AnyCurrentState()))
+    before_file_conflict = await workspace.stats()
+    with pytest.raises(PathAlreadyExistsError):
+        await workspace.mkdir(MakeDirectoryRequest(file_path, exist_ok=True))
+    assert await workspace.stats() == before_file_conflict
 
 
 @pytest.mark.asyncio

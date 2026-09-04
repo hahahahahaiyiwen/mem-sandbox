@@ -217,11 +217,20 @@ class MemoryWorkspace:
     async def mkdir(self, request: MakeDirectoryRequest) -> WorkspaceMutation:
         """Create one directory atomically."""
         self._validate_path(request.path)
-        if request.path.is_root:
-            raise PathAlreadyExistsError(f"{request.path} already exists")
 
         async with self._state_lock:
-            if _try_get_node(self._state.root, request.path) is not None:
+            existing = _try_get_node(self._state.root, request.path)
+            if existing is not None:
+                if request.exist_ok and isinstance(existing, _DirectoryNode):
+                    current_hash = _node_hash(existing)
+                    return WorkspaceMutation(
+                        path=request.path,
+                        created=False,
+                        changed=False,
+                        previous_hash=current_hash,
+                        current_hash=current_hash,
+                        stats=self._state.stats,
+                    )
                 raise PathAlreadyExistsError(f"{request.path} already exists")
 
             root = copy.deepcopy(self._state.root)
