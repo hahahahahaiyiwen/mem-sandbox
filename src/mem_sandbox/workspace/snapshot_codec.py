@@ -6,7 +6,6 @@ import base64
 import binascii
 import json
 from collections.abc import Callable
-from dataclasses import dataclass
 from typing import cast
 
 from mem_sandbox.core.errors import SandboxError
@@ -16,48 +15,17 @@ from mem_sandbox.workspace.errors import (
     SnapshotIncompatibleError,
     SnapshotTooLargeError,
 )
-from mem_sandbox.workspace.hashing import hash_directory
 from mem_sandbox.workspace.models import (
     ContentHash,
+    DecodedWorkspaceSnapshot,
     NodeKind,
     WorkspaceLimits,
     WorkspaceSnapshotData,
+    WorkspaceSnapshotEntry,
     WorkspaceStats,
 )
 from mem_sandbox.workspace.paths import SandboxPath
-
-
-@dataclass(frozen=True, slots=True)
-class WorkspaceSnapshotEntry:
-    """One deterministic directory or file record."""
-
-    path: SandboxPath
-    kind: NodeKind
-    content: bytes | None = None
-
-    def __post_init__(self) -> None:
-        if self.path.is_root:
-            raise ValueError("snapshot entries must not contain the implicit root")
-        if self.kind is NodeKind.FILE and not isinstance(self.content, bytes):
-            raise TypeError("file snapshot entry content must be bytes")
-        if self.kind is NodeKind.DIRECTORY and self.content is not None:
-            raise ValueError("directory snapshot entry must not contain file content")
-
-
-@dataclass(frozen=True, slots=True)
-class DecodedWorkspaceSnapshot:
-    """Validated snapshot state ready to restore."""
-
-    entries: tuple[WorkspaceSnapshotEntry, ...]
-    stats: WorkspaceStats
-
-
-@dataclass(slots=True)
-class _SnapshotDirectory:
-    children: dict[str, _SnapshotNode]
-
-
-type _SnapshotNode = _SnapshotDirectory | bytes
+from mem_sandbox.workspace.snapshot_tree import measure_workspace_entries
 
 
 class JsonWorkspaceSnapshotCodec:
@@ -191,7 +159,7 @@ class JsonWorkspaceSnapshotCodec:
             raise SnapshotTooLargeError(f"snapshot contains more than {limits.max_nodes} nodes")
 
         entries = self._decode_entries(entries_values, limits, resolve_path)
-        measured = _measure_entries(entries)
+        measured = measure_workspace_entries(entries)
         if measured.total_bytes != declared_total_bytes:
             raise SnapshotCorruptError("snapshot total byte count does not match entries")
         if measured.node_count != declared_node_count:
@@ -280,48 +248,6 @@ def _decode_file_content(
     ):
         raise SnapshotCorruptError("snapshot file content hash does not match content")
     return content
-
-
-def _measure_entries(entries: tuple[WorkspaceSnapshotEntry, ...]) -> WorkspaceStats:
-    root = _SnapshotDirectory(children={})
-    total_bytes = 0
-
-    for entry in entries:
-        parent = root
-        for segment in entry.path.parts[:-1]:
-            child = parent.children.get(segment)
-            if not isinstance(child, _SnapshotDirectory):
-                raise SnapshotCorruptError(f"snapshot parent directory is missing for {entry.path}")
-            parent = child
-        if entry.path.name in parent.children:
-            raise SnapshotCorruptError(f"snapshot path is duplicated: {entry.path}")
-        if entry.kind is NodeKind.DIRECTORY:
-            parent.children[entry.path.name] = _SnapshotDirectory(children={})
-        else:
-            assert entry.content is not None
-            parent.children[entry.path.name] = entry.content
-            total_bytes += len(entry.content)
-
-    root_hash = _snapshot_node_hash(root)
-    return WorkspaceStats(
-        total_bytes=total_bytes,
-        node_count=len(entries) + 1,
-        revision=Revision.initial(),
-        root_hash=root_hash,
-    )
-
-
-def _snapshot_node_hash(node: _SnapshotNode) -> ContentHash:
-    if isinstance(node, bytes):
-        return ContentHash.from_bytes(node)
-    return hash_directory(
-        (
-            name,
-            NodeKind.FILE if isinstance(child, bytes) else NodeKind.DIRECTORY,
-            _snapshot_node_hash(child),
-        )
-        for name, child in node.children.items()
-    )
 
 
 def _canonical_json(value: object) -> bytes:

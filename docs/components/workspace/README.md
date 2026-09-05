@@ -103,9 +103,20 @@ class WorkspaceSnapshotPort(Protocol):
     ) -> PreparedWorkspaceRestore: ...
     async def commit_restore(self, candidate: PreparedWorkspaceRestore) -> None: ...
     async def restore(self, data: WorkspaceSnapshotData) -> None: ...
+
+
+class WorkspaceArchivePort(Protocol):
+    async def export_portable_archive(self) -> WorkspaceArchiveData: ...
+    async def prepare_archive_restore(
+        self,
+        data: WorkspaceArchiveData,
+        *,
+        required_directory: SandboxPath,
+    ) -> PreparedWorkspaceRestore: ...
 ```
 
-The in-memory workspace may implement all three protocols.
+The in-memory workspace may implement all four protocols. Both restore ports publish
+through the same `commit_restore` operation and opaque `PreparedWorkspaceRestore`.
 
 `PreparedWorkspaceRestore` is an immutable, opaque candidate owned by the workspace
 module. Preparation decodes and verifies the complete tree, counters, hashes, limits,
@@ -137,8 +148,14 @@ publication.
 - Empty paths, NUL characters, and invalid path segments are rejected.
 - Comparisons are case-sensitive.
 - A normalized path is represented by a domain `SandboxPath`, not a host `pathlib.Path`.
+- `SandboxPath.join()` accepts the same path and segment limits as resolution, and
+  workspace-internal traversal always supplies the active `WorkspaceLimits` rather than
+  silently reapplying defaults.
 
 Path confinement is a workspace invariant, not only a policy rule.
+The general POSIX workspace can contain a literal backslash or a drive-like segment.
+Portable archive export rejects those otherwise-valid names before emitting bytes because
+the version 1 interchange profile deliberately excludes Windows-ambiguous syntax.
 
 ## Binary and text APIs
 
@@ -241,7 +258,7 @@ The default profile is configurable and starts with:
 | Model-facing range response | 256 KiB |
 | Lines per range response | 2,000 |
 | Patch input | 1 MiB |
-| Encoded snapshot | 32 MiB |
+| Encoded snapshot, raw archive input, or expanded tar stream | 32 MiB |
 
 ## Revisions and hashes
 
@@ -257,6 +274,167 @@ The default profile is configurable and starts with:
 File hashes are SHA-256 over their exact bytes. Directory hashes use a domain-separated
 SHA-256 sequence over each lexically ordered child's node kind, UTF-8 name, and content
 hash. Host metadata and insertion order never participate.
+
+## Portable archive boundary
+
+OpenAI workspace persistence uses a separate portable archive codec owned by the
+workspace boundary. The adapter supplies and consumes bounded byte streams; it must not
+implement tar parsing, path security, workspace limit checks, or restore atomicity.
+
+### Codec-neutral tree model
+
+`WorkspaceSnapshotEntry` and the decoded tree result are codec-neutral workspace models,
+not types owned by the JSON or tar implementation. The decoded tree result contains
+entries plus measured bytes, root-inclusive node count, and root hash; it does not invent
+a workspace revision. Entry construction validates `NodeKind` at runtime, and codecs
+branch exhaustively over file and directory kinds so invalid values cannot silently
+change node type or discard content.
+
+The public archive value is immutable:
+
+```python
+@dataclass(frozen=True, slots=True)
+class WorkspaceArchiveData:
+    encoded: bytes
+    format_version: int
+    workspace_revision: Revision
+    root_hash: ContentHash
+```
+
+Only `encoded` is written to the OpenAI snapshot stream. The format version, revision,
+and root hash are copied into serializable provider session state and supplied again when
+hydrating. A snapshot stream without matching provider metadata is unsupported in version
+1. This preserves exact revision behavior without making tar bytes depend on revision.
+
+The decoder recomputes the root hash and compares it with the out-of-band value before it
+can create a restore candidate. A missing, incompatible, or mismatched format version or
+root hash fails before publication.
+
+### Portable tar profile version 1
+
+Canonical export is an uncompressed POSIX PAX tar stream:
+
+- effective member names are UTF-8 workspace-relative paths without a leading `/` or
+  `./`; directory headers may carry the conventional single trailing `/` emitted by the
+  standard tar writer;
+- the root itself is not emitted;
+- every directory, including an empty directory, is emitted explicitly;
+- members are ordered by canonical `SandboxPath.value`;
+- regular files use mode `0644` and directories use `0755`;
+- uid, gid, mtime, device numbers, user name, and group name are normalized to zero or
+  empty values;
+- file bytes are exact and no permission, timestamp, owner, xattr, ACL, or host metadata
+  affects workspace identity;
+- PAX `path` records support UTF-8 and paths beyond USTAR limits.
+
+The golden archive digest in the unit tests is the cross-platform contract. A Python or
+dependency upgrade that changes those bytes requires an explicit archive format-version
+decision rather than silently changing persisted snapshots.
+
+Hydration accepts uncompressed PAX-compatible tar or gzip-compressed tar. Bzip2, xz,
+zstd, and other compression profiles are rejected as incompatible in version 1. A valid
+uncompressed tar header takes precedence over compression-like leading filename bytes,
+so names such as `BZh-file` remain portable tar members. A root directory marker named
+`.` or `./` is ignored, and one leading `./` on another member is accepted for
+compatibility with common tar producers. At most one root marker is accepted; it must be
+an empty directory and counts toward the archive member limit without counting as a
+workspace node. Other member names must already be canonical POSIX-relative paths.
+Missing parent directories are synthesized; explicit empty directories remain
+preserved.
+
+Only regular files and directories are supported. Import rejects absolute paths,
+traversal, Windows drive paths and separators, NULs, repeated separators, interior `.`
+segments, duplicate canonical paths, file/directory conflicts, links, devices, FIFOs,
+contiguous files, sparse members, malformed headers, and unsupported extensions or node
+types. A complete stream must end with two 512-byte zero blocks followed only by
+zero-filled block padding; each physical member payload must also use zero-filled padding
+through its final 512-byte block. Missing terminators, partial blocks, concatenated
+archives, and non-zero padding or trailing data are malformed. Raw USTAR/PAX header names
+and PAX `path` values are validated independently before directory-name normalization, so
+an effective PAX path cannot mask an unsafe fallback header. Exactly one trailing
+separator is removed only for a directory; GNU long-name and long-link extensions are
+unsupported because version 1 uses PAX for extended paths. A bounded physical-header scan
+runs before `tarfile` processing, permits at most one global PAX header and one local PAX
+header per member, caps total PAX records at `max_nodes`, validates every PAX `path`
+record, and rejects stacked extension chains. PAX path byte and segment limits are
+checked before UTF-8 string or component materialization. Other PAX metadata is ignored
+except where tar parsing supplies the effective member path; `size` overrides and sparse
+PAX metadata are unsupported because they alter physical payload framing.
+
+Every canonical component is checked independently for Windows drive syntax. POSIX USTAR
+prefixes are included in the raw path; non-POSIX and GNU headers with non-empty prefix
+regions are rejected so a PAX override cannot mask parser-specific fallback semantics.
+PAX `.` and `./` root markers remain valid when `max_path_bytes` is exactly the UTF-8
+length of `/workspace`.
+
+### Limits, errors, and memory behavior
+
+The codec accepts immutable bytes. The OpenAI adapter bounded-reads an `IOBase` into bytes
+using its `max_stream_bytes`; the workspace codec independently rechecks authoritative
+workspace limits. It never owns or closes the SDK stream.
+
+`max_snapshot_bytes` bounds each of:
+
+- raw uncompressed or gzip-compressed input;
+- the expanded tar byte stream, preventing compressed metadata/header bombs;
+- canonical encoded archive output;
+- cumulative UTF-8 bytes retained by canonical decoded member and synthesized-parent
+  paths, preventing a compact deep member from amplifying into quadratic path metadata.
+
+`max_total_bytes`, `max_file_bytes`, `max_nodes`, `max_path_bytes`, and
+`max_segment_bytes` then bound decoded workspace state. `max_nodes` also caps logical
+archive members, including the optional root marker, while the restored tree separately
+retains its root-inclusive node limit. Checks are incremental and occur before retaining
+an over-limit member. The decoder iterates members and file payloads without `extract`,
+`extractall`, temporary files, host paths, or host filesystem access.
+Canonical export writes through a bounded in-memory sink and fails before retaining a
+write that would cross `max_snapshot_bytes`.
+
+Malformed or unsafe input raises `SnapshotCorruptError`; a recognized but unsupported
+format or compression profile raises `SnapshotIncompatibleError`; every raw, expanded,
+file, workspace, member, path, or segment limit failure raises
+`SnapshotTooLargeError`.
+
+### Atomicity, cancellation, and OpenAI resume
+
+Hydration follows the prepared-restore model: decode and validate a complete immutable
+candidate first, verify required directories against that candidate, then publish the
+candidate under the workspace state lock. Any invalid archive or failed candidate check
+leaves live contents, counters, revision, and root hash unchanged.
+
+A prepared candidate is a one-use workspace capability and exposes no state accessor.
+The wrapper carries only an unforgeable key into a workspace-owned weak registry; it
+retains no prepared graph or metadata. Copies share the same key, commit removes the
+registry record once, and abandoned wrappers allow their records to be collected.
+Reconstructing or editing a wrapper cannot repopulate consumed state. Commit explicitly
+requires a directory root, iteratively clones and revalidates the graph, and publishes
+only the detached state. Mutation of a leaked or forged candidate graph therefore either
+fails revalidation before publication or cannot alias the committed live workspace.
+Clone tracks directory identities, rejects cycles or shared-directory aliases, and
+enforces `max_nodes` before retaining an oversized detached graph.
+Expected counters, root hash, and revision are sealed separately from the candidate graph;
+commit validates both copies and reconstructs with a fresh `Revision` value that is not
+shared with the candidate across the final cancellation checkpoint.
+
+The pure codec performs no mutation. Archive preparation has cooperative cancellation
+checkpoints before decoding, after decoding, and before publication. Waiting to acquire
+the state lock remains cancellable; after state replacement, commit returns without
+another suspension point. Cancellation or timeout before that replacement cannot publish
+the candidate, and all in-memory tar/gzip readers are closed through scoped context
+managers.
+
+Commit also yields before candidate consumption and again after detached validation.
+Pending cancellation or an expired timeout is therefore observed before publication even
+when the state lock is uncontended.
+
+Tree hashing, state measurement, snapshot enumeration, and copy-on-write cloning use
+iterative traversals. A valid tree may therefore use the full configured path and node
+limits without depending on the Python interpreter recursion limit.
+
+The OpenAI SDK's default snapshot resume clears the workspace before calling
+`hydrate_workspace`. The in-memory adapter must override that pre-clear operation and let
+the workspace archive port perform the single atomic replacement. Otherwise invalid
+snapshot input would destroy the prior live state before core validation.
 
 ## Consistency and concurrency
 

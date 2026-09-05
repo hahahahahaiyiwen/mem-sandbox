@@ -106,11 +106,21 @@ class SandboxPath:
             return type(self).root()
         return type(self)(f"{self.ROOT}/{'/'.join(parent_parts)}")
 
-    def join(self, *segments: str) -> Self:
+    def join(
+        self,
+        *segments: str,
+        max_path_bytes: int = 4_096,
+        max_segment_bytes: int = 255,
+    ) -> Self:
         """Resolve child segments under this path."""
         if not segments:
             return self
-        return type(self).resolve("/".join(segments), cwd=self)
+        return type(self).resolve(
+            "/".join(segments),
+            cwd=self,
+            max_path_bytes=max_path_bytes,
+            max_segment_bytes=max_segment_bytes,
+        )
 
     def is_ancestor_of(self, other: SandboxPath) -> bool:
         """Return whether this path strictly contains another path."""
