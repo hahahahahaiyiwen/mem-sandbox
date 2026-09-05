@@ -360,16 +360,14 @@ class MkdirCommand:
             except _EXPECTED_WORKSPACE_FAILURES as error:
                 return _failure("mkdir", str(error))
             try:
-                await self._mutator.mkdir(MakeDirectoryRequest(path, create_parents))
+                await self._mutator.mkdir(
+                    MakeDirectoryRequest(
+                        path,
+                        create_parents=create_parents,
+                        exist_ok=create_parents,
+                    )
+                )
             except _EXPECTED_WORKSPACE_FAILURES as error:
-                if create_parents:
-                    try:
-                        entry = await self._reader.stat(path)
-                    except _EXPECTED_WORKSPACE_FAILURES:
-                        pass
-                    else:
-                        if entry.kind is NodeKind.DIRECTORY:
-                            continue
                 return _failure("mkdir", str(error))
         return CommandResult.success()
 

@@ -5,7 +5,7 @@ import pytest
 from mem_sandbox.core.operations import OperationKind, OperationLimits
 
 
-def test_milestone_three_operation_kinds_are_exact() -> None:
+def test_supported_operation_kinds_are_exact() -> None:
     assert tuple(OperationKind) == (
         OperationKind.EXECUTE,
         OperationKind.READ_FILE,
@@ -15,6 +15,8 @@ def test_milestone_three_operation_kinds_are_exact() -> None:
         OperationKind.WRITE_BYTES,
         OperationKind.STAT,
         OperationKind.LIST_ENTRIES,
+        OperationKind.CREATE_DIRECTORY,
+        OperationKind.REMOVE_PATH,
         OperationKind.CREATE_SNAPSHOT,
         OperationKind.RESTORE_SNAPSHOT,
     )
@@ -27,6 +29,8 @@ def test_milestone_three_operation_kinds_are_exact() -> None:
         "write_bytes",
         "stat",
         "list_entries",
+        "create_directory",
+        "remove_path",
         "create_snapshot",
         "restore_snapshot",
     )

@@ -118,6 +118,11 @@ class WorkspaceArchivePort(Protocol):
 The in-memory workspace may implement all four protocols. Both restore ports publish
 through the same `commit_restore` operation and opaque `PreparedWorkspaceRestore`.
 
+Mutation methods remain cancellation-cooperative while waiting for the workspace lock.
+After publishing a new state they return the corresponding mutation result without
+another suspension point. Session orchestration relies on this boundary so a completed
+mutation cannot subsequently be reported as cancelled or timed out.
+
 `PreparedWorkspaceRestore` is an immutable, opaque candidate owned by the workspace
 module. Preparation decodes and verifies the complete tree, counters, hashes, limits,
 schema, and required directory without mutating live state. The candidate is bound to
@@ -174,6 +179,29 @@ The range result is materialized at one revision. It is not a lazy cursor over m
 state.
 
 ## Mutation behavior
+
+### Session directory operations
+
+Issue #31 exposes workspace directory creation and path removal through public
+`SandboxSession.create_directory` and `SandboxSession.remove_path` methods:
+
+- the session normalizes the path, performs admission and operation orchestration, and
+  delegates one `MakeDirectoryRequest` or `RemovePathRequest`;
+- `MakeDirectoryRequest.exist_ok=True` makes an existing directory, including root, an
+  unchanged success with the same previous/current directory hash and no revision
+  increment;
+- `exist_ok=False` remains strict for existing directories; `exist_ok=True` does not
+  permit replacing an existing file, which still raises `PathAlreadyExistsError`, and
+  `create_parents=False` continues to reject a missing parent;
+- `MemoryWorkspace` remains the sole owner of parent creation, recursive removal,
+  missing-path behavior, root protection, quotas, hashes, revisions, locking, and atomic
+  publication;
+- the session maps `WorkspaceMutation` into session operation metadata without applying
+  another mutation or revision increment;
+- command-language `mkdir -p` maps to `create_parents=True, exist_ok=True`, while `rm`
+  continues delegating to the same removal request, so native adapter calls and commands
+  cannot drift semantically;
+- session-native calls never invoke the command parser, host filesystem, or host process.
 
 ### Write
 

@@ -228,10 +228,12 @@ class MakeDirectoryRequest:
 
     path: SandboxPath
     create_parents: bool = False
+    exist_ok: bool = False
 
     def __post_init__(self) -> None:
         _require_path("path", self.path)
         _require_boolean("create_parents", self.create_parents)
+        _require_boolean("exist_ok", self.exist_ok)
 
 
 @dataclass(frozen=True, slots=True)
