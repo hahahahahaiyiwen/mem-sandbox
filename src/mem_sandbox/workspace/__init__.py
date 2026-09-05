@@ -1,5 +1,6 @@
 """Deterministic in-memory workspace contracts and implementation."""
 
+from mem_sandbox.workspace.archive_codec import PortableWorkspaceArchiveCodec
 from mem_sandbox.workspace.errors import (
     DestinationWithinSourceError,
     DirectoryNotEmptyError,
@@ -35,6 +36,8 @@ from mem_sandbox.workspace.models import (
     ContentHash,
     ContentHashMustEqual,
     CopyPathRequest,
+    DecodedWorkspaceSnapshot,
+    DecodedWorkspaceTree,
     ExpectedFileHash,
     MakeDirectoryRequest,
     MovePathRequest,
@@ -44,6 +47,7 @@ from mem_sandbox.workspace.models import (
     PreparedWorkspaceRestore,
     RemovePathRequest,
     WorkspaceAppendRequest,
+    WorkspaceArchiveData,
     WorkspaceBinaryResult,
     WorkspaceEntry,
     WorkspaceLimits,
@@ -53,12 +57,15 @@ from mem_sandbox.workspace.models import (
     WorkspaceRangeRequest,
     WorkspaceRangeResult,
     WorkspaceSnapshotData,
+    WorkspaceSnapshotEntry,
     WorkspaceStats,
     WorkspaceTextResult,
+    WorkspaceTreeStats,
     WorkspaceWriteRequest,
     WritePrecondition,
 )
 from mem_sandbox.workspace.paths import SandboxPath
+from mem_sandbox.workspace.ports import WorkspaceArchivePort
 from mem_sandbox.workspace.snapshot_codec import JsonWorkspaceSnapshotCodec
 
 __all__ = [
@@ -66,6 +73,8 @@ __all__ = [
     "ContentHash",
     "ContentHashMustEqual",
     "CopyPathRequest",
+    "DecodedWorkspaceSnapshot",
+    "DecodedWorkspaceTree",
     "DestinationWithinSourceError",
     "DirectoryNotEmptyError",
     "ExpectedFileHash",
@@ -88,6 +97,7 @@ __all__ = [
     "PathMustNotExist",
     "PathNotFoundError",
     "PathOutsideWorkspaceError",
+    "PortableWorkspaceArchiveCodec",
     "PreparedRestoreInvalid",
     "PreparedRestoreInvalidError",
     "PreparedWorkspaceRestore",
@@ -104,6 +114,8 @@ __all__ = [
     "StaleContentError",
     "UnsupportedNodeTypeError",
     "WorkspaceAppendRequest",
+    "WorkspaceArchiveData",
+    "WorkspaceArchivePort",
     "WorkspaceBinaryResult",
     "WorkspaceEntry",
     "WorkspaceLimits",
@@ -114,8 +126,10 @@ __all__ = [
     "WorkspaceRangeResult",
     "WorkspaceSizeLimitExceededError",
     "WorkspaceSnapshotData",
+    "WorkspaceSnapshotEntry",
     "WorkspaceStats",
     "WorkspaceTextResult",
+    "WorkspaceTreeStats",
     "WorkspaceWriteRequest",
     "WritePrecondition",
 ]

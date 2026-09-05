@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-import copy
 from dataclasses import dataclass
+from weakref import WeakKeyDictionary
 
+from mem_sandbox.core.errors import SandboxError
 from mem_sandbox.core.identifiers import Revision
+from mem_sandbox.workspace.archive_codec import PortableWorkspaceArchiveCodec
 from mem_sandbox.workspace.errors import (
     DestinationWithinSourceError,
     DirectoryNotEmptyError,
@@ -25,6 +27,7 @@ from mem_sandbox.workspace.errors import (
     RootModificationError,
     SamePathError,
     SnapshotCorruptError,
+    SnapshotIncompatibleError,
     StaleContentError,
     WorkspaceSizeLimitExceededError,
 )
@@ -42,6 +45,7 @@ from mem_sandbox.workspace.models import (
     PreparedWorkspaceRestore,
     RemovePathRequest,
     WorkspaceAppendRequest,
+    WorkspaceArchiveData,
     WorkspaceBinaryResult,
     WorkspaceEntry,
     WorkspaceLimits,
@@ -51,17 +55,14 @@ from mem_sandbox.workspace.models import (
     WorkspaceRangeRequest,
     WorkspaceRangeResult,
     WorkspaceSnapshotData,
+    WorkspaceSnapshotEntry,
     WorkspaceStats,
     WorkspaceTextResult,
     WorkspaceWriteRequest,
 )
 from mem_sandbox.workspace.patching import apply_file_patch, parse_unified_diff
 from mem_sandbox.workspace.paths import SandboxPath
-from mem_sandbox.workspace.snapshot_codec import (
-    DecodedWorkspaceSnapshot,
-    JsonWorkspaceSnapshotCodec,
-    WorkspaceSnapshotEntry,
-)
+from mem_sandbox.workspace.snapshot_codec import JsonWorkspaceSnapshotCodec
 from mem_sandbox.workspace.text import split_normalized_lines
 
 
@@ -84,6 +85,12 @@ class _WorkspaceState:
     stats: WorkspaceStats
 
 
+@dataclass(frozen=True, slots=True)
+class _PreparedRestorePayload:
+    state: _WorkspaceState
+    expected_stats: WorkspaceStats
+
+
 class MemoryWorkspace:
     """A deterministic virtual filesystem protected by one async state lock."""
 
@@ -91,7 +98,12 @@ class MemoryWorkspace:
         self._limits = limits or WorkspaceLimits()
         self._state_lock = asyncio.Lock()
         self._snapshot_codec = JsonWorkspaceSnapshotCodec()
+        self._archive_codec = PortableWorkspaceArchiveCodec()
         self._restore_token = object()
+        self._restore_candidates: WeakKeyDictionary[
+            object,
+            _PreparedRestorePayload,
+        ] = WeakKeyDictionary()
         root = _DirectoryNode(children={})
         self._state = self._state_for_root(root, Revision.initial())
 
@@ -135,7 +147,15 @@ class MemoryWorkspace:
                 raise NotADirectoryError(f"{path} is not a directory")
             revision = self._state.stats.revision
             return tuple(
-                _entry(path.join(name), child, revision)
+                _entry(
+                    path.join(
+                        name,
+                        max_path_bytes=self._limits.max_path_bytes,
+                        max_segment_bytes=self._limits.max_segment_bytes,
+                    ),
+                    child,
+                    revision,
+                )
                 for name, child in sorted(node.children.items())
             )
 
@@ -233,8 +253,13 @@ class MemoryWorkspace:
                     )
                 raise PathAlreadyExistsError(f"{request.path} already exists")
 
-            root = copy.deepcopy(self._state.root)
-            parent = _ensure_parent(root, request.path, request.create_parents)
+            root = _clone_directory(self._state.root, self._limits.max_nodes)
+            parent = _ensure_parent(
+                root,
+                request.path,
+                request.create_parents,
+                self._limits,
+            )
             parent.children[request.path.name] = _DirectoryNode(children={})
             next_state = self._commit(root)
             current_hash = _node_hash(_get_node(next_state.root, request.path))
@@ -266,8 +291,13 @@ class MemoryWorkspace:
                 request.precondition,
             )
 
-            root = copy.deepcopy(self._state.root)
-            parent = _ensure_parent(root, request.path, request.create_parents)
+            root = _clone_directory(self._state.root, self._limits.max_nodes)
+            parent = _ensure_parent(
+                root,
+                request.path,
+                request.create_parents,
+                self._limits,
+            )
             parent.children[request.path.name] = _FileNode(content=request.content)
             next_state = self._commit(root)
             current_hash = ContentHash.from_bytes(request.content)
@@ -301,8 +331,13 @@ class MemoryWorkspace:
                     f"{self._limits.max_file_bytes} bytes"
                 )
 
-            root = copy.deepcopy(self._state.root)
-            parent = _ensure_parent(root, request.path, request.create_parents)
+            root = _clone_directory(self._state.root, self._limits.max_nodes)
+            parent = _ensure_parent(
+                root,
+                request.path,
+                request.create_parents,
+                self._limits,
+            )
             parent.children[request.path.name] = _FileNode(content=content)
             next_state = self._commit(root)
             return WorkspaceMutation(
@@ -337,7 +372,7 @@ class MemoryWorkspace:
                 raise DirectoryNotEmptyError(f"{request.path} is not empty")
 
             previous_hash = _node_hash(existing)
-            root = copy.deepcopy(self._state.root)
+            root = _clone_directory(self._state.root, self._limits.max_nodes)
             parent = _get_parent(root, request.path)
             del parent.children[request.path.name]
             next_state = self._commit(root)
@@ -363,9 +398,17 @@ class MemoryWorkspace:
                 raise PathAlreadyExistsError(f"{request.destination} already exists")
 
             previous_hash = _node_hash(existing) if existing is not None else None
-            root = copy.deepcopy(self._state.root)
-            parent = _ensure_parent(root, request.destination, request.create_parents)
-            parent.children[request.destination.name] = copy.deepcopy(source)
+            root = _clone_directory(self._state.root, self._limits.max_nodes)
+            parent = _ensure_parent(
+                root,
+                request.destination,
+                request.create_parents,
+                self._limits,
+            )
+            parent.children[request.destination.name] = _clone_node(
+                source,
+                self._limits.max_nodes,
+            )
             next_state = self._commit(root)
             return WorkspaceMutation(
                 path=request.destination,
@@ -389,12 +432,13 @@ class MemoryWorkspace:
                 raise PathAlreadyExistsError(f"{request.destination} already exists")
 
             previous_hash = _node_hash(existing) if existing is not None else None
-            root = copy.deepcopy(self._state.root)
+            root = _clone_directory(self._state.root, self._limits.max_nodes)
             source_node = _get_node(root, request.source)
             destination_parent = _ensure_parent(
                 root,
                 request.destination,
                 request.create_parents,
+                self._limits,
             )
             source_parent = _get_parent(root, request.source)
             del source_parent.children[request.source.name]
@@ -462,7 +506,7 @@ class MemoryWorkspace:
                     )
                 )
 
-            root = copy.deepcopy(self._state.root)
+            root = _clone_directory(self._state.root, self._limits.max_nodes)
             for path, content, _, _ in updates:
                 parent = _get_parent(root, path)
                 parent.children[path.name] = _FileNode(content=content)
@@ -482,7 +526,11 @@ class MemoryWorkspace:
     async def export(self) -> WorkspaceSnapshotData:
         """Export one deterministic point-in-time workspace snapshot."""
         async with self._state_lock:
-            entries = _snapshot_entries(self._state.root, SandboxPath.root())
+            entries = _snapshot_entries(
+                self._state.root,
+                SandboxPath.root(),
+                self._limits,
+            )
             stats = self._state.stats
         return self._snapshot_codec.encode(entries, stats, self._limits)
 
@@ -499,16 +547,60 @@ class MemoryWorkspace:
             self._limits,
             lambda value: self.resolve_path(value),
         )
-        root = _root_from_snapshot(decoded)
-        candidate = self._state_for_root(root, decoded.stats.revision)
-        if candidate.stats != decoded.stats:
-            raise SnapshotCorruptError(
-                "snapshot counters or hashes do not match reconstructed state"
+        return self._prepare_restore_candidate(
+            decoded.entries,
+            decoded.stats,
+            required_directory,
+        )
+
+    async def export_portable_archive(self) -> WorkspaceArchiveData:
+        """Export canonical tree bytes with out-of-band restore metadata."""
+        async with self._state_lock:
+            entries = _snapshot_entries(
+                self._state.root,
+                SandboxPath.root(),
+                self._limits,
             )
-        required_node = _get_node(candidate.root, required_directory)
-        if not isinstance(required_node, _DirectoryNode):
-            raise NotADirectoryError(f"{required_directory} is not a directory")
-        return PreparedWorkspaceRestore(self._restore_token, candidate)
+            stats = self._state.stats
+        await asyncio.sleep(0)
+        return WorkspaceArchiveData(
+            encoded=self._archive_codec.encode(entries, self._limits),
+            format_version=self._archive_codec.FORMAT_VERSION,
+            workspace_revision=stats.revision,
+            root_hash=stats.root_hash,
+        )
+
+    async def prepare_archive_restore(
+        self,
+        data: object,
+        *,
+        required_directory: SandboxPath,
+    ) -> PreparedWorkspaceRestore:
+        """Validate portable archive state without mutating the live workspace."""
+        if not isinstance(data, WorkspaceArchiveData):
+            raise TypeError("data must be WorkspaceArchiveData")
+        required_directory = self._validate_path(required_directory)
+        if data.format_version != self._archive_codec.FORMAT_VERSION:
+            raise SnapshotIncompatibleError(
+                f"archive format version {data.format_version} is unsupported"
+            )
+
+        await asyncio.sleep(0)
+        decoded = self._archive_codec.decode(data.encoded, self._limits)
+        await asyncio.sleep(0)
+        if decoded.tree_stats.root_hash != data.root_hash:
+            raise SnapshotCorruptError("archive metadata root hash does not match decoded tree")
+        stats = WorkspaceStats(
+            total_bytes=decoded.tree_stats.total_bytes,
+            node_count=decoded.tree_stats.node_count,
+            revision=data.workspace_revision,
+            root_hash=decoded.tree_stats.root_hash,
+        )
+        return self._prepare_restore_candidate(
+            decoded.entries,
+            stats,
+            required_directory,
+        )
 
     async def commit_restore(self, candidate: object) -> None:
         """Publish one workspace-bound prepared candidate atomically."""
@@ -516,11 +608,39 @@ class MemoryWorkspace:
             raise PreparedRestoreInvalid("candidate must be a PreparedWorkspaceRestore")
         if not candidate.belongs_to(self._restore_token):
             raise RestoreCandidateMismatch("restore candidate belongs to another workspace")
-        state = candidate.prepared_state()
-        if not isinstance(state, _WorkspaceState):
+        await asyncio.sleep(0)
+        capability = candidate.capability_for(self._restore_token)
+        if capability is None:
             raise PreparedRestoreInvalid("restore candidate contains invalid workspace state")
+        try:
+            prepared = self._restore_candidates.pop(capability, None)
+        except TypeError as error:
+            raise PreparedRestoreInvalid("restore candidate capability is invalid") from error
+        if prepared is None:
+            raise PreparedRestoreInvalid("restore candidate contains invalid workspace state")
+        state = prepared.state
+        expected_stats = _validated_restore_stats(prepared.expected_stats)
+        state_stats = _validated_restore_stats(object.__getattribute__(state, "stats"))
+        if state_stats != expected_stats:
+            raise PreparedRestoreInvalid("restore candidate metadata changed after preparation")
+        candidate_root = object.__getattribute__(state, "root")
+        if not isinstance(candidate_root, _DirectoryNode):
+            raise PreparedRestoreInvalid("restore candidate root must be a directory")
+        try:
+            sealed_revision = Revision(expected_stats.revision.value)
+            detached_state = self._state_for_root(
+                _clone_directory(candidate_root, self._limits.max_nodes),
+                sealed_revision,
+            )
+        except (SandboxError, AttributeError, TypeError, ValueError) as error:
+            raise PreparedRestoreInvalid(
+                "restore candidate contains invalid workspace state"
+            ) from error
+        if detached_state.stats != expected_stats:
+            raise PreparedRestoreInvalid("restore candidate changed after preparation")
+        await asyncio.sleep(0)
         async with self._state_lock:
-            self._state = state
+            self._state = detached_state
 
     async def restore(self, data: WorkspaceSnapshotData) -> None:
         """Prepare and atomically replace workspace state from a snapshot."""
@@ -529,6 +649,31 @@ class MemoryWorkspace:
             required_directory=SandboxPath.root(),
         )
         await self.commit_restore(candidate)
+
+    def _prepare_restore_candidate(
+        self,
+        entries: tuple[WorkspaceSnapshotEntry, ...],
+        stats: WorkspaceStats,
+        required_directory: SandboxPath,
+    ) -> PreparedWorkspaceRestore:
+        root = _root_from_entries(entries)
+        candidate = self._state_for_root(root, stats.revision)
+        if candidate.stats != stats:
+            raise SnapshotCorruptError(
+                "snapshot counters or hashes do not match reconstructed state"
+            )
+        required_node = _get_node(candidate.root, required_directory)
+        if not isinstance(required_node, _DirectoryNode):
+            raise NotADirectoryError(f"{required_directory} is not a directory")
+        prepared = PreparedWorkspaceRestore.issue(self._restore_token)
+        capability = prepared.capability_for(self._restore_token)
+        if capability is None:
+            raise RuntimeError("issued restore candidate is missing its capability")
+        self._restore_candidates[capability] = _PreparedRestorePayload(
+            state=candidate,
+            expected_stats=_copy_workspace_stats(candidate.stats),
+        )
+        return prepared
 
     def _commit(self, root: _DirectoryNode) -> _WorkspaceState:
         next_state = self._state_for_root(root, self._state.stats.revision.next())
@@ -544,8 +689,10 @@ class MemoryWorkspace:
     def _state_for_root(
         self,
         root: _DirectoryNode,
-        revision: Revision,
+        revision: object,
     ) -> _WorkspaceState:
+        if not isinstance(revision, Revision):
+            raise TypeError("revision must be a Revision")
         total_bytes, node_count, root_hash = _measure_node(
             root,
             SandboxPath.root(),
@@ -634,11 +781,16 @@ def _ensure_parent(
     root: _DirectoryNode,
     path: SandboxPath,
     create_parents: bool,
+    limits: WorkspaceLimits,
 ) -> _DirectoryNode:
     node = root
     traversed = SandboxPath.root()
     for segment in path.parts[:-1]:
-        traversed = traversed.join(segment)
+        traversed = traversed.join(
+            segment,
+            max_path_bytes=limits.max_path_bytes,
+            max_segment_bytes=limits.max_segment_bytes,
+        )
         child = node.children.get(segment)
         if child is None:
             if not create_parents:
@@ -679,53 +831,101 @@ def _measure_node(
     path: SandboxPath,
     limits: WorkspaceLimits,
 ) -> tuple[int, int, ContentHash]:
-    if isinstance(node, _FileNode):
-        size = len(node.content)
-        if size > limits.max_file_bytes:
-            raise FileSizeLimitExceededError(
-                f"{path} contains {size} bytes; limit is {limits.max_file_bytes} bytes"
-            )
-        return size, 1, ContentHash.from_bytes(node.content)
+    measured: dict[int, tuple[int, int, ContentHash]] = {}
+    pending: list[tuple[_Node, SandboxPath, bool]] = [(node, path, False)]
+    while pending:
+        current, current_path, visited = pending.pop()
+        if isinstance(current, _FileNode):
+            size = len(current.content)
+            if size > limits.max_file_bytes:
+                raise FileSizeLimitExceededError(
+                    f"{current_path} contains {size} bytes; limit is {limits.max_file_bytes} bytes"
+                )
+            measured[id(current)] = (size, 1, ContentHash.from_bytes(current.content))
+            continue
+        if not visited:
+            pending.append((current, current_path, True))
+            for name, child in reversed(sorted(current.children.items())):
+                pending.append(
+                    (
+                        child,
+                        current_path.join(
+                            name,
+                            max_path_bytes=limits.max_path_bytes,
+                            max_segment_bytes=limits.max_segment_bytes,
+                        ),
+                        False,
+                    )
+                )
+            continue
 
-    total_bytes = 0
-    node_count = 1
-    child_hashes: list[tuple[str, NodeKind, ContentHash]] = []
-    for name, child in sorted(node.children.items()):
-        child_path = path.join(name)
-        child_bytes, child_nodes, child_hash = _measure_node(child, child_path, limits)
-        total_bytes += child_bytes
-        node_count += child_nodes
-        child_hashes.append(
-            (
-                name,
-                NodeKind.FILE if isinstance(child, _FileNode) else NodeKind.DIRECTORY,
-                child_hash,
+        total_bytes = 0
+        node_count = 1
+        child_hashes: list[tuple[str, NodeKind, ContentHash]] = []
+        for name, child in sorted(current.children.items()):
+            child_bytes, child_nodes, child_hash = measured[id(child)]
+            total_bytes += child_bytes
+            node_count += child_nodes
+            child_hashes.append(
+                (
+                    name,
+                    NodeKind.FILE if isinstance(child, _FileNode) else NodeKind.DIRECTORY,
+                    child_hash,
+                )
             )
+        measured[id(current)] = (
+            total_bytes,
+            node_count,
+            hash_directory(child_hashes),
         )
-    return total_bytes, node_count, hash_directory(child_hashes)
+    return measured[id(node)]
 
 
 def _node_hash(node: _Node) -> ContentHash:
     if isinstance(node, _FileNode):
         return ContentHash.from_bytes(node.content)
-    child_hashes = [
-        (
-            name,
-            NodeKind.FILE if isinstance(child, _FileNode) else NodeKind.DIRECTORY,
-            _node_hash(child),
+
+    hashes: dict[int, ContentHash] = {}
+    pending: list[tuple[_Node, bool]] = [(node, False)]
+    while pending:
+        current, visited = pending.pop()
+        if isinstance(current, _FileNode):
+            hashes[id(current)] = ContentHash.from_bytes(current.content)
+            continue
+        if not visited:
+            pending.append((current, True))
+            pending.extend((child, False) for child in current.children.values())
+            continue
+        hashes[id(current)] = hash_directory(
+            (
+                name,
+                NodeKind.FILE if isinstance(child, _FileNode) else NodeKind.DIRECTORY,
+                hashes[id(child)],
+            )
+            for name, child in current.children.items()
         )
-        for name, child in sorted(node.children.items())
-    ]
-    return hash_directory(child_hashes)
+    return hashes[id(node)]
 
 
 def _snapshot_entries(
     directory: _DirectoryNode,
     path: SandboxPath,
+    limits: WorkspaceLimits,
 ) -> tuple[WorkspaceSnapshotEntry, ...]:
     entries: list[WorkspaceSnapshotEntry] = []
-    for name, child in sorted(directory.children.items()):
-        child_path = path.join(name)
+    pending: list[tuple[SandboxPath, _Node]] = [
+        (
+            path.join(
+                name,
+                max_path_bytes=limits.max_path_bytes,
+                max_segment_bytes=limits.max_segment_bytes,
+            ),
+            child,
+        )
+        for name, child in reversed(sorted(directory.children.items()))
+    ]
+    while pending:
+        child_path, child = pending.pop()
         if isinstance(child, _FileNode):
             entries.append(
                 WorkspaceSnapshotEntry(
@@ -741,13 +941,82 @@ def _snapshot_entries(
                     kind=NodeKind.DIRECTORY,
                 )
             )
-            entries.extend(_snapshot_entries(child, child_path))
+            pending.extend(
+                (
+                    child_path.join(
+                        name,
+                        max_path_bytes=limits.max_path_bytes,
+                        max_segment_bytes=limits.max_segment_bytes,
+                    ),
+                    descendant,
+                )
+                for name, descendant in reversed(sorted(child.children.items()))
+            )
     return tuple(entries)
 
 
-def _root_from_snapshot(decoded: DecodedWorkspaceSnapshot) -> _DirectoryNode:
+def _clone_directory(
+    directory: _DirectoryNode,
+    max_nodes: int,
+) -> _DirectoryNode:
+    cloned = _clone_node(directory, max_nodes)
+    if not isinstance(cloned, _DirectoryNode):
+        raise TypeError("workspace root must be a directory")
+    return cloned
+
+
+def _copy_workspace_stats(stats: WorkspaceStats) -> WorkspaceStats:
+    return WorkspaceStats(
+        total_bytes=stats.total_bytes,
+        node_count=stats.node_count,
+        revision=Revision(stats.revision.value),
+        root_hash=ContentHash(stats.root_hash.value),
+    )
+
+
+def _validated_restore_stats(value: object) -> WorkspaceStats:
+    if not isinstance(value, WorkspaceStats):
+        raise PreparedRestoreInvalid("restore candidate metadata is invalid")
+    revision = object.__getattribute__(value, "revision")
+    if not isinstance(revision, Revision):
+        raise PreparedRestoreInvalid("restore candidate revision is invalid")
+    return value
+
+
+def _clone_node(node: _Node, max_nodes: int) -> _Node:
+    if isinstance(node, _FileNode):
+        return _FileNode(content=node.content)
+
+    cloned = _DirectoryNode(children={})
+    cloned_nodes = 1
+    seen_directories = {id(node)}
+    pending: list[tuple[_DirectoryNode, _DirectoryNode]] = [(node, cloned)]
+    while pending:
+        source, destination = pending.pop()
+        for name, child in source.children.items():
+            cloned_nodes += 1
+            if cloned_nodes > max_nodes:
+                raise NodeLimitExceededError(
+                    f"workspace clone contains more than {max_nodes} nodes"
+                )
+            if isinstance(child, _FileNode):
+                destination.children[name] = _FileNode(content=child.content)
+                continue
+            child_identity = id(child)
+            if child_identity in seen_directories:
+                raise ValueError("workspace directory graph contains a cycle or alias")
+            seen_directories.add(child_identity)
+            child_clone = _DirectoryNode(children={})
+            destination.children[name] = child_clone
+            pending.append((child, child_clone))
+    return cloned
+
+
+def _root_from_entries(
+    entries: tuple[WorkspaceSnapshotEntry, ...],
+) -> _DirectoryNode:
     root = _DirectoryNode(children={})
-    for entry in decoded.entries:
+    for entry in entries:
         parent = _get_parent(root, entry.path)
         if entry.kind is NodeKind.DIRECTORY:
             parent.children[entry.path.name] = _DirectoryNode(children={})

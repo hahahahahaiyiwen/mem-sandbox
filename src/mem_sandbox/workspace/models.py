@@ -106,6 +106,42 @@ class NodeKind(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
+class WorkspaceSnapshotEntry:
+    """One immutable directory or file record shared by workspace codecs."""
+
+    path: SandboxPath
+    kind: NodeKind
+    content: bytes | None = None
+
+    def __post_init__(self) -> None:
+        _require_path("path", self.path)
+        if self.path.is_root:
+            raise ValueError("snapshot entries must not contain the implicit root")
+        _require_node_kind(self.kind)
+        if self.kind is NodeKind.FILE and not isinstance(self.content, bytes):
+            raise TypeError("file snapshot entry content must be bytes")
+        if self.kind is NodeKind.DIRECTORY and self.content is not None:
+            raise ValueError("directory snapshot entry must not contain file content")
+
+
+@dataclass(frozen=True, slots=True)
+class WorkspaceTreeStats:
+    """Measured tree counters and root identity without revision history."""
+
+    total_bytes: int
+    node_count: int
+    root_hash: ContentHash
+
+
+@dataclass(frozen=True, slots=True)
+class DecodedWorkspaceTree:
+    """Validated codec-neutral workspace tree ready for candidate construction."""
+
+    entries: tuple[WorkspaceSnapshotEntry, ...]
+    tree_stats: WorkspaceTreeStats
+
+
+@dataclass(frozen=True, slots=True)
 class WorkspaceStats:
     """Committed workspace counters and root identity."""
 
@@ -113,6 +149,14 @@ class WorkspaceStats:
     node_count: int
     revision: Revision
     root_hash: ContentHash
+
+
+@dataclass(frozen=True, slots=True)
+class DecodedWorkspaceSnapshot:
+    """Validated versioned snapshot state ready to restore."""
+
+    entries: tuple[WorkspaceSnapshotEntry, ...]
+    stats: WorkspaceStats
 
 
 @dataclass(frozen=True, slots=True)
@@ -346,20 +390,45 @@ class WorkspaceSnapshotData:
         _require_content_hash("root_hash", self.root_hash)
 
 
+@dataclass(frozen=True, slots=True)
+class WorkspaceArchiveData:
+    """Portable tree bytes plus provider-persisted restore metadata."""
+
+    encoded: bytes
+    format_version: int
+    workspace_revision: Revision
+    root_hash: ContentHash
+
+    def __post_init__(self) -> None:
+        _require_bytes("encoded", self.encoded)
+        _require_integer("format_version", self.format_version)
+        _require_revision("workspace_revision", self.workspace_revision)
+        _require_content_hash("root_hash", self.root_hash)
+
+
+class _RestoreCapability:
+    __slots__ = ("__weakref__",)
+
+
 @dataclass(frozen=True, slots=True, repr=False)
 class PreparedWorkspaceRestore:
     """Opaque workspace-bound state validated for one atomic restore commit."""
 
     _workspace_token: object
-    _candidate_state: object
+    _capability: object
+
+    @classmethod
+    def issue(cls, workspace_token: object) -> PreparedWorkspaceRestore:
+        """Create an opaque capability for one workspace-owned prepared state."""
+        return cls(workspace_token, _RestoreCapability())
 
     def belongs_to(self, workspace_token: object) -> bool:
         """Return whether this candidate belongs to the supplied workspace token."""
         return self._workspace_token is workspace_token
 
-    def prepared_state(self) -> object:
-        """Return opaque prepared state to the owning workspace implementation."""
-        return self._candidate_state
+    def capability_for(self, workspace_token: object) -> object | None:
+        """Return the opaque key only to the workspace holding the matching token."""
+        return self._capability if self._workspace_token is workspace_token else None
 
 
 def _require_text(name: str, value: object) -> str:
@@ -395,6 +464,12 @@ def _require_content_hash(name: str, value: object) -> ContentHash:
 def _require_path(name: str, value: object) -> SandboxPath:
     if not isinstance(value, SandboxPath):
         raise TypeError(f"{name} must be a SandboxPath")
+    return value
+
+
+def _require_node_kind(value: object) -> NodeKind:
+    if not isinstance(value, NodeKind):
+        raise TypeError("snapshot entry kind must be a NodeKind")
     return value
 
 

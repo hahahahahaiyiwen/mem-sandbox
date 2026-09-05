@@ -93,7 +93,15 @@ class InMemorySandboxSessionState(SandboxSessionState):
     workspace_id: str
     max_workspace_bytes: int
     max_stream_bytes: int
+    workspace_archive_version: int | None = None
+    workspace_revision: int | None = None
+    workspace_root_hash: str | None = None
 ```
+
+The three archive metadata fields remain outside the tar bytes so equivalent workspace
+trees produce identical archives even when their revision histories differ. They are
+required when restoring a provider-produced snapshot; version 1 rejects a bare snapshot
+stream that has no matching provider state metadata.
 
 ### Session
 
@@ -107,12 +115,14 @@ async def _exec_internal(
     timeout: float | None = None,
 ) -> ExecResult: ...
 
+
 async def read(
     self,
     path: Path,
     *,
     user: str | User | None = None,
 ) -> io.IOBase: ...
+
 
 async def write(
     self,
@@ -122,9 +132,12 @@ async def write(
     user: str | User | None = None,
 ) -> None: ...
 
+
 async def running(self) -> bool: ...
 
+
 async def persist_workspace(self) -> io.IOBase: ...
+
 
 async def hydrate_workspace(self, data: io.IOBase) -> None: ...
 ```
@@ -146,12 +159,15 @@ async def create(
     options: ClientOptionsT,
 ) -> SandboxSession: ...
 
+
 async def delete(self, session: SandboxSession) -> SandboxSession: ...
+
 
 async def resume(
     self,
     state: SandboxSessionState,
 ) -> SandboxSession: ...
+
 
 def deserialize_session_state(
     self,
@@ -330,6 +346,14 @@ class CoreFileEntry:
     size: int
 
 
+@dataclass(frozen=True)
+class CoreWorkspaceArchive:
+    payload: bytes
+    format_version: int
+    workspace_revision: int
+    root_hash: str
+
+
 class SandboxCoreSession(Protocol):
     async def start(self) -> None: ...
     async def shutdown(self) -> None: ...
@@ -373,8 +397,8 @@ class SandboxCoreSession(Protocol):
     ) -> None: ...
     async def assert_path_allowed(self, path: str, *, for_write: bool) -> None: ...
 
-    async def export_workspace_tar(self, *, skip_paths: tuple[str, ...]) -> bytes: ...
-    async def import_workspace_tar(self, payload: bytes) -> None: ...
+    async def export_workspace_archive(self) -> CoreWorkspaceArchive: ...
+    async def import_workspace_archive(self, archive: CoreWorkspaceArchive) -> None: ...
 
 
 class SandboxCoreStore(Protocol):
@@ -389,7 +413,7 @@ class SandboxCoreStore(Protocol):
     async def delete(self, workspace_id: str) -> None: ...
 
 
-def read_bounded_stream(
+async def read_bounded_stream(
     data: io.IOBase,
     *,
     max_bytes: int,
@@ -419,6 +443,7 @@ def read_bounded_stream(
         if total > max_bytes:
             raise ValueError(f"{description} exceeds the {max_bytes}-byte input limit")
         chunks.append(payload)
+        await asyncio.sleep(0)
 
 
 class InMemorySandboxClientOptions(BaseSandboxClientOptions):
@@ -433,6 +458,9 @@ class InMemorySandboxSessionState(SandboxSessionState):
     workspace_id: str
     max_workspace_bytes: int
     max_stream_bytes: int
+    workspace_archive_version: int | None = None
+    workspace_revision: int | None = None
+    workspace_root_hash: str | None = None
 
 
 class InMemorySandboxSession(BaseSandboxSession):
@@ -460,9 +488,7 @@ class InMemorySandboxSession(BaseSandboxSession):
     async def _probe_workspace_root_for_preserved_resume(self) -> bool:
         if not self._workspace_state_preserved_on_start():
             return False
-        ready = await self._core.is_directory(
-            sandbox_path_str(self._workspace_root_path())
-        )
+        ready = await self._core.is_directory(sandbox_path_str(self._workspace_root_path()))
         if ready:
             self._mark_workspace_root_ready_from_probe()
         return ready
@@ -477,8 +503,7 @@ class InMemorySandboxSession(BaseSandboxSession):
     ) -> ExecResult:
         result = await self._core.execute(
             tuple(
-                sandbox_path_str(part) if isinstance(part, Path) else str(part)
-                for part in command
+                sandbox_path_str(part) if isinstance(part, Path) else str(part) for part in command
             ),
             timeout_seconds=timeout,
         )
@@ -509,7 +534,7 @@ class InMemorySandboxSession(BaseSandboxSession):
         user: str | User | None = None,
     ) -> None:
         normalized = await self._validate_path_access(path, for_write=True)
-        payload = read_bounded_stream(
+        payload = await read_bounded_stream(
             data,
             max_bytes=min(
                 self.state.max_workspace_bytes,
@@ -528,20 +553,39 @@ class InMemorySandboxSession(BaseSandboxSession):
         return await self._core.is_running()
 
     async def persist_workspace(self) -> io.IOBase:
-        skip_paths = tuple(
-            path.as_posix() for path in sorted(self._persist_workspace_skip_relpaths())
-        )
-        payload = await self._core.export_workspace_tar(skip_paths=skip_paths)
-        return io.BytesIO(payload)
+        archive = await self._core.export_workspace_archive()
+        self.state.workspace_archive_version = archive.format_version
+        self.state.workspace_revision = archive.workspace_revision
+        self.state.workspace_root_hash = archive.root_hash
+        return io.BytesIO(archive.payload)
 
     async def hydrate_workspace(self, data: io.IOBase) -> None:
-        payload = read_bounded_stream(
+        payload = await read_bounded_stream(
             data,
             max_bytes=self.state.max_stream_bytes,
             allow_text=False,
             description="workspace archive",
         )
-        await self._core.import_workspace_tar(payload)
+        if (
+            self.state.workspace_archive_version is None
+            or self.state.workspace_revision is None
+            or self.state.workspace_root_hash is None
+        ):
+            raise ValueError("workspace archive metadata is required for hydration")
+        await self._core.import_workspace_archive(
+            CoreWorkspaceArchive(
+                payload=payload,
+                format_version=self.state.workspace_archive_version,
+                workspace_revision=self.state.workspace_revision,
+                root_hash=self.state.workspace_root_hash,
+            )
+        )
+
+    # The core hydration operation performs one validated atomic replacement.
+    # The SDK default clears the workspace before hydrate_workspace(), which would
+    # violate that guarantee for malformed snapshots.
+    async def _clear_workspace_root_on_resume(self) -> None:
+        return
 
     # Recommended for a native virtual filesystem. The inherited implementations
     # invoke POSIX ls, mkdir, and rm through _exec_internal().
@@ -624,9 +668,7 @@ class InMemorySandboxSession(BaseSandboxSession):
         )
 
 
-class InMemorySandboxClient(
-    BaseSandboxClient[InMemorySandboxClientOptions | None]
-):
+class InMemorySandboxClient(BaseSandboxClient[InMemorySandboxClientOptions | None]):
     backend_id = "in_memory"
     supports_default_options = True
 
@@ -672,10 +714,7 @@ class InMemorySandboxClient(
         state: SandboxSessionState,
     ) -> SandboxSession:
         if not isinstance(state, InMemorySandboxSessionState):
-            raise TypeError(
-                "InMemorySandboxClient.resume expects "
-                "InMemorySandboxSessionState"
-            )
+            raise TypeError("InMemorySandboxClient.resume expects InMemorySandboxSessionState")
         state.assert_path_grants_rebound()
 
         core = await self._store.attach(state.workspace_id)
@@ -694,9 +733,7 @@ class InMemorySandboxClient(
     async def delete(self, session: SandboxSession) -> SandboxSession:
         state = session.state
         if not isinstance(state, InMemorySandboxSessionState):
-            raise TypeError(
-                "InMemorySandboxClient.delete expects an in-memory session"
-            )
+            raise TypeError("InMemorySandboxClient.delete expects an in-memory session")
         await self._store.delete(state.workspace_id)
         return session
 
@@ -782,11 +819,13 @@ async def persist(
     dependencies: Dependencies | None = None,
 ) -> None: ...
 
+
 async def restore(
     self,
     *,
     dependencies: Dependencies | None = None,
 ) -> io.IOBase: ...
+
 
 async def restorable(
     self,
@@ -847,9 +886,7 @@ try:
         result = await Runner.run(
             agent,
             "Inspect the workspace.",
-            run_config=RunConfig(
-                sandbox=SandboxRunConfig(session=sandbox)
-            ),
+            run_config=RunConfig(sandbox=SandboxRunConfig(session=sandbox)),
         )
 finally:
     await client.delete(sandbox)
