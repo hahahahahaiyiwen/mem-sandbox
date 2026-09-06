@@ -515,3 +515,15 @@ snapshot payload bytes, environment values, or secrets.
 Changes to lifecycle publication, provenance, handle semantics, registry state, factory
 ownership, or application trust assumptions require updates to this README and behavior
 tests in the same change.
+## Provider reattachment
+
+Agent-framework providers may persist the string form of `SandboxHandle` as a
+process-local reattachment hint. The handle remains opaque application data: it is not
+authorization, is not a durable workspace identifier, and is useful only with the same
+live `SandboxService` instance.
+
+A provider resume must first call `get_session()` with that handle. If the record is
+still live, the provider reattaches without allocating. If it is absent, the provider
+creates a replacement session and relies on its framework snapshot to hydrate portable
+workspace state. The service does not add lookup by caller-selected identifier and does
+not expose its runtime registry.

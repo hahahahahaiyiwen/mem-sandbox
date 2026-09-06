@@ -33,6 +33,10 @@ class SessionNotRunning(ConflictError):
     code = "session_not_running"
 
 
+class SessionWorkspaceChanged(_OperationIdentity, ConflictError):
+    code = "session_workspace_changed"
+
+
 class SessionClosing(ConflictError):
     code = "session_closing"
 
@@ -80,6 +84,7 @@ class SessionCleanupFailed(InternalSandboxError):
 SessionRequestInvalidError = SessionRequestInvalid
 SessionStartInvalidError = SessionStartInvalid
 SessionNotRunningError = SessionNotRunning
+SessionWorkspaceChangedError = SessionWorkspaceChanged
 SessionClosingError = SessionClosing
 SessionClosedError = SessionClosed
 SessionFailedError = SessionFailed

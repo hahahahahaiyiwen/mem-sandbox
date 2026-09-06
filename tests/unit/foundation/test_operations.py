@@ -19,6 +19,8 @@ def test_supported_operation_kinds_are_exact() -> None:
         OperationKind.REMOVE_PATH,
         OperationKind.CREATE_SNAPSHOT,
         OperationKind.RESTORE_SNAPSHOT,
+        OperationKind.EXPORT_PORTABLE_ARCHIVE,
+        OperationKind.RESTORE_PORTABLE_ARCHIVE,
     )
     assert tuple(item.value for item in OperationKind) == (
         "execute",
@@ -33,6 +35,8 @@ def test_supported_operation_kinds_are_exact() -> None:
         "remove_path",
         "create_snapshot",
         "restore_snapshot",
+        "export_portable_archive",
+        "restore_portable_archive",
     )
 
 

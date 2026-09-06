@@ -3,8 +3,8 @@
 **Pinned SDK:** `openai-agents==0.22.0`
 **Pinned source:** commit
 [`89c02c8`](https://github.com/openai/openai-agents-python/tree/89c02c828ee8510fe9a84ee6675608193aa13b02)
-**Status:** Milestone 5.1 contract and optional package boundary complete; Sandbox Agents
-are beta.
+**Status:** Milestone 5.2 client/session and manifest profile implemented with
+behavior-first tests. Sandbox Agents are beta.
 
 ## Package boundary
 
@@ -14,9 +14,10 @@ Install the integration dependency with:
 pip install "mem-sandbox[openai-agents]"
 ```
 
-The production namespace is `mem_sandbox.integrations.openai_agents`. Milestone 5.1
-creates that isolated boundary but intentionally exports no client, session, or capability
-implementation before the owning core prerequisites are complete.
+The production namespace is `mem_sandbox.integrations.openai_agents`. Core packages must
+remain importable without the optional SDK dependency. The integration package may import
+OpenAI SDK types and public MemSandbox contracts, but it must not import concrete
+workspace implementations.
 
 ## Direct answer
 
@@ -59,13 +60,17 @@ and give `type` a non-empty string default, normally a `Literal`:
 
 ```python
 class InMemorySandboxClientOptions(BaseSandboxClientOptions):
-    type: Literal["in_memory"] = "in_memory"
-    max_workspace_bytes: int = 16 * 1024 * 1024
+    type: Literal["mem_sandbox"] = "mem_sandbox"
+    owner_id: str = "openai-agents"
+    workspace_limits: WorkspaceLimits = WorkspaceLimits()
     max_stream_bytes: int = 32 * 1024 * 1024
+    manifest_profile_version: Literal[1] = 1
+    exposed_ports: tuple[int, ...] = ()
 ```
 
 The model is frozen. The discriminator should equal the client's `backend_id`.
 `max_stream_bytes` bounds adapter-side buffering before data reaches the core.
+`exposed_ports` exists only to reject non-empty configuration explicitly in profile 1.
 
 ### Session state
 
@@ -89,19 +94,23 @@ recreate the backend. Do not serialize credentials.
 
 ```python
 class InMemorySandboxSessionState(SandboxSessionState):
-    type: Literal["in_memory"] = "in_memory"
-    workspace_id: str
-    max_workspace_bytes: int
+    type: Literal["mem_sandbox"] = "mem_sandbox"
+    sandbox_handle: str
+    owner_id: str
+    workspace_limits: WorkspaceLimits
     max_stream_bytes: int
-    workspace_archive_version: int | None = None
-    workspace_revision: int | None = None
-    workspace_root_hash: str | None = None
+    manifest_profile_version: Literal[1] = 1
+    workspace_archive_format_version: int | None = None
+    workspace_archive_revision: int | None = None
+    workspace_archive_root_hash: str | None = None
 ```
 
-The three archive metadata fields remain outside the tar bytes so equivalent workspace
-trees produce identical archives even when their revision histories differ. They are
-required when restoring a provider-produced snapshot; version 1 rejects a bare snapshot
-stream that has no matching provider state metadata.
+`sandbox_handle` is the string form of the service's opaque process-local handle. It is a
+reattachment hint for the same live service, not a durable workspace identity or an
+authorization token. The three archive metadata fields remain outside the tar bytes so
+equivalent workspace trees produce identical archives even when their revision histories
+differ. They are required when restoring a provider-produced snapshot; version 1 rejects
+a bare snapshot stream that has no matching provider state metadata.
 
 ### Session
 
@@ -299,466 +308,141 @@ This level is not required for the first Python version. A cleaner first milesto
 This makes the design functionally complete without pretending that the in-memory
 workspace is a full Unix machine.
 
-## 4. Minimal adapter skeleton
+## 4. Final adapter boundary
 
-This skeleton shows the OpenAI-facing boundary. `SandboxCoreSession` and
-`SandboxCoreStore` represent framework-neutral interfaces owned by the new project.
+The client receives one `SandboxService` through constructor injection. A provider
+session retains:
 
-```python
-from __future__ import annotations
+- its serializable `InMemorySandboxSessionState`;
+- the injected service;
+- the opaque `SandboxHandle` represented by `state.sandbox_handle`;
+- the public `SandboxSession` returned by `service.get_session(handle)`.
 
-import asyncio
-import io
-import stat
-import uuid
-from dataclasses import dataclass
-from pathlib import Path
-from typing import Literal, Protocol
+No workspace, executor, archive codec, snapshot store, policy engine, or event sink is
+exposed to the adapter.
 
-from agents.sandbox import ExecResult, Manifest, User, resolve_snapshot
-from agents.sandbox.files import EntryKind, FileEntry
-from agents.sandbox.snapshot import SnapshotBase, SnapshotSpec
-from agents.sandbox.session import (
-    BaseSandboxClient,
-    BaseSandboxClientOptions,
-    BaseSandboxSession,
-    SandboxSession,
-    SandboxSessionState,
-)
-from agents.sandbox.types import Permissions
-from agents.sandbox.workspace_paths import sandbox_path_str
+### Create
 
+1. Resolve default options, manifest, and SDK snapshot.
+2. Validate the complete manifest profile, including file, aggregate-byte, and node
+   quotas, then translate it to immutable seed files plus empty-directory requests.
+3. Reject non-empty exposed ports before allocation.
+4. Reject an already-restorable snapshot because create has no matching provider archive
+   metadata; restorable snapshots are accepted only through serialized resume state.
+5. Call `SandboxService.create()` once with the validated limits and seed files.
+6. Materialize required empty directories through public native session operations.
+7. Construct provider state, mark the provider start as already materialized, and return
+   `self._wrap_session(inner)`.
+8. Rebind the pinned wrapper hooks that do not delegate safely: `apply_manifest`,
+   `_apply_entry_batch`, and `extract`.
+9. If any post-allocation step fails, attempt service deletion and propagate the primary
+   failure.
 
-@dataclass(frozen=True)
-class CoreExecResult:
-    stdout: bytes
-    stderr: bytes
-    exit_code: int
+The core session is already running when the SDK wrapper is returned. Provider
+`start()` therefore performs no second core start and no duplicate manifest apply.
 
+### Resume
 
-@dataclass(frozen=True)
-class CoreFileEntry:
-    path: str
-    kind: Literal["file", "directory", "symlink", "other"]
-    mode: int
-    owner: str
-    group: str
-    size: int
+1. Validate state type, manifest profile, limits, and archive metadata shape.
+2. Parse `state.sandbox_handle` as an opaque handle value.
+3. Attempt `service.get_session(handle)`.
+4. If found, mark the provider start as preserved and reuse that session.
+5. If not found, allocate a replacement with the same immutable limits and translated
+   manifest seed plan, update the provider handle, and mark the start as not preserved.
+6. During SDK `start()`, hydrate a restorable snapshot into the replacement through the
+   portable archive bridge. A live reattachment performs no hydration.
 
+Only `SandboxNotFound` selects the replacement branch. Other service lookup failures
+propagate without allocating a divergent workspace.
 
-@dataclass(frozen=True)
-class CoreWorkspaceArchive:
-    payload: bytes
-    format_version: int
-    workspace_revision: int
-    root_hash: str
+The provider overrides `_probe_workspace_root_for_preserved_resume()` and
+`_can_skip_snapshot_restore_on_resume()` using the runtime-only fact that the exact same
+opaque handle resolved in the same service. It does not invoke the SDK's `test -d`
+command or fingerprint helper.
 
+### Session translation
 
-class SandboxCoreSession(Protocol):
-    async def start(self) -> None: ...
-    async def shutdown(self) -> None: ...
-    async def is_running(self) -> bool: ...
-    async def is_directory(self, path: str) -> bool: ...
+| SDK operation | Public MemSandbox translation |
+|---|---|
+| `_exec_internal(argv)` | Quote each argv element into one constrained command string and call `SandboxSession.execute` |
+| `read` | `SandboxSession.read_bytes` |
+| `write` | Bounded binary stream read, then `SandboxSession.write_bytes` |
+| `running` | Compare public session state with `RUNNING` |
+| `ls` | `SandboxSession.list_entries` and translate immutable metadata |
+| `mkdir` | `SandboxSession.create_directory` |
+| `rm` | `SandboxSession.remove_path` |
+| `persist_workspace` | `SandboxSession.export_portable_archive` |
+| `hydrate_workspace` | Rebuild `WorkspaceArchiveData`, then `SandboxSession.restore_portable_archive` |
 
-    async def execute(
-        self,
-        argv: tuple[str, ...],
-        *,
-        timeout_seconds: float | None,
-    ) -> CoreExecResult: ...
+The argv quoting helper is adapter-owned syntax translation, not a shell. It must preserve
+arguments exactly for the constrained parser, reject NUL and unsupported values, and
+never invoke `sh`, a host process, or executable lookup.
 
-    async def read_bytes(self, path: str, *, user: str | None) -> bytes: ...
-    async def write_bytes(
-        self,
-        path: str,
-        payload: bytes,
-        *,
-        user: str | None,
-    ) -> None: ...
-    async def list_entries(
-        self,
-        path: str,
-        *,
-        user: str | None,
-    ) -> list[CoreFileEntry]: ...
-    async def make_directory(
-        self,
-        path: str,
-        *,
-        parents: bool,
-        user: str | None,
-    ) -> None: ...
-    async def remove(
-        self,
-        path: str,
-        *,
-        recursive: bool,
-        user: str | None,
-    ) -> None: ...
-    async def assert_path_allowed(self, path: str, *, for_write: bool) -> None: ...
+SDK `user` values are rejected before core calls. `exec(..., shell=True)` and custom shell
+prefix lists are overridden and rejected before the SDK can prepend `sh -lc`.
 
-    async def export_workspace_archive(self) -> CoreWorkspaceArchive: ...
-    async def import_workspace_archive(self, archive: CoreWorkspaceArchive) -> None: ...
+Boundary failures use SDK errors where the SDK defines a matching category:
+`InvalidManifestPathError` for confined-path failures, `WorkspaceWriteTypeError` for
+non-binary writes, and `WorkspaceArchiveReadError` for stream, metadata, or core archive
+validation failures. The original core error is retained as the cause.
 
+### Manifest materialization
 
-class SandboxCoreStore(Protocol):
-    async def create(
-        self,
-        workspace_id: str,
-        *,
-        max_workspace_bytes: int,
-    ) -> SandboxCoreSession: ...
+Profile validation recursively visits every entry before allocation. Supported `Dir` and
+`File` entries are flattened into:
 
-    async def attach(self, workspace_id: str) -> SandboxCoreSession | None: ...
-    async def delete(self, workspace_id: str) -> None: ...
+- `WorkspaceSeedFile` values for all files;
+- ordered `CreateDirectoryRequest` values for explicit and empty directories.
 
+The normalized plan rejects duplicate paths, file-as-parent conflicts, and entries that
+target the workspace root. It also preflights file size, aggregate bytes, and the complete
+explicit/implicit node set before allocation. The adapter does not call
+`BaseEntry.apply()`, inherited `_apply_entry_batch()`, `chmod`, `chgrp`, or a host/local
+source API. The profile permits descriptions but requires default per-kind permissions,
+no group, and `ephemeral=False`.
 
-async def read_bounded_stream(
-    data: io.IOBase,
-    *,
-    max_bytes: int,
-    allow_text: bool,
-    description: str,
-) -> bytes:
-    if max_bytes <= 0:
-        raise ValueError("max_bytes must be positive")
+`remote_mount_command_allowlist` must remain equal to the pinned SDK default. It has no
+runtime effect because all mount entry types are rejected, but rejecting custom values
+keeps the supported configuration matrix exact instead of silently ignoring input.
 
-    chunks: list[bytes] = []
-    total = 0
+The provider overrides `_start_workspace`, `_validate_manifest_application`,
+`_apply_manifest`, `_apply_entry_batch`, and `provision_manifest_accounts`. Initial
+materialization is already complete before the SDK wrapper is returned; later supported
+manifest applications and runtime-manager entry batches use the supplied entries with the
+same native translation plan. Live updates are applied to a temporary service-owned
+sandbox restored from the current portable archive, then atomically published back through
+`SandboxSession.restore_portable_archive()` only if the live revision and root hash still
+match the captured workspace identity. The staging sandbox is deleted before publication.
+A failed quota check, concurrent live mutation, staging mutation, or staging cleanup
+therefore cannot expose a partial or stale manifest result. No inherited SDK path can reach
+account or metadata commands.
 
-    while True:
-        chunk = data.read(min(64 * 1024, max_bytes - total + 1))
-        if chunk in (b"", ""):
-            return b"".join(chunks)
-        if isinstance(chunk, str):
-            if not allow_text:
-                raise TypeError(f"{description} stream must return bytes")
-            payload = chunk.encode("utf-8")
-        elif isinstance(chunk, bytes | bytearray):
-            payload = bytes(chunk)
-        else:
-            raise TypeError(f"{description} stream returned an unsupported value")
+### Portable archive bridge
 
-        total += len(payload)
-        if total > max_bytes:
-            raise ValueError(f"{description} exceeds the {max_bytes}-byte input limit")
-        chunks.append(payload)
-        await asyncio.sleep(0)
+The adapter enforces `max_stream_bytes` on both persisted and hydrated snapshot streams.
+It stores only archive format version, revision, and root hash in provider state; archive
+bytes remain in the SDK snapshot. Each persistence attempt writes a new immutable snapshot
+identity and publishes that identity plus its metadata only after the snapshot backend
+accepts the matching bytes. An uncertain write failure can therefore leave only an
+unreferenced candidate while the previous payload and metadata pair remains authoritative.
+Hydration reconstructs the typed archive value and delegates all tar validation,
+decompressed quotas, entry limits, path checks, and atomic publication to the session/core
+boundary.
 
+Direct `persist_workspace()` calls remain usable without changing durable resume state:
+the returned raw-byte stream carries transient in-process archive metadata consumed by a
+matching direct `hydrate_workspace()` call. Only successful SDK snapshot persistence
+publishes serialized archive metadata.
 
-class InMemorySandboxClientOptions(BaseSandboxClientOptions):
-    type: Literal["in_memory"] = "in_memory"
-    max_workspace_bytes: int = 16 * 1024 * 1024
-    max_stream_bytes: int = 32 * 1024 * 1024
-    exposed_ports: tuple[int, ...] = ()
+The adapter must not import `MemoryWorkspace`, `WorkspaceArchivePort`, or concrete workspace
+snapshot/archive codecs.
 
+The provider overrides `_clear_workspace_root_on_resume()` as a no-op and disables SDK
+snapshot fingerprint computation. Malformed hydration therefore cannot destroy the live
+workspace before validation.
 
-class InMemorySandboxSessionState(SandboxSessionState):
-    type: Literal["in_memory"] = "in_memory"
-    workspace_id: str
-    max_workspace_bytes: int
-    max_stream_bytes: int
-    workspace_archive_version: int | None = None
-    workspace_revision: int | None = None
-    workspace_root_hash: str | None = None
-
-
-class InMemorySandboxSession(BaseSandboxSession):
-    state: InMemorySandboxSessionState
-
-    def __init__(
-        self,
-        *,
-        state: InMemorySandboxSessionState,
-        core: SandboxCoreSession,
-    ) -> None:
-        self.state = state
-        self._core = core
-
-    async def _ensure_backend_started(self) -> None:
-        await self._core.start()
-
-    async def _prepare_backend_workspace(self) -> None:
-        await self._core.make_directory(
-            sandbox_path_str(self._workspace_root_path()),
-            parents=True,
-            user=None,
-        )
-
-    async def _probe_workspace_root_for_preserved_resume(self) -> bool:
-        if not self._workspace_state_preserved_on_start():
-            return False
-        ready = await self._core.is_directory(sandbox_path_str(self._workspace_root_path()))
-        if ready:
-            self._mark_workspace_root_ready_from_probe()
-        return ready
-
-    async def _shutdown_backend(self) -> None:
-        await self._core.shutdown()
-
-    async def _exec_internal(
-        self,
-        *command: str | Path,
-        timeout: float | None = None,
-    ) -> ExecResult:
-        result = await self._core.execute(
-            tuple(
-                sandbox_path_str(part) if isinstance(part, Path) else str(part) for part in command
-            ),
-            timeout_seconds=timeout,
-        )
-        return ExecResult(
-            stdout=result.stdout,
-            stderr=result.stderr,
-            exit_code=result.exit_code,
-        )
-
-    async def read(
-        self,
-        path: Path,
-        *,
-        user: str | User | None = None,
-    ) -> io.IOBase:
-        normalized = await self._validate_path_access(path)
-        payload = await self._core.read_bytes(
-            sandbox_path_str(normalized),
-            user=self._user_name(user),
-        )
-        return io.BytesIO(payload)
-
-    async def write(
-        self,
-        path: Path,
-        data: io.IOBase,
-        *,
-        user: str | User | None = None,
-    ) -> None:
-        normalized = await self._validate_path_access(path, for_write=True)
-        payload = await read_bounded_stream(
-            data,
-            max_bytes=min(
-                self.state.max_workspace_bytes,
-                self.state.max_stream_bytes,
-            ),
-            allow_text=True,
-            description="sandbox write",
-        )
-        await self._core.write_bytes(
-            sandbox_path_str(normalized),
-            payload,
-            user=self._user_name(user),
-        )
-
-    async def running(self) -> bool:
-        return await self._core.is_running()
-
-    async def persist_workspace(self) -> io.IOBase:
-        archive = await self._core.export_workspace_archive()
-        self.state.workspace_archive_version = archive.format_version
-        self.state.workspace_revision = archive.workspace_revision
-        self.state.workspace_root_hash = archive.root_hash
-        return io.BytesIO(archive.payload)
-
-    async def hydrate_workspace(self, data: io.IOBase) -> None:
-        payload = await read_bounded_stream(
-            data,
-            max_bytes=self.state.max_stream_bytes,
-            allow_text=False,
-            description="workspace archive",
-        )
-        if (
-            self.state.workspace_archive_version is None
-            or self.state.workspace_revision is None
-            or self.state.workspace_root_hash is None
-        ):
-            raise ValueError("workspace archive metadata is required for hydration")
-        await self._core.import_workspace_archive(
-            CoreWorkspaceArchive(
-                payload=payload,
-                format_version=self.state.workspace_archive_version,
-                workspace_revision=self.state.workspace_revision,
-                root_hash=self.state.workspace_root_hash,
-            )
-        )
-
-    # The core hydration operation performs one validated atomic replacement.
-    # The SDK default clears the workspace before hydrate_workspace(), which would
-    # violate that guarantee for malformed snapshots.
-    async def _clear_workspace_root_on_resume(self) -> None:
-        return
-
-    # Recommended for a native virtual filesystem. The inherited implementations
-    # invoke POSIX ls, mkdir, and rm through _exec_internal().
-    async def ls(
-        self,
-        path: Path | str,
-        *,
-        user: str | User | None = None,
-    ) -> list[FileEntry]:
-        normalized = await self._validate_path_access(path)
-        entries = await self._core.list_entries(
-            sandbox_path_str(normalized),
-            user=self._user_name(user),
-        )
-        return [self._to_sdk_file_entry(entry) for entry in entries]
-
-    async def mkdir(
-        self,
-        path: Path | str,
-        *,
-        parents: bool = False,
-        user: str | User | None = None,
-    ) -> None:
-        normalized = await self._validate_path_access(path, for_write=True)
-        await self._core.make_directory(
-            sandbox_path_str(normalized),
-            parents=parents,
-            user=self._user_name(user),
-        )
-
-    async def rm(
-        self,
-        path: Path | str,
-        *,
-        recursive: bool = False,
-        user: str | User | None = None,
-    ) -> None:
-        normalized = await self._validate_path_access(path, for_write=True)
-        await self._core.remove(
-            sandbox_path_str(normalized),
-            recursive=recursive,
-            user=self._user_name(user),
-        )
-
-    async def _validate_path_access(
-        self,
-        path: Path | str,
-        *,
-        for_write: bool = False,
-    ) -> Path:
-        normalized = self.normalize_path(path, for_write=for_write)
-        await self._core.assert_path_allowed(
-            sandbox_path_str(normalized),
-            for_write=for_write,
-        )
-        return normalized
-
-    # The SDK's default fingerprint implementation installs and runs a POSIX helper
-    # script. Disable it until the virtual core supplies a native equivalent.
-    def _should_compute_snapshot_fingerprint_on_persist(self) -> bool:
-        return False
-
-    @staticmethod
-    def _user_name(user: str | User | None) -> str | None:
-        return user.name if isinstance(user, User) else user
-
-    @staticmethod
-    def _to_sdk_file_entry(entry: CoreFileEntry) -> FileEntry:
-        kind = EntryKind(entry.kind)
-        mode = entry.mode
-        if kind == EntryKind.DIRECTORY:
-            mode |= stat.S_IFDIR
-        return FileEntry(
-            path=entry.path,
-            permissions=Permissions.from_mode(mode),
-            owner=entry.owner,
-            group=entry.group,
-            size=entry.size,
-            kind=kind,
-        )
-
-
-class InMemorySandboxClient(BaseSandboxClient[InMemorySandboxClientOptions | None]):
-    backend_id = "in_memory"
-    supports_default_options = True
-
-    def __init__(self, store: SandboxCoreStore) -> None:
-        self._store = store
-
-    async def create(
-        self,
-        *,
-        snapshot: SnapshotSpec | SnapshotBase | None = None,
-        manifest: Manifest | None = None,
-        options: InMemorySandboxClientOptions | None = None,
-    ) -> SandboxSession:
-        resolved_options = options or InMemorySandboxClientOptions()
-        resolved_manifest = manifest or Manifest()
-        self._validate_manifest_for_create(resolved_manifest)
-
-        session_id = uuid.uuid4()
-        workspace_id = session_id.hex
-        resolved_snapshot = resolve_snapshot(snapshot, str(session_id))
-        state = InMemorySandboxSessionState(
-            session_id=session_id,
-            workspace_id=workspace_id,
-            max_workspace_bytes=resolved_options.max_workspace_bytes,
-            max_stream_bytes=resolved_options.max_stream_bytes,
-            snapshot=resolved_snapshot,
-            manifest=resolved_manifest,
-            exposed_ports=resolved_options.exposed_ports,
-        )
-        core = await self._store.create(
-            workspace_id,
-            max_workspace_bytes=resolved_options.max_workspace_bytes,
-        )
-        try:
-            inner = InMemorySandboxSession(state=state, core=core)
-            return self._wrap_session(inner)
-        except Exception:
-            await asyncio.shield(self._store.delete(workspace_id))
-            raise
-
-    async def resume(
-        self,
-        state: SandboxSessionState,
-    ) -> SandboxSession:
-        if not isinstance(state, InMemorySandboxSessionState):
-            raise TypeError("InMemorySandboxClient.resume expects InMemorySandboxSessionState")
-        state.assert_path_grants_rebound()
-
-        core = await self._store.attach(state.workspace_id)
-        preserved = core is not None
-        if core is None:
-            core = await self._store.create(
-                state.workspace_id,
-                max_workspace_bytes=state.max_workspace_bytes,
-            )
-            state = state.model_copy(update={"workspace_root_ready": False})
-
-        inner = InMemorySandboxSession(state=state, core=core)
-        inner._set_start_state_preserved(preserved)
-        return self._wrap_session(inner)
-
-    async def delete(self, session: SandboxSession) -> SandboxSession:
-        state = session.state
-        if not isinstance(state, InMemorySandboxSessionState):
-            raise TypeError("InMemorySandboxClient.delete expects an in-memory session")
-        await self._store.delete(state.workspace_id)
-        return session
-
-    def deserialize_session_state(
-        self,
-        payload: dict[str, object],
-    ) -> SandboxSessionState:
-        return self._deserialize_session_state_payload(
-            payload,
-            InMemorySandboxSessionState,
-        )
-```
-
-Manifest, snapshot, option, and state validation occurs before the core workspace is
-allocated. There are no await points between successful allocation and ownership transfer
-to the wrapped session. If synchronous construction or wrapping fails, shielded cleanup
-deletes the newly allocated workspace before the original failure is propagated.
-
-The adapter input limit bounds compressed or raw bytes before buffering. The core archive
-decoder must independently enforce decompressed workspace bytes, entry count, path
-limits, and atomic restore.
-
-This is the adapter boundary, not the implementation of the virtual filesystem or shell.
-The project core should own path semantics, quotas, command policy, snapshots, and
-concurrency. The OpenAI adapter should only translate SDK calls into that core.
+Provider state must be serialized after successful `stop()` when a durable snapshot is
+required. This is the ordering used by the pinned runtime cleanup path.
 
 ## 5. The ABC minimum is not the usable minimum
 
@@ -770,6 +454,7 @@ SDK behavior assumes a POSIX-like environment.
 | `exec(..., shell=True)` | Prefixes the request with `sh -lc` |
 | `user=` execution | Prefixes the request with `sudo -u <user> --` |
 | Default `ls`, `mkdir`, and `rm` | Executes those POSIX utilities |
+| Default archive `extract` | May spool unbounded input into a host temporary file |
 | Manifest files and directories | Uses `chmod`, and optionally `chgrp` |
 | Manifest users and groups | Uses `groupadd`, `useradd`, and `usermod` |
 | Preserved-workspace probe | Uses `test -d` |
@@ -795,14 +480,18 @@ Unix host.
 
 For the first adapter version:
 
-- override `ls`, `mkdir`, `rm`, and `_validate_path_access`
+- override `ls`, `mkdir`, `rm`, `extract`, and `_validate_path_access`; profile 1 rejects
+  archive extraction before reading input and uses the bounded snapshot bridge for portable
+  whole-workspace hydration
 - disable the SDK's POSIX fingerprint helper or replace it with a native hash
-- either support logical `chmod`/`chgrp` in the command dispatcher or override
-  `_apply_manifest` and `_apply_entry_batch`
+- override manifest validation and materialization so accepted synthetic entries use
+  public seed/directory operations and never invoke `chmod` or `chgrp`
 - reject manifest users, groups, mounts, `GitRepo`, exposed ports, and PTY unless the core
   explicitly supports them
-- do not enable the default `Shell` capability unless the virtual command language accepts
-  the `sh -lc` form used by the SDK
+- reject `exec(..., shell=True)` and custom shell prefixes; `_exec_internal` accepts only
+  the argv form produced by `shell=False`
+- do not enable the default `Shell` capability; use the adapter-owned capability from
+  Milestone 5.3
 
 If the backend does not provide POSIX shell semantics, define a custom capability whose
 typed tools call the project's constrained command API directly.

@@ -9,6 +9,7 @@ deadline. The session borrows behavior collaborators, closes only its injected
 policy, event delivery, secrets, and snapshot persistence behind constructor-injected
 interfaces.
 
-Milestone 3 exposes execute, bounded text read, text write, patch, host binary/stat/list,
-and snapshot create/restore. It does not implement service ownership, framework adapters,
-secret-bearing public requests, policy obligations, or best-effort event delivery.
+The public host-facing surface includes portable archive export and validate-then-publish
+restore. Restore may require an expected current workspace revision and root hash;
+mismatches raise `SessionWorkspaceChanged` while the operation gate prevents a stale
+publication from overwriting newer session work.

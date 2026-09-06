@@ -17,7 +17,7 @@ from mem_sandbox.command_executor import (
     ExecuteRequest,
     ExecuteResult,
 )
-from mem_sandbox.core import OperationLimits, Revision, SessionId
+from mem_sandbox.core import OperationKind, OperationLimits, Revision, SessionId
 from mem_sandbox.events import (
     EventDeliveryDiagnostic,
     EventDeliveryMode,
@@ -61,6 +61,7 @@ from mem_sandbox.session import (
     SessionSnapshotCodec,
     SessionSnapshotStore,
     SessionStartInvalid,
+    SessionWorkspaceChanged,
     StatRequest,
     WriteBytesRequest,
     WriteFileRequest,
@@ -81,6 +82,7 @@ from mem_sandbox.workspace import (
     PreparedWorkspaceRestore,
     RemovePathRequest,
     SandboxPath,
+    WorkspaceArchiveData,
     WorkspaceBinaryResult,
     WorkspaceEntry,
     WorkspaceMutation,
@@ -116,6 +118,19 @@ class Events:
         self.values.append(event)
 
 
+class CancelOnOperationCompletedEvents(Events):
+    def __init__(self) -> None:
+        super().__init__()
+        self.task: asyncio.Task[object] | None = None
+        self.cancel_count = 2
+
+    async def emit(self, event: SandboxEvent) -> None:
+        await super().emit(event)
+        if event.event_type == "operation.completed" and self.task is not None:
+            for _ in range(self.cancel_count):
+                self.task.cancel()
+
+
 class Store:
     @property
     def process_local(self) -> bool:
@@ -134,6 +149,11 @@ class Workspace:
         self.root = SandboxPath.root()
         self.hash = ContentHash.from_bytes(b"")
         self.writes: list[object] = []
+        self.archive_exports = 0
+        self.archive_prepares: list[tuple[WorkspaceArchiveData, SandboxPath]] = []
+        self.archive_commits: list[PreparedWorkspaceRestore] = []
+        self.cancel_after_archive_commit: asyncio.Task[object] | None = None
+        self.cancel_after_archive_commit_count = 2
 
     def resolve_path(self, value: str, *, cwd: SandboxPath | None = None) -> SandboxPath:
         return SandboxPath.resolve(value, cwd=cwd)
@@ -186,6 +206,10 @@ class Workspace:
     async def export(self) -> WorkspaceSnapshotData:
         raise AssertionError
 
+    async def export_portable_archive(self) -> WorkspaceArchiveData:
+        self.archive_exports += 1
+        return WorkspaceArchiveData(b"archive", 1, self.revision, self.hash)
+
     async def prepare_restore(
         self,
         data: WorkspaceSnapshotData,
@@ -194,8 +218,20 @@ class Workspace:
     ) -> PreparedWorkspaceRestore:
         return PreparedWorkspaceRestore(object(), object())
 
+    async def prepare_archive_restore(
+        self,
+        data: WorkspaceArchiveData,
+        *,
+        required_directory: SandboxPath,
+    ) -> PreparedWorkspaceRestore:
+        self.archive_prepares.append((data, required_directory))
+        return PreparedWorkspaceRestore.issue(self)
+
     async def commit_restore(self, candidate: PreparedWorkspaceRestore) -> None:
-        raise AssertionError
+        self.archive_commits.append(candidate)
+        if self.cancel_after_archive_commit is not None:
+            for _ in range(self.cancel_after_archive_commit_count):
+                self.cancel_after_archive_commit.cancel()
 
 
 class Executor:
@@ -256,6 +292,108 @@ def make_session(
         executor,
         events,
     )
+
+
+@pytest.mark.asyncio
+async def test_portable_archive_operations_use_the_session_owned_workspace_boundary() -> None:
+    session, workspace, _, events = make_session()
+    archive = WorkspaceArchiveData(
+        encoded=b"replacement",
+        format_version=1,
+        workspace_revision=Revision(7),
+        root_hash=ContentHash.from_bytes(b"replacement"),
+    )
+
+    with pytest.raises(SessionNotRunning):
+        await session.export_portable_archive()
+    with pytest.raises(SessionNotRunning):
+        await session.restore_portable_archive(archive)
+
+    await session.start()
+    exported = await session.export_portable_archive()
+    await session.restore_portable_archive(archive)
+
+    assert exported == WorkspaceArchiveData(b"archive", 1, Revision(0), workspace.hash)
+    assert workspace.archive_exports == 1
+    assert workspace.archive_prepares == [(archive, SandboxPath.root())]
+    assert len(workspace.archive_commits) == 1
+    assert [
+        event.operation_kind for event in events.values if event.operation_kind is not None
+    ] == [
+        OperationKind.EXPORT_PORTABLE_ARCHIVE,
+        OperationKind.EXPORT_PORTABLE_ARCHIVE,
+        OperationKind.RESTORE_PORTABLE_ARCHIVE,
+        OperationKind.RESTORE_PORTABLE_ARCHIVE,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_portable_archive_conditional_restore_rejects_changed_workspace_identity() -> None:
+    session, workspace, _, _ = make_session()
+    archive = WorkspaceArchiveData(
+        encoded=b"replacement",
+        format_version=1,
+        workspace_revision=Revision(7),
+        root_hash=ContentHash.from_bytes(b"replacement"),
+    )
+    await session.start()
+    exported = await session.export_portable_archive()
+    workspace.hash = ContentHash.from_bytes(b"same-revision-different-tree")
+
+    with pytest.raises(SessionWorkspaceChanged):
+        await session.restore_portable_archive(
+            archive,
+            expected_current_revision=exported.workspace_revision,
+            expected_current_root_hash=exported.root_hash,
+        )
+
+    assert workspace.archive_prepares == []
+    assert workspace.archive_commits == []
+
+
+@pytest.mark.asyncio
+async def test_portable_archive_commit_completion_is_authoritative_during_native_cancellation() -> (
+    None
+):
+    session, workspace, _, events = make_session()
+    archive = WorkspaceArchiveData(
+        encoded=b"replacement",
+        format_version=1,
+        workspace_revision=Revision(7),
+        root_hash=ContentHash.from_bytes(b"replacement"),
+    )
+    await session.start()
+    current_task = asyncio.current_task()
+    assert current_task is not None
+    workspace.cancel_after_archive_commit = current_task
+
+    await session.restore_portable_archive(archive)
+
+    assert len(workspace.archive_commits) == 1
+    assert current_task.cancelling() == 0
+    assert events.values[-1].event_type == "operation.completed"
+
+
+@pytest.mark.asyncio
+async def test_portable_archive_completion_event_consumes_native_cancellation() -> None:
+    events = CancelOnOperationCompletedEvents()
+    session, workspace, _, _ = make_session(event_sink=events)
+    archive = WorkspaceArchiveData(
+        encoded=b"replacement",
+        format_version=1,
+        workspace_revision=Revision(7),
+        root_hash=ContentHash.from_bytes(b"replacement"),
+    )
+    await session.start()
+    current_task = asyncio.current_task()
+    assert current_task is not None
+    events.task = current_task
+
+    await session.restore_portable_archive(archive)
+
+    assert len(workspace.archive_commits) == 1
+    assert current_task.cancelling() == 0
+    assert events.values[-1].event_type == "operation.completed"
 
 
 @pytest.mark.asyncio

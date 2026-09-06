@@ -787,3 +787,28 @@ the session to `FAILED`.
 
 Changes to operation ordering, lifecycle, concurrency, snapshot composition, or any
 session-owned port require an update to this document.
+## Portable workspace archives
+
+Framework adapters need a public session-owned archive seam without receiving the
+concrete workspace. `SandboxSession` therefore owns the lifecycle/policy boundary for two
+portable operations:
+
+- `export_portable_archive() -> WorkspaceArchiveData`
+- `restore_portable_archive(WorkspaceArchiveData, *, expected_current_revision=None, expected_current_root_hash=None) -> None`
+
+The existing `SessionWorkspaceSnapshotPort` grows these two portable methods because it
+already owns complete workspace export, restore preparation, and atomic commit. The
+default service factory supplies the same workspace that owns archive encoding, decoding,
+quotas, path validation, restore preparation, and atomic commit. Framework integrations
+must call these session operations rather than import or inspect `MemoryWorkspace`.
+
+Restore is validate-then-publish. Optional expected-current revision and root-hash values
+must be supplied together and are checked while the session operation gate is held; a
+mismatch raises `SessionWorkspaceChanged` before restore preparation. Invalid bytes,
+incompatible metadata, quota failures, workspace-identity conflicts, or cancellation
+before publication leave the complete workspace unchanged.
+Once the workspace collaborator publishes a prepared candidate, the completed result is
+authoritative under the same publication rules as other session mutations, including
+native cancellation observed immediately after commit. When that authoritative result
+suppresses one or more native cancellation requests, the session consumes all of those
+requests before returning success.

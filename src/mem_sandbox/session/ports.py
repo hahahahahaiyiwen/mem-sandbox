@@ -22,6 +22,7 @@ from mem_sandbox.workspace import (
     PreparedWorkspaceRestore,
     RemovePathRequest,
     SandboxPath,
+    WorkspaceArchiveData,
     WorkspaceBinaryResult,
     WorkspaceEntry,
     WorkspaceMutation,
@@ -86,9 +87,16 @@ class SessionSnapshotCodec(Protocol):
 
 class SessionWorkspaceSnapshotPort(Protocol):
     async def export(self) -> WorkspaceSnapshotData: ...
+    async def export_portable_archive(self) -> WorkspaceArchiveData: ...
     async def prepare_restore(
         self,
         data: WorkspaceSnapshotData,
+        *,
+        required_directory: SandboxPath,
+    ) -> PreparedWorkspaceRestore: ...
+    async def prepare_archive_restore(
+        self,
+        data: WorkspaceArchiveData,
         *,
         required_directory: SandboxPath,
     ) -> PreparedWorkspaceRestore: ...

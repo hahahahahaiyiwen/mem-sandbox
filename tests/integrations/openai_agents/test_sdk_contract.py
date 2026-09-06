@@ -191,7 +191,11 @@ class RecordingSession(BaseSandboxSession):
 
 
 def _method_contract(callable_: Callable[..., object]) -> tuple[str, bool]:
-    return str(signature(callable_)), iscoroutinefunction(callable_)
+    rendered_signature = str(signature(callable_)).replace(
+        "Optional[Literal['tar', 'zip']]",
+        "Literal['tar', 'zip'] | None",
+    )
+    return rendered_signature, iscoroutinefunction(callable_)
 
 
 def _method(owner: object, name: str) -> Callable[..., object]:
@@ -334,6 +338,78 @@ def test_sandbox_session_abstract_contract_is_stable() -> None:
         "(self, data: io.IOBase) -> None",
         True,
     )
+
+
+def test_sandbox_session_concrete_override_hooks_are_stable() -> None:
+    expected = {
+        "exec": (
+            "(self, *command: str | pathlib.Path, timeout: float | None = None, "
+            "shell: bool | list[str] = True, "
+            "user: str | agents.sandbox.types.User | None = None) "
+            "-> agents.sandbox.types.ExecResult",
+            True,
+        ),
+        "_probe_workspace_root_for_preserved_resume": ("(self) -> bool", True),
+        "_start_workspace": ("(self) -> None", True),
+        "_clear_workspace_root_on_resume": ("(self) -> None", True),
+        "_should_compute_snapshot_fingerprint_on_persist": ("(self) -> bool", False),
+        "_can_skip_snapshot_restore_on_resume": (
+            "(self, *, is_running: bool) -> bool",
+            True,
+        ),
+        "_set_start_state_preserved": (
+            "(self, workspace: bool, *, system: bool | None = None) -> None",
+            False,
+        ),
+        "_validate_path_access": (
+            "(self, path: pathlib.Path | str, *, for_write: bool = False) -> pathlib.Path",
+            True,
+        ),
+        "ls": (
+            "(self, path: pathlib.Path | str, *, "
+            "user: str | agents.sandbox.types.User | None = None) "
+            "-> list[agents.sandbox.files.FileEntry]",
+            True,
+        ),
+        "mkdir": (
+            "(self, path: pathlib.Path | str, *, parents: bool = False, "
+            "user: str | agents.sandbox.types.User | None = None) -> None",
+            True,
+        ),
+        "rm": (
+            "(self, path: pathlib.Path | str, *, recursive: bool = False, "
+            "user: str | agents.sandbox.types.User | None = None) -> None",
+            True,
+        ),
+        "extract": (
+            "(self, path: pathlib.Path | str, data: io.IOBase, *, "
+            "compression_scheme: Literal['tar', 'zip'] | None = None, "
+            "archive_limits: agents.run_config.SandboxArchiveLimits | None = None) -> None",
+            True,
+        ),
+        "_validate_manifest_application": (
+            "(self, *, only_ephemeral: bool = False, "
+            "manifest: agents.sandbox.manifest.Manifest | None = None, "
+            "session_running: bool | None = None) -> None",
+            True,
+        ),
+        "_apply_manifest": (
+            "(self, *, only_ephemeral: bool = False, provision_accounts: bool = True) "
+            "-> agents.sandbox.materialization.MaterializationResult",
+            True,
+        ),
+        "_apply_entry_batch": (
+            "(self, entries: collections.abc.Sequence[tuple[pathlib.Path, "
+            "agents.sandbox.entries.base.BaseEntry]], *, base_dir: pathlib.Path) "
+            "-> list[agents.sandbox.materialization.MaterializedFile]",
+            True,
+        ),
+        "provision_manifest_accounts": ("(self) -> None", True),
+    }
+
+    assert {
+        name: _method_contract(_method(BaseSandboxSession, name)) for name in expected
+    } == expected
 
 
 def test_capability_clone_and_bind_contract_is_stable() -> None:
