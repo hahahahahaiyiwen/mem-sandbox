@@ -191,7 +191,11 @@ class RecordingSession(BaseSandboxSession):
 
 
 def _method_contract(callable_: Callable[..., object]) -> tuple[str, bool]:
-    return str(signature(callable_)), iscoroutinefunction(callable_)
+    rendered_signature = str(signature(callable_)).replace(
+        "Optional[Literal['tar', 'zip']]",
+        "Literal['tar', 'zip'] | None",
+    )
+    return rendered_signature, iscoroutinefunction(callable_)
 
 
 def _method(owner: object, name: str) -> Callable[..., object]:
@@ -379,7 +383,7 @@ def test_sandbox_session_concrete_override_hooks_are_stable() -> None:
         ),
         "extract": (
             "(self, path: pathlib.Path | str, data: io.IOBase, *, "
-            "compression_scheme: Optional[Literal['tar', 'zip']] = None, "
+            "compression_scheme: Literal['tar', 'zip'] | None = None, "
             "archive_limits: agents.run_config.SandboxArchiveLimits | None = None) -> None",
             True,
         ),
