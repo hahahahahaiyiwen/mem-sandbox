@@ -14,6 +14,7 @@ from mem_sandbox.session.errors import (
     SessionRequestInvalid,
     SessionSnapshotRestoreFailed,
     SessionStartInvalid,
+    SessionWorkspaceChanged,
 )
 from mem_sandbox.session.models import (
     ApplyPatchRequest,
@@ -103,6 +104,7 @@ __all__ = [
     "SessionSnapshotStore",
     "SessionStartInvalid",
     "SessionState",
+    "SessionWorkspaceChanged",
     "SessionWorkspaceMutator",
     "SessionWorkspaceReader",
     "SessionWorkspaceSnapshotPort",

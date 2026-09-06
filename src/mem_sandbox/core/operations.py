@@ -20,6 +20,8 @@ class OperationKind(StrEnum):
     REMOVE_PATH = "remove_path"
     CREATE_SNAPSHOT = "create_snapshot"
     RESTORE_SNAPSHOT = "restore_snapshot"
+    EXPORT_PORTABLE_ARCHIVE = "export_portable_archive"
+    RESTORE_PORTABLE_ARCHIVE = "restore_portable_archive"
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

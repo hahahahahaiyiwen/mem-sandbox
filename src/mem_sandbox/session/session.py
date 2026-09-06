@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import TypeVar, cast
@@ -65,6 +65,7 @@ from mem_sandbox.session.errors import (
     SessionRequestInvalid,
     SessionSnapshotRestoreFailed,
     SessionStartInvalid,
+    SessionWorkspaceChanged,
 )
 from mem_sandbox.session.models import (
     ApplyPatchRequest,
@@ -121,6 +122,7 @@ from mem_sandbox.workspace import (
     PreparedWorkspaceRestore,
     RemovePathRequest,
     SandboxPath,
+    WorkspaceArchiveData,
     WorkspaceBinaryResult,
     WorkspaceEntry,
     WorkspaceMutation,
@@ -909,6 +911,89 @@ class SandboxSession:
         )
         return RestoreSnapshotResult(outcome.metadata, request.snapshot_ref)
 
+    async def export_portable_archive(self) -> WorkspaceArchiveData:
+        async def action(
+            context: _OperationContext,
+        ) -> tuple[WorkspaceArchiveData, Revision]:
+            archive = await self._await_collaborator(
+                self._workspace_snapshots.export_portable_archive,
+                context.collaborator_deadline,
+                None,
+                context.operation_id,
+            )
+            return archive, archive.workspace_revision
+
+        outcome = await self._run_operation(
+            OperationKind.EXPORT_PORTABLE_ARCHIVE,
+            OperationLimits(),
+            None,
+            lambda: None,
+            action,
+        )
+        return outcome.value
+
+    async def restore_portable_archive(
+        self,
+        data: WorkspaceArchiveData,
+        *,
+        expected_current_revision: Revision | None = None,
+        expected_current_root_hash: ContentHash | None = None,
+    ) -> None:
+        if (expected_current_revision is None) != (expected_current_root_hash is None):
+            raise ValueError(
+                "expected_current_revision and expected_current_root_hash must be provided together"
+            )
+        if expected_current_revision is not None and not isinstance(
+            cast(object, expected_current_revision), Revision
+        ):
+            raise TypeError("expected_current_revision must be a Revision or None")
+        if expected_current_root_hash is not None and not isinstance(
+            cast(object, expected_current_root_hash), ContentHash
+        ):
+            raise TypeError("expected_current_root_hash must be a ContentHash or None")
+
+        async def action(context: _OperationContext) -> tuple[None, Revision]:
+            if expected_current_revision is not None:
+                current_stats = await self._await_collaborator(
+                    self._workspace_reader.stats,
+                    context.collaborator_deadline,
+                    None,
+                    context.operation_id,
+                )
+                if (
+                    current_stats.revision != expected_current_revision
+                    or current_stats.root_hash != expected_current_root_hash
+                ):
+                    raise SessionWorkspaceChanged(
+                        "workspace changed after the restore source was captured",
+                        operation_id=context.operation_id,
+                    )
+            candidate = await self._await_collaborator(
+                lambda: self._workspace_snapshots.prepare_archive_restore(
+                    data,
+                    required_directory=self._cwd,
+                ),
+                context.collaborator_deadline,
+                None,
+                context.operation_id,
+            )
+            await self._publish_workspace_restore(
+                candidate,
+                context.collaborator_deadline,
+                None,
+                context.operation_id,
+            )
+            return None, data.workspace_revision
+
+        await self._run_operation(
+            OperationKind.RESTORE_PORTABLE_ARCHIVE,
+            OperationLimits(),
+            None,
+            lambda: None,
+            action,
+            completed_result_is_authoritative=True,
+        )
+
     async def close(self) -> None:
         close_task = self._close_task
         if close_task is not None:
@@ -1272,13 +1357,34 @@ class SandboxSession:
         cancellation: CancellationSignal | None,
         operation_id: OperationId,
     ) -> None:
-        self._remaining(deadline, operation_id)
-        self._check_cooperative_cancellation(cancellation, operation_id)
-
         async def publish() -> None:
             await self._workspace_snapshots.commit_restore(candidate)
             self._cwd = state.cwd
             self._environment = state.approved_environment
+
+        await self._publish_restore_action(publish, deadline, cancellation, operation_id)
+
+    async def _publish_workspace_restore(
+        self,
+        candidate: PreparedWorkspaceRestore,
+        deadline: float,
+        cancellation: CancellationSignal | None,
+        operation_id: OperationId,
+    ) -> None:
+        async def publish() -> None:
+            await self._workspace_snapshots.commit_restore(candidate)
+
+        await self._publish_restore_action(publish, deadline, cancellation, operation_id)
+
+    async def _publish_restore_action(
+        self,
+        publish: Callable[[], Coroutine[object, object, None]],
+        deadline: float,
+        cancellation: CancellationSignal | None,
+        operation_id: OperationId,
+    ) -> None:
+        self._remaining(deadline, operation_id)
+        self._check_cooperative_cancellation(cancellation, operation_id)
 
         task = asyncio.create_task(publish())
         pending_error: SandboxError | None = None
@@ -1321,6 +1427,9 @@ class SandboxSession:
                     "restore publication had an unprovable live-state outcome during "
                     f"cancellation: {error}"
                 )
+            else:
+                _consume_current_task_cancellation()
+                return
             raise
         except SandboxError:
             raise
@@ -1578,8 +1687,17 @@ async def _await_despite_native_cancellation[T](awaitable: Awaitable[T]) -> T:
         try:
             await asyncio.shield(task)
         except asyncio.CancelledError:
+            _consume_current_task_cancellation()
             continue
     return task.result()
+
+
+def _consume_current_task_cancellation() -> None:
+    current_task = asyncio.current_task()
+    if current_task is None:
+        return
+    while current_task.cancelling():
+        current_task.uncancel()
 
 
 async def _finish_timed_out_cleanup(
