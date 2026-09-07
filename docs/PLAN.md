@@ -870,19 +870,19 @@ those foundations.
 
 #### 5.3 OpenAI sandbox capability
 
-- [ ] **5.3.1** Implement an adapter-owned OpenAI `Capability` exposing exactly
+- [x] **5.3.1** Implement an adapter-owned OpenAI `Capability` exposing exactly
   `execute`, `read_file`, `write_file`, and `apply_patch` through the bound in-memory
   sandbox session.
-- [ ] **5.3.2** Map existing domain requests, results, correctable errors, terminal
+- [x] **5.3.2** Map existing domain requests, results, correctable errors, terminal
   denials, dependency failures, timeouts, and cancellation without adding a second
   framework-neutral schema layer.
-- [ ] **5.3.3** Replace the default OpenAI shell/filesystem capability set for the first
+- [x] **5.3.3** Replace the default OpenAI shell/filesystem capability set for the first
   profile. Do not advertise `sh -lc`, PTY, arbitrary shell, image viewing, or another SDK
   feature until its complete semantics pass explicit conformance.
-- [ ] **5.3.4** Run the shared model-free conformance scenario through the capability and
+- [x] **5.3.4** Run the shared model-free conformance scenario through the capability and
   assert the same normalized domain outcomes, revisions, file hashes, snapshot root
   hashes, restored state, fork isolation, and cleanup as direct `SandboxSession`.
-- [ ] **5.3.5** Add one deterministic runner integration test proving capability
+- [x] **5.3.5** Add one deterministic runner integration test proving capability
   cloning/binding, trusted session selection, tool registration, safe output/error
   translation, and cleanup without a live model or provider network call.
 

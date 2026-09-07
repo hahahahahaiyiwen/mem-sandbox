@@ -201,6 +201,11 @@ class InMemorySandboxSession(BaseSandboxSession):
     def handle(self) -> SandboxHandle:
         return SandboxHandle(uuid.UUID(self.state.sandbox_handle))
 
+    @property
+    def core_session(self) -> SandboxSession:
+        """Return the bound domain session without transferring lifecycle ownership."""
+        return self._session
+
     async def start(self) -> None:
         async with self._lifecycle_lock:
             self._require_backend_available()
@@ -621,6 +626,17 @@ class InMemorySandboxSession(BaseSandboxSession):
             )
         except BaseException as cleanup_error:
             primary.add_note(f"secondary dependency cleanup failure: {cleanup_error}")
+
+
+def resolve_in_memory_sandbox_session(
+    session: BaseSandboxSession,
+) -> InMemorySandboxSession:
+    """Resolve the provider session from the SDK's instrumented session wrapper."""
+    if isinstance(session, InMemorySandboxSession):
+        return session
+    if isinstance(session, OpenAISandboxSession):
+        return _provider_inner(session)
+    raise TypeError("InMemorySandboxCapability requires InMemorySandboxSession")
 
 
 class InMemorySandboxClient(BaseSandboxClient[InMemorySandboxClientOptions]):
