@@ -6,12 +6,14 @@ from mem_sandbox.integrations.openai_agents.adapter import (
     InMemorySandboxSession,
     InMemorySandboxSessionState,
 )
+from mem_sandbox.integrations.openai_agents.capability import InMemorySandboxCapability
 from mem_sandbox.integrations.openai_agents.snapshot import (
     InMemorySandboxSnapshot,
     InMemorySandboxSnapshotSpec,
 )
 
 __all__ = [
+    "InMemorySandboxCapability",
     "InMemorySandboxClient",
     "InMemorySandboxClientOptions",
     "InMemorySandboxSession",

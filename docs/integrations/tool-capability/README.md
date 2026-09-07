@@ -1,6 +1,6 @@
 # Tool/Capability Integration Design
 
-**Status:** OpenAI-first Milestone 5 design; other framework capabilities deferred
+**Status:** OpenAI profile 1 implemented; other framework capabilities deferred
 
 ## Purpose
 
@@ -43,20 +43,18 @@ model
 
 The adapter never finds the session through global mutable state.
 
-## Default tool surface
+## OpenAI profile 1 tool surface
 
 | Tool | Session operation | Visibility |
 |---|---|---|
-| `execute` | `SandboxSession.execute` | Default |
-| `read_file` | `SandboxSession.read_file` | Default |
-| `write_file` | `SandboxSession.write_file` | Default |
-| `apply_patch` | `SandboxSession.apply_patch` | Default |
-| `list_files` | `SandboxSession.list_entries` | Optional |
-| `file_info` | Workspace metadata through session | Optional |
-| `search_files` | Constrained command or native search operation | Optional |
+| `execute` | `SandboxSession.execute` | Exposed |
+| `read_file` | `SandboxSession.read_file` | Exposed |
+| `write_file` | `SandboxSession.write_file` | Exposed |
+| `apply_patch` | `SandboxSession.apply_patch` | Exposed |
 
 Lifecycle, policy configuration, secret grants, and snapshots remain host-only unless a
-separate capability explicitly exposes them.
+separate capability explicitly exposes them. Profile 1 has no optional tools and does not
+compose with the SDK's default shell, filesystem, or compaction capabilities.
 
 ## Tool schemas
 
@@ -73,12 +71,29 @@ max_output_bytes?
 Output:
 
 ```text
+metadata:
+  session_id
+  operation_id
+  workspace_revision
+  started_at
+  completed_at
 exit_code
+failure_code
 stdout
 stderr
+stdout_original_bytes
+stderr_original_bytes
+stdout_truncated
+stderr_truncated
 duration_ms
-output_truncated
+resulting_cwd
+environment_changes[]
 ```
+
+`command` is parsed only by the constrained MemSandbox command executor. The adapter
+does not wrap it in `sh -lc` or invoke a host shell. `max_output_bytes` applies
+independently to stdout and stderr. `timeout_seconds` is forwarded to both the command
+limit and the end-to-end operation deadline.
 
 ### `read_file`
 
@@ -93,6 +108,7 @@ end_line?
 Output:
 
 ```text
+metadata
 path
 content
 start_line
@@ -121,12 +137,12 @@ omitted hash.
 Output:
 
 ```text
+metadata
 path
 created
+changed
 previous_hash
 current_hash
-bytes_written
-workspace_revision
 ```
 
 ### `apply_patch`
@@ -134,12 +150,30 @@ workspace_revision
 Input:
 
 ```text
-path
 patch
-expected_hash?
+expected_hashes[]:
+  path
+  content_hash
 ```
 
-Output uses `FileMutationResult`.
+The patch may update multiple files atomically. The adapter passes the patch text and
+all expected hashes directly to `ApplyPatchRequest`; it does not parse or rewrite the
+diff.
+
+Output:
+
+```text
+metadata
+files[]:
+  path
+  previous_hash
+  current_hash
+```
+
+Every successful result is returned as `{"ok": true, "result": ...}` and preserves the
+domain result metadata. Expected failures are returned as
+`{"ok": false, "error": ...}` with stable category, code, message, correction guidance,
+retry guidance, and an operation ID when one exists.
 
 Framework schemas may add descriptions and examples, but they must preserve domain
 semantics.
@@ -155,11 +189,10 @@ from agents.sandbox.capabilities import Capability
 from agents.tool import Tool
 
 
-class MemSandboxCapability(Capability):
+class InMemorySandboxCapability(Capability):
     type: Literal["mem_sandbox"] = "mem_sandbox"
 
-    def tools(self) -> list[Tool]:
-        ...
+    def tools(self) -> list[Tool]: ...
 ```
 
 The host injects the sandbox client or live session through `SandboxRunConfig`. The
@@ -169,20 +202,22 @@ default; the capability never performs global lookup and the model cannot provid
 session handle.
 
 The capability owns framework tool wrappers but not the underlying core service, handle,
-or session. Future framework adapters own their native wrapper types rather than
-implementing a shared `FrameworkTool` abstraction.
+or session. It accepts either the provider session or the OpenAI SDK's instrumented
+wrapper around that provider session, verifies the concrete provider identity, and uses a
+read-only provider-to-domain session seam. Future framework adapters own their native
+wrapper types rather than implementing a shared `FrameworkTool` abstraction.
+
+Profile 1 rejects a non-empty `SandboxRunConfig.cwd`. Relative paths therefore continue
+to use the core session cwd consistently across file tools, patch headers, expected
+hashes, and constrained commands. Supporting a separate model-facing cwd would require a
+new profile with explicit command and patch-path translation semantics.
 
 ## Capability profiles
 
-Profiles keep advertised functionality honest:
-
-- `FILES_ONLY`: read, write, patch, and optional list/info
-- `VIRTUAL_SHELL`: default four tools with constrained command execution
-- `READ_ONLY`: read, list, info, and search
-- `CUSTOM`: explicitly selected tools
-
-The adapter builds tool descriptions from the active profile and command registry. It
-does not advertise absent commands or unsupported filesystem features.
+The implemented OpenAI profile is intentionally fixed to the four tools above. Additional
+profiles such as files-only, read-only, or custom subsets remain future work and require
+their own explicit schemas and conformance coverage. The adapter does not advertise
+absent commands or unsupported filesystem features.
 
 ## Request translation
 
@@ -203,12 +238,13 @@ Domain categories map to stable tool outcomes:
 
 | Domain category | Tool behavior |
 |---|---|
-| Invalid input or path | Non-retryable tool error unless the model can correct the field |
+| Invalid input or path | Correctable structured tool error |
 | File not found or stale hash | Correctable structured tool error |
 | Policy or secret denied | Terminal denial; do not encourage bypass attempts |
 | Command non-zero exit | Successful tool invocation containing the non-zero result |
-| Timeout | Structured timeout result or framework timeout error |
-| Dependency/internal failure | Framework execution error with safe correlation ID |
+| Timeout | Correctable, retryable structured tool error |
+| Dependency/internal failure | Redacted structured error with a safe correlation ID |
+| Cancellation | Propagated to the runner; never converted to a model-visible result |
 
 Raw exceptions, stack traces, secrets, and unbounded outputs are not returned to the
 model.
@@ -221,7 +257,7 @@ Preferred host-managed flow:
 create/resume session
   -> bind capability
   -> run agent
-  -> unbind/close capability
+  -> discard run-scoped capability clone
   -> snapshot if requested
   -> close session
 ```
@@ -232,7 +268,7 @@ not for hidden global session creation.
 
 ## OpenAI Agents SDK treatment
 
-The OpenAI adapter should define a custom sandbox `Capability` that:
+The OpenAI adapter defines a custom sandbox `Capability` that:
 
 - is cloned and bound by the SDK to the live in-memory sandbox session;
 - contributes exactly `execute`, `read_file`, `write_file`, and `apply_patch`;
@@ -290,7 +326,7 @@ Every tool adapter must pass the same scenario:
 - Each tool calls exactly one intended session method.
 - Trusted identity cannot be overridden by model input.
 - Correctable, denied, timeout, and internal errors map distinctly.
-- Capability profiles expose only enabled tools.
+- The fixed first profile exposes exactly four tools and replaces SDK defaults.
 - Output and error redaction occurs before returning to the framework.
 - Host-owned sessions are not closed by adapter cleanup.
 - Framework cancellation reaches the session operation.

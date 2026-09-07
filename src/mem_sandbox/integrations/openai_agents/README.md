@@ -16,13 +16,9 @@ pip install "mem-sandbox[openai-agents]"
 The supported SDK range is `openai-agents>=0.22,<0.23`. Contract tests execute against
 exactly `0.22.0`.
 
-## Milestone 5.2 design
+## Public surface
 
-Milestone 5.2 adds the SDK client/session profile while keeping all filesystem,
-execution, lifecycle, and archive rules in their owning core modules. The adapter owns
-only SDK state plus translation.
-
-The provider discriminator is `mem_sandbox`. Public provider types are:
+The integration exports:
 
 - `InMemorySandboxClientOptions`
 - `InMemorySandboxSessionState`
@@ -30,6 +26,15 @@ The provider discriminator is `mem_sandbox`. Public provider types are:
 - `InMemorySandboxClient`
 - `InMemorySandboxSnapshot`
 - `InMemorySandboxSnapshotSpec`
+- `InMemorySandboxCapability`
+
+## Milestone 5.2 client and session design
+
+Milestone 5.2 adds the SDK client/session profile while keeping all filesystem,
+execution, lifecycle, and archive rules in their owning core modules. The adapter owns
+only SDK state plus translation.
+
+The provider discriminator is `mem_sandbox`.
 
 The client advertises SDK default-option support. When `SandboxRunConfig` omits
 `options`, creation uses a fresh `InMemorySandboxClientOptions()` instance.
@@ -145,6 +150,67 @@ commands such as `chmod` or `chgrp`.
 - Live manifest applications and runtime entry batches are staged in a temporary
   service-owned sandbox, cleaned up, and then published through a revision-and-root-hash
   conditional public atomic archive restore.
+
+## Milestone 5.3 four-tool capability
+
+`InMemorySandboxCapability` is the model-facing profile for the OpenAI runner. Configure
+it explicitly on `SandboxAgent`; doing so replaces the SDK's default shell, filesystem,
+and compaction capability set:
+
+```python
+from agents import RunConfig, Runner
+from agents.sandbox import SandboxAgent, SandboxRunConfig
+from mem_sandbox.integrations.openai_agents import InMemorySandboxCapability
+
+agent = SandboxAgent(
+    name="sandboxed",
+    capabilities=[InMemorySandboxCapability()],
+)
+result = await Runner.run(
+    agent,
+    "Update the workspace",
+    run_config=RunConfig(sandbox=SandboxRunConfig(session=sdk_session)),
+)
+```
+
+The SDK clones the capability for each run and binds the clone to the live provider
+session. Binding accepts the concrete `InMemorySandboxSession` and the SDK's
+instrumented wrapper around that concrete provider only. The model cannot provide a
+handle or session ID, and the capability performs no service lookup. The original
+capability stays unbound and neither the capability nor its tools close or delete the
+host-owned session.
+
+Profile 1 rejects a non-empty `SandboxRunConfig.cwd`. Relative file paths, expected
+hashes, patch headers, and commands all continue to resolve through the core session cwd.
+This avoids parsing or rewriting the approved opaque patch contract. A future scoped-cwd
+profile must define and test those translation rules explicitly.
+
+The profile exposes exactly:
+
+| Tool | Input |
+|---|---|
+| `execute` | `command`, optional `timeout_seconds`, optional `max_output_bytes` |
+| `read_file` | `path`, optional `start_line`, optional `end_line` |
+| `write_file` | `path`, `content`, explicit `write_condition`, optional `expected_hash`, optional `create_parents` |
+| `apply_patch` | `patch`, `expected_hashes[]` containing `path` and `content_hash` |
+
+`execute` uses the constrained MemSandbox command language, never a host shell.
+`max_output_bytes` independently bounds stdout and stderr. Write conditions map exactly
+to `AnyCurrentState`, `PathMustNotExist`, or `ContentHashMustEqual`; omission of an
+expected hash never implies overwrite. Patch input retains the core's atomic multi-file
+contract. Duplicate expected-hash paths, including aliases that normalize to the same
+workspace path, are rejected as correctable tool input before an operation starts.
+
+Successful calls return a JSON object with `ok: true` and the complete JSON-safe domain
+result, including operation metadata and all result-specific hash, truncation, cwd, and
+environment fields. Expected domain failures return `ok: false` with stable category,
+code, safe message, `correctable`, `retryable`, and an operation ID when present.
+Policy denials are terminal. Timeouts are retryable. Cancellation propagates to the
+runner. Unexpected and internal failures are redacted and include a correlation ID.
+
+The capability intentionally does not expose `sh -lc`, arbitrary shell selection, PTY,
+image viewing, host filesystem access, lifecycle operations, snapshots, policy
+configuration, or secret grants.
 
 ## Portable snapshot bridge
 
@@ -263,6 +329,8 @@ this README and the integration design documents.
 - Use constructor injection for core service dependencies. The SDK-required capability
   `bind` hook may attach the live session to a per-run clone but must not perform global
   lookup.
+- Keep the provider-to-domain capability seam read-only. Resolving the SDK's instrumented
+  wrapper is a pinned compatibility concern owned by this package.
 - Translate requests and results; do not duplicate core validation or mutation behavior.
 - Reject unsupported SDK features explicitly and never use the host filesystem or shell
   as a fallback.
