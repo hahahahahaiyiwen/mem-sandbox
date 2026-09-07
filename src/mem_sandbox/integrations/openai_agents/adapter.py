@@ -2,20 +2,22 @@
 
 from __future__ import annotations
 
+import asyncio
 import io
 import shlex
 import sys
 import uuid
-from collections.abc import Sequence
+from collections.abc import Awaitable, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PureWindowsPath
-from typing import Literal, cast
+from typing import Any, Literal, cast
 
 from agents.run_config import SandboxArchiveLimits
 from agents.sandbox import Manifest
 from agents.sandbox.entries import BaseEntry, Dir, File
 from agents.sandbox.errors import (
     InvalidManifestPathError,
+    SnapshotNotRestorableError,
     WorkspaceArchiveReadError,
     WorkspaceWriteTypeError,
 )
@@ -26,6 +28,7 @@ from agents.sandbox.session import (
     BaseSandboxClient,
     BaseSandboxClientOptions,
     BaseSandboxSession,
+    Dependencies,
     SandboxSessionState,
 )
 from agents.sandbox.session import SandboxSession as OpenAISandboxSession
@@ -36,12 +39,18 @@ from agents.sandbox.snapshot import (
     resolve_snapshot,
 )
 from agents.sandbox.types import ExecResult, Permissions, User
-from pydantic import Field, field_validator, model_validator
+from pydantic import ConfigDict, Field, field_validator, model_validator
 
 from mem_sandbox.command_executor import CommandLimits
-from mem_sandbox.core import OperationLimits, Revision
+from mem_sandbox.core import Clock, OperationLimits, Revision, SessionId
+from mem_sandbox.integrations.openai_agents.snapshot import (
+    InMemorySandboxSnapshot,
+    WorkspaceArchiveStream,
+    configure_snapshot_dependencies,
+)
 from mem_sandbox.service import (
     CreateSandboxRequest,
+    FactorySnapshotStore,
     OwnerId,
     SandboxHandle,
     SandboxNotFound,
@@ -55,6 +64,7 @@ from mem_sandbox.session import (
     ReadBytesRequest,
     RemoveEntryRequest,
     SandboxSession,
+    SessionClosed,
     SessionExecuteRequest,
     WriteBytesRequest,
 )
@@ -99,8 +109,16 @@ class InMemorySandboxClientOptions(BaseSandboxClientOptions):
 class InMemorySandboxSessionState(SandboxSessionState):
     """JSON-safe provider state plus portable archive metadata."""
 
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True,
+        extra="forbid",
+        hide_input_in_errors=True,
+    )
+
     type: Literal["mem_sandbox"] = _PROVIDER_TYPE  # pyright: ignore[reportIncompatibleVariableOverride]
+    provider_state_version: Literal[1] = 1
     sandbox_handle: str
+    core_session_id: str
     owner_id: str = _DEFAULT_OWNER_ID
     workspace_limits: WorkspaceLimits = Field(default_factory=WorkspaceLimits)
     lifecycle_limits: OperationLimits = Field(default_factory=OperationLimits)
@@ -117,22 +135,25 @@ class InMemorySandboxSessionState(SandboxSessionState):
             raise ValueError("max_stream_bytes must be a positive integer")
         return value
 
+    @field_validator("sandbox_handle")
+    @classmethod
+    def _validate_sandbox_handle(cls, value: str) -> str:
+        _parse_handle(value)
+        return value
+
+    @field_validator("core_session_id")
+    @classmethod
+    def _validate_core_session_id(cls, value: str) -> str:
+        SessionId.parse(value)
+        return value
+
     @model_validator(mode="after")
     def _validate_archive_metadata(self) -> InMemorySandboxSessionState:
-        metadata = (
+        _validate_archive_metadata_values(
             self.workspace_archive_format_version,
             self.workspace_archive_revision,
             self.workspace_archive_root_hash,
         )
-        if any(value is not None for value in metadata) and any(
-            value is None for value in metadata
-        ):
-            raise ValueError("workspace archive metadata must be complete")
-        if self.workspace_archive_format_version is not None:
-            if self.workspace_archive_format_version <= 0:
-                raise ValueError("workspace archive format version must be positive")
-            Revision(cast(int, self.workspace_archive_revision))
-            ContentHash(cast(str, self.workspace_archive_root_hash))
         return self
 
 
@@ -148,12 +169,6 @@ class _BinaryStreamTypeError(TypeError):
         self.actual_type = actual_type
 
 
-class _WorkspaceArchiveStream(io.BytesIO):
-    def __init__(self, archive: WorkspaceArchiveData) -> None:
-        super().__init__(archive.encoded)
-        self.archive = archive
-
-
 class InMemorySandboxSession(BaseSandboxSession):
     """OpenAI sandbox session backed by one public MemSandbox session."""
 
@@ -167,17 +182,74 @@ class InMemorySandboxSession(BaseSandboxSession):
         session: SandboxSession,
         live_reattached: bool = False,
         replacement_resume: bool = False,
+        cleanup_on_start_failure: bool = False,
     ) -> None:
         self.state = state  # pyright: ignore[reportIncompatibleVariableOverride]
         self._service = service
         self._session = session
         self._live_reattached = live_reattached
         self._replacement_resume = replacement_resume
+        self._cleanup_on_start_failure = cleanup_on_start_failure
+        self._cleanup_timeout_seconds = state.lifecycle_limits.timeout_seconds
+        self._start_completed = False
+        self._backend_deleted = False
+        self._sdk_closing_or_closed = False
+        self._lifecycle_lock = asyncio.Lock()
         self._set_start_state_preserved(live_reattached, system=live_reattached)
 
     @property
     def handle(self) -> SandboxHandle:
         return SandboxHandle(uuid.UUID(self.state.sandbox_handle))
+
+    async def start(self) -> None:
+        async with self._lifecycle_lock:
+            self._require_backend_available()
+            if self._start_completed:
+                return
+            try:
+                await super().start()
+            except BaseException as error:
+                if self._cleanup_on_start_failure:
+                    self._backend_deleted = await _cleanup_handle_after_failure(
+                        self._service,
+                        self.handle,
+                        error,
+                        self._cleanup_timeout_seconds,
+                    )
+                    await self._cleanup_dependencies_after_failure(error)
+                raise
+            self._cleanup_on_start_failure = False
+            self._start_completed = True
+
+    async def stop(self) -> None:
+        async with self._lifecycle_lock:
+            if self._backend_deleted or self._dependencies_closed or self._sdk_closing_or_closed:
+                return
+            if self._replacement_resume and not self._start_completed:
+                return
+            if self._session.state in {
+                CoreSandboxSessionState.CLOSING,
+                CoreSandboxSessionState.CLOSED,
+            }:
+                return
+            await super().stop()
+
+    async def shutdown(self) -> None:
+        async with self._lifecycle_lock:
+            if self._sdk_closing_or_closed:
+                return
+            self._sdk_closing_or_closed = True
+            await super().shutdown()
+
+    async def delete_backend(self) -> None:
+        async with self._lifecycle_lock:
+            if self._backend_deleted:
+                return
+            try:
+                await self._service.delete(self.handle)
+            except SandboxNotFound:
+                pass
+            self._backend_deleted = True
 
     async def exec(
         self,
@@ -261,7 +333,11 @@ class InMemorySandboxSession(BaseSandboxSession):
     async def persist_workspace(self) -> io.IOBase:
         archive = await self._session.export_portable_archive()
         _validate_archive_stream_size(archive, self.state.max_stream_bytes)
-        return _WorkspaceArchiveStream(archive)
+        return WorkspaceArchiveStream(
+            archive,
+            source_session_id=self._session.session_id,
+            owner_id=self.state.owner_id,
+        )
 
     async def _persist_snapshot(self) -> None:
         snapshot = self.state.snapshot
@@ -269,8 +345,20 @@ class InMemorySandboxSession(BaseSandboxSession):
             return
         archive = await self._session.export_portable_archive()
         _validate_archive_stream_size(archive, self.state.max_stream_bytes)
+        if (
+            isinstance(snapshot, InMemorySandboxSnapshot)
+            and self.state.workspace_archive_format_version == archive.format_version
+            and self.state.workspace_archive_revision == archive.workspace_revision.value
+            and self.state.workspace_archive_root_hash == archive.root_hash.value
+            and await snapshot.restorable(dependencies=self.dependencies)
+        ):
+            return
         candidate_snapshot = snapshot.model_copy(update={"id": uuid.uuid4().hex})
-        stream = io.BytesIO(archive.encoded)
+        stream = WorkspaceArchiveStream(
+            archive,
+            source_session_id=self._session.session_id,
+            owner_id=self.state.owner_id,
+        )
         try:
             await candidate_snapshot.persist(stream, dependencies=self.dependencies)
         finally:
@@ -289,10 +377,20 @@ class InMemorySandboxSession(BaseSandboxSession):
     async def hydrate_workspace(self, data: io.IOBase) -> None:
         root = Path(self.state.manifest.root)
         try:
-            if isinstance(data, _WorkspaceArchiveStream):
+            if isinstance(data, WorkspaceArchiveStream):
                 format_version = data.archive.format_version
                 revision = data.archive.workspace_revision.value
                 root_hash = data.archive.root_hash.value
+                serialized_metadata = (
+                    self.state.workspace_archive_format_version,
+                    self.state.workspace_archive_revision,
+                    self.state.workspace_archive_root_hash,
+                )
+                stream_metadata = (format_version, revision, root_hash)
+                if any(value is not None for value in serialized_metadata) and (
+                    serialized_metadata != stream_metadata
+                ):
+                    raise ValueError("workspace archive metadata does not match persisted snapshot")
             else:
                 format_version = self.state.workspace_archive_format_version
                 revision = self.state.workspace_archive_revision
@@ -379,16 +477,19 @@ class InMemorySandboxSession(BaseSandboxSession):
         if self._live_reattached:
             self._mark_workspace_root_ready_from_probe()
             return True
-        self.state.workspace_root_ready = True
-        self._start_workspace_root_ready = True
         return False
 
     async def _start_workspace(self) -> None:
         if self._live_reattached:
+            self._require_backend_available()
             return
-        if self._replacement_resume and await self.state.snapshot.restorable(
-            dependencies=self.dependencies
-        ):
+        if self._replacement_resume:
+            _require_archive_metadata(self.state)
+            if not await self.state.snapshot.restorable(dependencies=self.dependencies):
+                raise SnapshotNotRestorableError(
+                    snapshot_id=self.state.snapshot.id,
+                    path=Path(f"<snapshot:{self.state.snapshot.id}>"),
+                )
             await self._restore_snapshot_into_workspace_on_resume()
 
     async def _clear_workspace_root_on_resume(self) -> None:
@@ -499,6 +600,28 @@ class InMemorySandboxSession(BaseSandboxSession):
                 cause=error,
             ) from error
 
+    def _require_backend_available(self) -> None:
+        if (
+            self._backend_deleted
+            or self._dependencies_closed
+            or self._sdk_closing_or_closed
+            or self._session.state
+            in {
+                CoreSandboxSessionState.CLOSING,
+                CoreSandboxSessionState.CLOSED,
+            }
+        ):
+            raise SessionClosed("sandbox backend is closed")
+
+    async def _cleanup_dependencies_after_failure(self, primary: BaseException) -> None:
+        try:
+            await _await_despite_native_cancellation(
+                self._aclose_dependencies(),
+                timeout_seconds=self._cleanup_timeout_seconds,
+            )
+        except BaseException as cleanup_error:
+            primary.add_note(f"secondary dependency cleanup failure: {cleanup_error}")
+
 
 class InMemorySandboxClient(BaseSandboxClient[InMemorySandboxClientOptions]):
     """OpenAI sandbox client over one injected MemSandbox service."""
@@ -506,8 +629,21 @@ class InMemorySandboxClient(BaseSandboxClient[InMemorySandboxClientOptions]):
     backend_id = _PROVIDER_TYPE
     supports_default_options = True
 
-    def __init__(self, service: SandboxService) -> None:
+    def __init__(
+        self,
+        service: SandboxService,
+        *,
+        snapshot_store: FactorySnapshotStore | None = None,
+        clock: Clock | None = None,
+        dependencies: Dependencies | None = None,
+    ) -> None:
+        super().__init__()
         self._service = service
+        self._dependencies = configure_snapshot_dependencies(
+            dependencies,
+            snapshot_store=snapshot_store,
+            clock=clock,
+        )
 
     async def create(
         self,
@@ -522,71 +658,125 @@ class InMemorySandboxClient(BaseSandboxClient[InMemorySandboxClientOptions]):
         _validate_provider_options(selected_options)
         snapshot_id = uuid.uuid4().hex
         selected_snapshot = resolve_snapshot(snapshot, snapshot_id)
-        if await selected_snapshot.restorable(dependencies=self._dependencies):
+        if isinstance(selected_snapshot, InMemorySandboxSnapshot):
+            selected_snapshot = selected_snapshot.model_copy(
+                update={"owner_id": selected_options.owner_id}
+            )
+        if await self._snapshot_is_restorable(selected_snapshot):
             raise ValueError("restorable snapshots require session state")
 
         handle, session = await self._allocate(selected_options, plan)
-        state = InMemorySandboxSessionState(
-            sandbox_handle=str(handle),
-            owner_id=selected_options.owner_id,
-            workspace_limits=selected_options.workspace_limits,
-            lifecycle_limits=selected_options.lifecycle_limits,
-            max_stream_bytes=selected_options.max_stream_bytes,
-            manifest_profile_version=selected_options.manifest_profile_version,
-            snapshot=selected_snapshot,
-            manifest=selected_manifest,
-            exposed_ports=selected_options.exposed_ports,
-            workspace_root_ready=True,
-        )
-        return self._wrap_provider_session(
-            InMemorySandboxSession(
-                state=state,
-                service=self._service,
-                session=session,
+        try:
+            state = InMemorySandboxSessionState(
+                sandbox_handle=str(handle),
+                core_session_id=str(session.session_id),
+                owner_id=selected_options.owner_id,
+                workspace_limits=selected_options.workspace_limits,
+                lifecycle_limits=selected_options.lifecycle_limits,
+                max_stream_bytes=selected_options.max_stream_bytes,
+                manifest_profile_version=selected_options.manifest_profile_version,
+                snapshot=selected_snapshot,
+                manifest=selected_manifest,
+                exposed_ports=selected_options.exposed_ports,
+                workspace_root_ready=True,
             )
-        )
+            return self._wrap_provider_session(
+                InMemorySandboxSession(
+                    state=state,
+                    service=self._service,
+                    session=session,
+                    cleanup_on_start_failure=True,
+                )
+            )
+        except BaseException as error:
+            await _cleanup_handle_after_failure(
+                self._service,
+                handle,
+                error,
+                selected_options.lifecycle_limits.timeout_seconds,
+            )
+            raise
 
     async def delete(self, session: OpenAISandboxSession) -> OpenAISandboxSession:
         inner = _provider_inner(session)
-        await self._service.delete(inner.handle)
+        await inner.delete_backend()
         return session
 
     async def resume(self, state: SandboxSessionState) -> OpenAISandboxSession:
         if not isinstance(state, InMemorySandboxSessionState):
             raise TypeError("state must be an InMemorySandboxSessionState")
-        options = _options_from_state(state)
+        if state.type != _PROVIDER_TYPE:
+            raise ValueError(f"state type must be {_PROVIDER_TYPE}")
+        if state.provider_state_version != 1:
+            raise ValueError("provider_state_version must be 1")
+        _parse_handle(state.sandbox_handle)
+        SessionId.parse(state.core_session_id)
+        if (
+            isinstance(state.snapshot, InMemorySandboxSnapshot)
+            and state.snapshot.owner_id != state.owner_id
+        ):
+            raise ValueError("snapshot owner does not match provider state")
+        _validate_archive_metadata_values(
+            state.workspace_archive_format_version,
+            state.workspace_archive_revision,
+            state.workspace_archive_root_hash,
+        )
+        validated_state = state.model_copy(deep=True)
+        options = _options_from_state(validated_state)
         _validate_provider_options(options)
-        plan = _manifest_plan(state.manifest, state.workspace_limits)
-        handle = _parse_handle(state.sandbox_handle)
+        plan = _manifest_plan(validated_state.manifest, validated_state.workspace_limits)
+        handle = _parse_handle(validated_state.sandbox_handle)
+        expected_session_id = SessionId.parse(validated_state.core_session_id)
 
         try:
             session = await self._service.get_session(handle)
         except SandboxNotFound:
-            new_handle, session = await self._allocate(options, plan)
-            resumed_state = state.model_copy(
+            session = None
+
+        if session is not None and session.session_id == expected_session_id:
+            return self._wrap_provider_session(
+                InMemorySandboxSession(
+                    state=validated_state,
+                    service=self._service,
+                    session=session,
+                    live_reattached=True,
+                )
+            )
+
+        if not await self._snapshot_is_restorable(validated_state.snapshot):
+            raise SnapshotNotRestorableError(
+                snapshot_id=validated_state.snapshot.id,
+                path=Path(f"<snapshot:{validated_state.snapshot.id}>"),
+            )
+        _require_archive_metadata(validated_state)
+
+        new_handle, replacement = await self._allocate(options, plan)
+        try:
+            resumed_state = validated_state.model_copy(
                 deep=True,
                 update={
                     "sandbox_handle": str(new_handle),
-                    "workspace_root_ready": True,
+                    "core_session_id": str(replacement.session_id),
+                    "workspace_root_ready": False,
                 },
             )
             return self._wrap_provider_session(
                 InMemorySandboxSession(
                     state=resumed_state,
                     service=self._service,
-                    session=session,
+                    session=replacement,
                     replacement_resume=True,
+                    cleanup_on_start_failure=True,
                 )
             )
-
-        return self._wrap_provider_session(
-            InMemorySandboxSession(
-                state=state.model_copy(deep=True),
-                service=self._service,
-                session=session,
-                live_reattached=True,
+        except BaseException as error:
+            await _cleanup_handle_after_failure(
+                self._service,
+                new_handle,
+                error,
+                options.lifecycle_limits.timeout_seconds,
             )
-        )
+            raise
 
     def deserialize_session_state(
         self,
@@ -620,10 +810,12 @@ class InMemorySandboxClient(BaseSandboxClient[InMemorySandboxClientOptions]):
             await _materialize_directories(session, plan.directories)
             return handle, session
         except BaseException as error:
-            try:
-                await self._service.delete(handle)
-            except BaseException as cleanup_error:
-                error.add_note(f"secondary sandbox cleanup failure: {cleanup_error}")
+            await _cleanup_handle_after_failure(
+                self._service,
+                handle,
+                error,
+                options.lifecycle_limits.timeout_seconds,
+            )
             raise
 
     def _wrap_provider_session(
@@ -635,6 +827,14 @@ class InMemorySandboxClient(BaseSandboxClient[InMemorySandboxClientOptions]):
         wrapped.extract = inner.extract  # type: ignore[method-assign]
         wrapped._apply_entry_batch = inner._apply_entry_batch  # type: ignore[method-assign]
         return wrapped
+
+    async def _snapshot_is_restorable(self, snapshot: SnapshotBase) -> bool:
+        dependencies = self._resolve_dependencies()
+        try:
+            return await snapshot.restorable(dependencies=dependencies)
+        finally:
+            if dependencies is not None:
+                await dependencies.aclose()
 
 
 def _provider_inner(session: OpenAISandboxSession) -> InMemorySandboxSession:
@@ -843,6 +1043,81 @@ def _parse_handle(value: str) -> SandboxHandle:
         return SandboxHandle(uuid.UUID(value))
     except (TypeError, ValueError) as error:
         raise ValueError("sandbox_handle must be a valid non-nil UUID") from error
+
+
+def _validate_archive_metadata_values(
+    format_version: int | None,
+    revision: int | None,
+    root_hash: str | None,
+) -> None:
+    metadata = (format_version, revision, root_hash)
+    if any(value is not None for value in metadata) and any(value is None for value in metadata):
+        raise ValueError("workspace archive metadata must be complete")
+    if format_version is not None:
+        if format_version <= 0:
+            raise ValueError("workspace archive format version must be positive")
+        Revision(cast(int, revision))
+        ContentHash(cast(str, root_hash))
+
+
+def _require_archive_metadata(
+    state: InMemorySandboxSessionState,
+) -> tuple[int, Revision, ContentHash]:
+    format_version = state.workspace_archive_format_version
+    revision = state.workspace_archive_revision
+    root_hash = state.workspace_archive_root_hash
+    if format_version is None or revision is None or root_hash is None:
+        raise ValueError("workspace archive metadata must be complete")
+    return format_version, Revision(revision), ContentHash(root_hash)
+
+
+async def _cleanup_handle_after_failure(
+    service: SandboxService,
+    handle: SandboxHandle,
+    primary: BaseException,
+    timeout_seconds: float,
+) -> bool:
+    try:
+        await _await_despite_native_cancellation(
+            service.delete(handle),
+            timeout_seconds=timeout_seconds,
+        )
+    except SandboxNotFound:
+        return True
+    except BaseException as cleanup_error:
+        primary.add_note(f"secondary sandbox cleanup failure: {cleanup_error}")
+        return False
+    return True
+
+
+async def _await_despite_native_cancellation[T](
+    awaitable: Awaitable[T],
+    *,
+    timeout_seconds: float,
+) -> T:
+    task = asyncio.ensure_future(awaitable)
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout_seconds
+    while not task.done():
+        remaining = deadline - loop.time()
+        if remaining <= 0:
+            task.cancel()
+            task.add_done_callback(_consume_background_task_result)
+            raise TimeoutError("sandbox cleanup timed out")
+        try:
+            done, _ = await asyncio.wait({task}, timeout=remaining)
+        except asyncio.CancelledError:
+            continue
+        if not done:
+            task.cancel()
+            task.add_done_callback(_consume_background_task_result)
+            raise TimeoutError("sandbox cleanup timed out")
+    return task.result()
+
+
+def _consume_background_task_result(task: asyncio.Future[Any]) -> None:
+    if not task.cancelled():
+        task.exception()
 
 
 def _reject_user(user: str | User | None) -> None:

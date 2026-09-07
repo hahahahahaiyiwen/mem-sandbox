@@ -28,24 +28,40 @@ The provider discriminator is `mem_sandbox`. Public provider types are:
 - `InMemorySandboxSessionState`
 - `InMemorySandboxSession`
 - `InMemorySandboxClient`
+- `InMemorySandboxSnapshot`
+- `InMemorySandboxSnapshotSpec`
 
 The client advertises SDK default-option support. When `SandboxRunConfig` omits
 `options`, creation uses a fresh `InMemorySandboxClientOptions()` instance.
 
-The client owns exactly one injected `SandboxService`. Each provider session owns one
-opaque `SandboxHandle` and one public `SandboxSession`. The handle UUID is serialized as
-`sandbox_handle` only so a client using the same live service can attempt reattachment;
-the adapter never treats it as authorization or reconstructs a handle for a different
-service instance.
+The host owns the injected `SandboxService` lifetime. The client consistently uses that
+one service, while each provider session references one opaque `SandboxHandle` and one
+public `SandboxSession`. Provider state serializes both `sandbox_handle` and the expected
+public core `session_id`. A live lookup is reused only when both identities match. This
+pair is a consistency check, not authorization; applications still authorize handle and
+snapshot access.
+
+Provider state has an explicit schema version. Unknown fields, unsupported versions,
+malformed identities, incomplete archive metadata, and unsupported manifest state are
+rejected before service lookup or allocation.
 
 Resume follows two paths:
 
-1. Reattach when the serialized handle still resolves in the injected service.
-2. Allocate a replacement when it does not, then let the SDK snapshot lifecycle hydrate
-   the replacement from the provider archive metadata in state.
+1. Reattach when the serialized handle resolves in the injected service and the core
+   session identity matches.
+2. When the handle is absent or identifies another core session, require a restorable
+   snapshot, allocate an independent replacement, and let the SDK snapshot lifecycle
+   hydrate it from the provider archive metadata in state.
 
-Only `SandboxNotFound` selects replacement allocation. Other service lookup failures
-propagate without allocating a divergent workspace.
+`SandboxNotFound` and identity mismatch select replacement allocation. A mismatched live
+session is never attached to or deleted. Other service lookup failures propagate without
+allocating a divergent workspace. If the snapshot is unavailable, resume fails before
+allocation rather than returning an empty workspace.
+
+Repeated resumes from state whose original handle is unavailable create independent
+snapshot-backed forks without mutating the caller's state. Multiple resumes while the
+original handle is live are wrapper aliases over the same core session; deletion through
+any alias removes the shared backend handle.
 
 Passing an already-restorable snapshot to `create()` is unsupported in profile 1 because
 there is no matching provider state carrying the archive metadata. The client checks and
@@ -145,13 +161,71 @@ under `max_stream_bytes`, rejects text or unsupported stream values, and passes 
 `WorkspaceArchiveData` object to the public core restore operation. A malformed,
 oversized, or metadata-mismatched archive leaves the live workspace unchanged.
 Persistence enforces the same stream limit and writes each archive under a fresh snapshot
-identity. The provider publishes that identity and its metadata together only after the
-snapshot backend accepts the matching bytes. Failed or uncertain snapshot writes therefore
-leave the previous metadata and payload pair usable for replacement resume.
+identity when workspace metadata changes, while unchanged persistence reuses the current
+durable identity. The provider publishes a new identity and its metadata together only
+after the snapshot backend accepts the matching bytes. Failed or uncertain snapshot writes
+therefore leave the previous metadata and payload pair usable for replacement resume.
 
 Direct `persist_workspace()` calls return a raw-byte in-process stream that carries its
 archive metadata transiently for a matching direct `hydrate_workspace()` call. They do not
 modify serialized resume metadata or the durable snapshot identity.
+
+## Snapshot store integration
+
+`FactorySnapshotStore` remains the framework-neutral persistence extension point.
+`InMemorySandboxSnapshot` is the OpenAI `SnapshotBase` bridge, and
+`InMemorySandboxSnapshotSpec` lets the SDK assign each initial snapshot identity. Configure
+the client with the same store abstraction used elsewhere in MemSandbox:
+
+```python
+client = InMemorySandboxClient(
+    service,
+    snapshot_store=snapshot_store,
+    clock=clock,
+)
+snapshot = InMemorySandboxSnapshotSpec()
+```
+
+The client binds the live store and clock into cloned SDK `Dependencies`; neither object
+is serialized. Create/resume snapshot preflight also uses a temporary dependency clone
+that is closed immediately, so owned factory results never accumulate in the client
+template. The bridge stores a canonical envelope containing the portable archive bytes,
+archive format, workspace revision, and root hash under the store format
+`openai-portable-workspace`. It also records owner provenance and rejects mismatched
+owners, formats, schema versions, sizes, payload hashes, and archive metadata.
+Owner provenance is a consistency tag checked against provider state, not an authorization
+boundary; the application must authorize access to serialized state and snapshot IDs.
+
+Unchanged repeated persistence reuses the current immutable snapshot. Changed workspaces
+receive new snapshot identities so previously serialized states remain independently
+resumable. Store quotas and expiration therefore remain explicit host policy rather than
+being bypassed by destructive adapter cleanup. If a changed save exceeds store quota,
+`stop()` fails and leaves the previous serialized snapshot pair authoritative; hosts
+should size or purge the store according to expected durable-stop frequency.
+
+`NoopSnapshot` remains available when recovery is intentionally unnecessary. Explicit
+third-party SDK snapshot providers are caller-owned extensions; the adapter never selects
+one as a fallback.
+
+## Lifecycle ownership
+
+- A newly allocated create or replacement-resume handle is cleaned up if adapter
+  construction or SDK startup fails.
+- Cleanup is cancellation-resilient and bounded by the session lifecycle timeout. A
+  cleanup failure or timeout is secondary context on the original failure.
+- Failed startup also closes the session-scoped SDK dependency clone so owned factory
+  results do not outlive the terminal provider session.
+- Failed startup of a live reattachment preserves the pre-existing backend because the
+  attempt allocated no resource.
+- Closing or stopping an unstarted replacement preserves the original durable snapshot;
+  the manifest-only replacement is not persisted before successful hydration.
+- SDK `stop()` persists only. SDK `aclose()` performs SDK stop/shutdown and dependency
+  cleanup but does not delete the backend.
+- Provider `stop()` and `shutdown()` share one lifecycle lock; shutdown marks the SDK
+  session closing before dependency cleanup, so concurrent persistence cannot use closed
+  dependency resources.
+- `client.delete()` is the authoritative backend release and is safe after prior or
+  concurrent deletion. Later `aclose()` calls do not attempt to persist a deleted backend.
 
 ## Error translation
 

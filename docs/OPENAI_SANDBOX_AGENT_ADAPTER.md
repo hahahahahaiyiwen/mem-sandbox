@@ -3,8 +3,9 @@
 **Pinned SDK:** `openai-agents==0.22.0`
 **Pinned source:** commit
 [`89c02c8`](https://github.com/openai/openai-agents-python/tree/89c02c828ee8510fe9a84ee6675608193aa13b02)
-**Status:** Milestone 5.2 client/session and manifest profile implemented with
-behavior-first tests. Sandbox Agents are beta.
+**Status:** Milestone 5.2 client/session and manifest foundation implemented with
+behavior-first tests; issue #34 defines the remaining lifecycle and resume-state
+hardening. Sandbox Agents are beta.
 
 ## Package boundary
 
@@ -95,7 +96,9 @@ recreate the backend. Do not serialize credentials.
 ```python
 class InMemorySandboxSessionState(SandboxSessionState):
     type: Literal["mem_sandbox"] = "mem_sandbox"
+    provider_state_version: Literal[1] = 1
     sandbox_handle: str
+    core_session_id: str
     owner_id: str
     workspace_limits: WorkspaceLimits
     max_stream_bytes: int
@@ -105,12 +108,21 @@ class InMemorySandboxSessionState(SandboxSessionState):
     workspace_archive_root_hash: str | None = None
 ```
 
-`sandbox_handle` is the string form of the service's opaque process-local handle. It is a
-reattachment hint for the same live service, not a durable workspace identity or an
-authorization token. The three archive metadata fields remain outside the tar bytes so
-equivalent workspace trees produce identical archives even when their revision histories
-differ. They are required when restoring a provider-produced snapshot; version 1 rejects
-a bare snapshot stream that has no matching provider state metadata.
+`sandbox_handle` is the string form of the service's opaque process-local handle.
+`core_session_id` records the expected public core session identity associated with that
+handle. Live reattachment requires both values to match; a handle that resolves to a
+different core session is treated as an unavailable original and is never attached to or
+deleted. The pair is a consistency check for the same live service, not a durable
+workspace identity or an authorization token.
+
+`provider_state_version` versions the adapter-owned state schema independently from the
+manifest and portable archive formats. Unknown versions or provider fields are rejected
+before service lookup or allocation.
+
+The three archive metadata fields remain outside the tar bytes so equivalent workspace
+trees produce identical archives even when their revision histories differ. They are
+required when restoring a provider-produced snapshot; version 1 rejects a bare snapshot
+stream that has no matching provider state metadata.
 
 ### Session
 
@@ -316,10 +328,13 @@ session retains:
 - its serializable `InMemorySandboxSessionState`;
 - the injected service;
 - the opaque `SandboxHandle` represented by `state.sandbox_handle`;
+- the expected public core `SessionId` represented by `state.core_session_id`;
 - the public `SandboxSession` returned by `service.get_session(handle)`.
 
-No workspace, executor, archive codec, snapshot store, policy engine, or event sink is
-exposed to the adapter.
+No workspace, executor, archive codec, policy engine, or event sink is exposed to the
+client/session adapter. The separate SDK snapshot bridge resolves only the public
+`FactorySnapshotStore` port through runtime dependencies; it does not access the service
+registry or concrete snapshot-store implementation.
 
 ### Create
 
@@ -343,17 +358,28 @@ The core session is already running when the SDK wrapper is returned. Provider
 
 ### Resume
 
-1. Validate state type, manifest profile, limits, and archive metadata shape.
+1. Validate the provider-state version and complete state, manifest, limits, and archive
+   metadata shape before any service operation.
 2. Parse `state.sandbox_handle` as an opaque handle value.
 3. Attempt `service.get_session(handle)`.
-4. If found, mark the provider start as preserved and reuse that session.
-5. If not found, allocate a replacement with the same immutable limits and translated
-   manifest seed plan, update the provider handle, and mark the start as not preserved.
-6. During SDK `start()`, hydrate a restorable snapshot into the replacement through the
-   portable archive bridge. A live reattachment performs no hydration.
+4. If found and its public `session_id` matches `state.core_session_id`, mark the
+   provider start as preserved and reuse that session.
+5. If the handle is absent or resolves to a different core session, leave any mismatched
+   session untouched and require the configured snapshot to be restorable.
+6. Allocate an independent replacement with the same immutable limits and translated
+   manifest seed plan, update both provider identity fields, and mark the start as not
+   preserved.
+7. During SDK `start()`, hydrate the snapshot into the replacement through the portable
+   archive bridge. A live reattachment performs no hydration.
 
-Only `SandboxNotFound` selects the replacement branch. Other service lookup failures
-propagate without allocating a divergent workspace.
+`SandboxNotFound` and a core-session identity mismatch select the replacement branch.
+Other service lookup failures propagate without allocating a divergent workspace. An
+unavailable original with a non-restorable snapshot fails before replacement allocation;
+resume never silently substitutes an empty manifest-based workspace.
+
+Until replacement `start()` successfully hydrates the workspace, `stop()` and `aclose()`
+preserve the original durable snapshot and metadata. They do not publish the manifest-only
+replacement workspace over valid recovery state.
 
 The provider overrides `_probe_workspace_root_for_preserved_resume()` and
 `_can_skip_snapshot_restore_on_resume()` using the runtime-only fact that the exact same
@@ -421,10 +447,13 @@ account or metadata commands.
 
 The adapter enforces `max_stream_bytes` on both persisted and hydrated snapshot streams.
 It stores only archive format version, revision, and root hash in provider state; archive
-bytes remain in the SDK snapshot. Each persistence attempt writes a new immutable snapshot
+bytes remain in the SDK snapshot. A changed workspace writes a new immutable snapshot
 identity and publishes that identity plus its metadata only after the snapshot backend
-accepts the matching bytes. An uncertain write failure can therefore leave only an
-unreferenced candidate while the previous payload and metadata pair remains authoritative.
+accepts the matching bytes. The integration-owned, integrity-checked MemSandbox store
+bridge reuses its current durable identity for an unchanged workspace. Generic SDK
+snapshot providers are persisted again because `restorable()` alone does not prove stored
+content integrity. An uncertain write failure can therefore leave only an unreferenced
+candidate while the previous payload and metadata pair remains authoritative.
 Hydration reconstructs the typed archive value and delegates all tar validation,
 decompressed quotas, entry limits, path checks, and atomic publication to the session/core
 boundary.
@@ -523,12 +552,51 @@ async def restorable(
 ) -> bool: ...
 ```
 
+MemSandbox already owns the framework-neutral `FactorySnapshotStore` abstraction used by
+core sessions and `SandboxService`. Issue #34 adds an integration-owned `SnapshotBase`
+bridge rather than a second persistence abstraction. The bridge serializes only its type,
+snapshot identifier, dependency key, and owner provenance; it resolves the live
+`FactorySnapshotStore` and clock through SDK `Dependencies`.
+
+Create/resume snapshot preflight runs against a temporary clone of the client's configured
+dependency template and closes that clone afterward. This preserves the SDK's
+session-scoped factory caches and owned-resource cleanup contract.
+
+The bridge stores portable OpenAI workspace archive bytes in the existing bounded store
+under a distinct format and schema. The store record preserves source-session and owner
+provenance, while the integrity-protected envelope preserves workspace revision, root hash,
+archive format, and bytes. Core full-session snapshots and OpenAI portable workspace
+archives may therefore share a store implementation without sharing codecs or being
+confused during restore.
+
+Owner provenance is a consistency tag bound to provider state, not an authorization
+credential. The host application must authorize access to provider state and snapshot
+identifiers before calling the adapter.
+
+`NoopSnapshot` remains supported when recovery is intentionally unnecessary. A caller may
+explicitly supply another SDK `SnapshotBase`, including local or remote persistence, but
+that provider is an external dependency selected by the caller. The MemSandbox adapter
+never falls back to one, serializes its credentials, or treats its storage as part of the
+virtual workspace.
+
+The store is immutable and bounded. An unchanged repeated `stop()` reuses the current
+snapshot identity. A changed workspace receives a new identity so older serialized states
+remain resumable until the store's configured expiration or quota policy removes them;
+the adapter does not silently delete historical snapshots. If a changed save exceeds
+quota, `stop()` fails while the previously published state/snapshot pair remains valid.
+Hosts must size or purge the store for their expected durable-stop frequency.
+
 `Runner` cleanup calls `stop()` before `delete()`. `stop()` persists the workspace to the
 configured snapshot, and `delete()` can then release the live workspace. Consequently:
 
 - `NoopSnapshot` gives no workspace recovery after the client deletes the workspace.
 - A process-local in-memory snapshot store supports resume only in the same process.
-- Cross-process or durable resume needs a local or remote snapshot implementation.
+- Cross-process or durable resume needs a shared/durable `FactorySnapshotStore`
+  implementation or an explicitly selected external SDK snapshot provider.
+
+Provider `stop()` and `shutdown()` share one lifecycle lock. Shutdown marks the SDK
+session closing before dependency cleanup, preventing a concurrent `stop()` from beginning
+snapshot persistence against resources that `aclose()` is about to close.
 
 ## 7. Wiring the client to `SandboxAgent`
 
