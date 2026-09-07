@@ -26,6 +26,8 @@ from mem_sandbox.snapshots import (
 @dataclass(frozen=True, slots=True)
 class ServiceBundle:
     service: InMemorySandboxService
+    snapshot_store: InMemorySnapshotStore
+    clock: SystemClock
 
 
 class RecordingService:
@@ -60,17 +62,21 @@ class RecordingService:
         await self.delegate.close()
 
 
-def create_service_bundle() -> ServiceBundle:
-    clock = SystemClock()
+def create_service_bundle(
+    *,
+    snapshot_store: InMemorySnapshotStore | None = None,
+    clock: SystemClock | None = None,
+) -> ServiceBundle:
+    selected_clock = clock or SystemClock()
     uuids = SystemUuidGenerator()
     codec = JsonSessionSnapshotCodec()
-    store = InMemorySnapshotStore(
+    store = snapshot_store or InMemorySnapshotStore(
         default_ttl=timedelta(days=1),
         limits=SnapshotStoreLimits(
             max_snapshots=20,
             max_total_payload_bytes=64 * 1024 * 1024,
         ),
-        clock=clock,
+        clock=selected_clock,
     )
     gateway = InMemoryServiceSnapshotGateway(store)
     factory = DefaultSessionFactory(
@@ -78,15 +84,17 @@ def create_service_bundle() -> ServiceBundle:
         secret_broker=NoSecretBroker(),
         event_sink=InMemoryEventSink(max_events=500, max_payload_bytes=4 * 1024 * 1024),
         snapshot_codec=codec,
-        clock=clock,
+        clock=selected_clock,
         uuid_generator=uuids,
     )
     return ServiceBundle(
-        InMemorySandboxService(
+        service=InMemorySandboxService(
             session_factory=factory,
             snapshot_gateway=gateway,
             snapshot_decoder=codec,
-            clock=clock,
+            clock=selected_clock,
             uuid_generator=uuids,
-        )
+        ),
+        snapshot_store=store,
+        clock=selected_clock,
     )

@@ -1,6 +1,10 @@
 # MemSandbox Implementation Plan
 
-**Status:** Proposed implementation sequence
+**Status:** Active implementation roadmap
+**Current focus:** Milestone 5. The OpenAI client/session, manifest, and portable archive
+foundation landed in issues #31-#33; issue #34 owns the remaining client lifecycle and
+resume-state hardening.
+
 **Approved design inputs:** [High-Level Design](./HIGH_LEVEL_DESIGN.md),
 [Workspace Design](./components/workspace/README.md), and
 [Command Executor Design](./components/command-executor/README.md)
@@ -773,27 +777,96 @@ committing to additional framework adapters.
 
 #### 5.2 OpenAI Agents SDK sandbox client and session
 
-- [ ] **5.2.1** Implement immutable client options and serializable session state without
-  live Python objects, resolved secrets, host credentials, or untrusted host paths.
-- [ ] **5.2.2** Implement the sandbox client and session adapter over one owned
-  `SandboxService` handle and `SandboxSession`, including create, running, stop/close,
-  delete, state serialization, live reattachment when safe, and snapshot-backed
-  replacement resume.
-- [ ] **5.2.3** Define and implement a versioned manifest support matrix. Accept only
+Issues #31 and #32 added the required public directory and portable archive seams. Issue
+#33 delivered the initial provider types, SDK wrapper, session operations, manifest
+profile, archive bridge, live reattachment, and snapshot-backed replacement path. Issue
+#34 completes lifecycle ownership and state/resume hardening rather than reimplementing
+those foundations.
+
+- [x] **5.2.1** Implement immutable client options and registered, JSON-serializable
+  session state containing only the process-local handle hint, expected core session
+  identity, explicit provider-state schema version, provider configuration, SDK
+  manifest/snapshot models, and portable archive metadata. Exclude live services,
+  sessions, collaborator objects, resolved secrets, host credentials, and accepted host
+  paths. Reject unknown or unsupported provider-state fields before any service call.
+- [x] **5.2.2** Complete the implemented sandbox client/session lifecycle over one
+  injected `SandboxService` and exactly one service handle per provider session. Cover
+  create, running, repeatable `stop()`/`aclose()`, idempotent delete, state
+  serialization, safe live reattachment, snapshot-backed replacement resume, ownership
+  transfer, failure cleanup, and concurrent lifecycle calls.
+- [x] **5.2.3** Define and implement a versioned manifest support matrix. Accept only
   synthetic files, directories, and configuration that map losslessly to public core
   behavior. Reject non-empty manifest environment, users, groups, host/local paths,
   mounts, ports, PTY, Git entries, symlinks, devices, and executable hooks before core
   allocation or mutation unless separately implemented and approved.
-- [ ] **5.2.4** Implement complete binary stream translation and the portable workspace
+- [x] **5.2.4** Implement complete binary stream translation and the portable workspace
   persistence/hydration bridge with bounded input, decompressed-size, entry-count, and
   path validation owned by the appropriate core boundary.
-- [ ] **5.2.5** Override inherited POSIX-assuming behavior required by the supported
+- [x] **5.2.5** Override inherited POSIX-assuming behavior required by the supported
   profile, including native path validation and directory operations. Disable or replace
   shell-based fingerprinting and never fall back to `sh`, a host process, or the host
   filesystem.
-- [ ] **5.2.6** Run client/session contract, lifecycle idempotency, binary round-trip,
-  manifest atomicity, snapshot round-trip, resume/fork, unsupported-feature, cancellation,
-  timeout, and no-host-fallback tests.
+- [x] **5.2.6** Complete the remaining lifecycle and state conformance tests. Issue #33
+  already covers the pinned SDK contract, wrapper delegation, binary round-trip,
+  manifest atomicity, snapshot persistence/hydration, basic live and replacement resume,
+  unsupported features, cancellation, timeout, and no-host fallback. Issue #34 adds
+  corrupt/incompatible state, startup and resume cleanup, repeated-resume forks,
+  repeatable SDK cleanup, idempotent backend deletion, primary-versus-cleanup failure
+  precedence, and concurrent client lifecycle coverage.
+
+##### Issue #34 lifecycle ownership contract
+
+- The host owns the injected `SandboxService` lifetime; the adapter client must not close
+  that shared service implicitly. Each returned provider session owns one opaque service
+  handle and one public core `SandboxSession`.
+- Every `create()` and `resume()` result remains the SDK instrumentation wrapper. A newly
+  allocated handle is transferred to the returned provider session only after adapter
+  construction succeeds.
+- SDK `stop()` is persistence-only. SDK `aclose()` performs the SDK stop/shutdown and
+  dependency lifecycle but does not delete the service handle. `client.delete()` is the
+  authoritative backend-release operation and must be safe after prior or concurrent
+  deletion.
+- A handle allocated for create or replacement resume must be deleted if adapter
+  construction or startup fails. Cleanup failure must be attached as secondary context
+  without replacing the primary construction, startup, persistence, or resume failure.
+  Failed startup also closes the session-scoped SDK dependency clone and its owned
+  resources. A failed live-reattachment start preserves the pre-existing handle because
+  that attempt allocated no new backend resource.
+- Live reattachment is attempted only after complete state and manifest validation.
+  A resolved handle is reusable only when the returned public `SandboxSession.session_id`
+  matches the expected core session identity serialized with the handle. A mismatch is
+  treated as an unavailable original session: do not attach to or delete the unrelated
+  session, and use snapshot-backed replacement. `SandboxNotFound` selects the same
+  replacement path; all other lookup failures propagate without creating a divergent
+  workspace. The identity pair is a consistency check, not an authorization credential.
+- Resume must not mutate the caller's state object. Concurrent or repeated resumes from
+  the same immutable serialized payload create independent replacement sessions when the
+  original process-local handle is unavailable; a still-live handle intentionally
+  reattaches to the same core session.
+- Replacement resume requires a restorable snapshot. If the original handle is absent or
+  mismatched and the configured snapshot is unavailable, fail before allocation rather
+  than returning an empty manifest-based workspace as a successful resume. Until
+  replacement `start()` successfully hydrates that snapshot, `stop()`/`aclose()` must
+  preserve the original durable snapshot and metadata rather than publishing the
+  manifest-only replacement workspace.
+- Multiple live resumes are wrapper aliases over the same service-owned core session,
+  not forks. Core operation serialization remains authoritative, and deletion through
+  any alias removes the shared handle so later operations through every alias fail.
+- MemSandbox's `FactorySnapshotStore` remains the persistence extension point. The
+  OpenAI integration provides a serializable `SnapshotBase` bridge that resolves the
+  live store through SDK `Dependencies` and stores the portable workspace archive under
+  a distinct format/schema. The bridge serializes only its type, snapshot identifier,
+  dependency key, and owner provenance; it never serializes the live store or clock.
+  Unchanged persistence reuses the current snapshot, while changed workspaces retain
+  immutable historical snapshots until store expiration or quota policy removes them.
+  `NoopSnapshot` remains valid when recovery is not required; explicitly supplied
+  third-party SDK snapshot providers remain caller-owned extensions, never implicit
+  adapter fallbacks.
+- Concurrent create, resume, stop/`aclose()`, and delete paths must converge on one
+  authoritative ownership outcome without leaked handles, duplicate cleanup, or
+  success-shaped recovery from a failed operation. Snapshot preflight uses a temporary
+  dependency clone and closes it so caller-owned SDK dependency factories cannot leak
+  resources into the client template.
 
 #### 5.3 OpenAI sandbox capability
 
@@ -869,10 +942,10 @@ committing to additional framework adapters.
 - [ ] **5.9.2** The OpenAI capability produces the same normalized domain outcomes,
   revisions, file hashes, snapshot root hashes, restored state, fork behavior, and
   cleanup as the direct-session reference scenario.
-- [ ] **5.9.3** The OpenAI sandbox client/session passes pinned SDK contract, lifecycle,
+- [x] **5.9.3** The OpenAI sandbox client/session passes pinned SDK contract, lifecycle,
   binary stream, manifest atomicity, state serialization, snapshot round-trip,
   resume/fork, unsupported-feature, timeout/cancellation, and no-host-fallback tests.
-- [ ] **5.9.4** Adapter dependency tests prove framework packages are isolated from core.
+- [x] **5.9.4** Adapter dependency tests prove framework packages are isolated from core.
 - [ ] **5.9.5** The OpenAI integration `README.md` records its supported SDK range,
   exact tested version, beta compatibility policy, manifest/capability support matrix,
   ownership model, unsupported behavior, and conformance results.
@@ -986,9 +1059,11 @@ Required paths for every behavior:
 One behavior suite runs against:
 
 - direct `SandboxSession`
-- PydanticAI capability
-- Deep Agents backend
-- OpenAI sandbox adapter
+- OpenAI Agents SDK sandbox client/session
+- OpenAI Agents SDK custom capability
+
+PydanticAI capabilities and LangChain Deep Agents backends remain future candidates and
+are added to the shared suite only after separate adapter decisions and implementations.
 
 The expected workspace hashes and domain outcomes remain the same. The complete
 create-through-resume lifecycle and normalized trace are defined in
@@ -1052,7 +1127,7 @@ their referenced checklist task begins.
 | Snapshot expiration | Require an explicit store-level default TTL; the store assigns absolute expiry and performs lazy/explicit purge | `4.4` | Resolved |
 | Service lifecycle events | Keep `sandbox.created`/`sandbox.deleted` producer-less until shared sequencing or separate service identity is approved | `4.7` | Deferred |
 | Product validation | Stateful cross-adapter conformance plus controlled provisioning baselines; comparative evidence required for a scoped "fastest" claim | `5.6` | Resolved |
-| First framework adapter | PydanticAI capability | `5.2.1` | Open |
+| First framework adapter | OpenAI Agents SDK custom capability plus sandbox client/session | `5.2` / `5.3` | Resolved |
 | Workspace content offload | Revisit after Milestone 5 using measured workload and provisioning data | `6.2.3` | Deferred |
 
 ## 14. Definition of first usable release
@@ -1068,7 +1143,8 @@ The first usable release is complete when:
 - [ ] The minimal explicit admission seam and dependency failures produce stable domain
   errors; a composed policy engine is not required for the first usable release.
 - [ ] Events contain no secret or unbounded content.
-- [ ] The PydanticAI capability passes the shared conformance scenario.
+- [ ] The OpenAI Agents SDK sandbox client/session and custom capability pass the shared
+  conformance scenario.
 - [ ] The stateful create, snapshot, resume, continue, fork, and cleanup scenario passes
   through the direct session and supported adapters.
 - [ ] A controlled provisioning and adapter-overhead baseline is published with
