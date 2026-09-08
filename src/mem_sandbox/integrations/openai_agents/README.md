@@ -46,9 +46,12 @@ public core `session_id`. A live lookup is reused only when both identities matc
 pair is a consistency check, not authorization; applications still authorize handle and
 snapshot access.
 
-Provider state has an explicit schema version. Unknown fields, unsupported versions,
-malformed identities, incomplete archive metadata, and unsupported manifest state are
-rejected before service lookup or allocation.
+Provider state has an explicit schema version. Version 1 also records the snapshot
+checkpoint's cwd and approved environment. Those fields have root/empty defaults so
+payloads serialized before their addition remain readable without a version bump.
+Unknown fields, unsupported versions, malformed identities, invalid execution context,
+incomplete archive metadata, and unsupported manifest state are rejected before service
+lookup or allocation.
 
 Resume follows two paths:
 
@@ -221,8 +224,13 @@ snapshot identity:
 - `workspace_archive_format_version`
 - `workspace_archive_revision`
 - `workspace_archive_root_hash`
+- `cwd`
+- `approved_environment`
 
-Hydration requires all three values. The adapter reads the incoming `IOBase` incrementally
+Hydration requires all three archive values. Replacement resume atomically publishes the
+validated cwd and approved environment with the restored workspace, while direct
+`hydrate_workspace()` keeps the target session's current execution context. The adapter
+reads the incoming `IOBase` incrementally
 under `max_stream_bytes`, rejects text or unsupported stream values, and passes one
 `WorkspaceArchiveData` object to the public core restore operation. A malformed,
 oversized, or metadata-mismatched archive leaves the live workspace unchanged.
@@ -309,6 +317,21 @@ Normal command non-zero results remain `ExecResult` values. Core cancellation an
 remain exceptional and retain their original causes so later capability translation can
 map them without losing domain classification. An SDK execution timeout is forwarded into
 both the core operation and command-execution limits.
+
+## Product conformance
+
+The model-free reference scenario passes through the direct service/session, OpenAI
+sandbox client/session, and OpenAI capability drivers with one identical normalized
+trace and correctness checksum. The trace covers revisions, file hashes, guarded patch
+and stale-write behavior, snapshot workspace root and complete-state hashes, cwd,
+approved environment, SDK lifecycle rejection, replacement identity, fork isolation,
+and live/snapshot cleanup.
+
+Product validation lives in `benchmarks.validation` rather than this runtime adapter.
+The OpenAI sandbox driver uses the documented `core_session` seam for revisioned and
+preconditioned operations that are not represented by the SDK's generic binary stream
+methods. The capability driver exercises only `execute`, `read_file`, `write_file`, and
+`apply_patch`. Neither path performs a model or provider-network call.
 
 ## Compatibility policy
 

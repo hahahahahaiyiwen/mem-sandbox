@@ -1,6 +1,6 @@
 # Direct Core Conformance
 
-**Status:** Issue #21 direct-core reference implemented; adapter reuse begins in Milestone 5
+**Status:** Direct-core and three-driver product equivalence implemented
 
 ## Purpose
 
@@ -106,6 +106,19 @@ Each run also verifies contiguous per-session event sequence, shared operation i
 between start and terminal events, snapshot-specific event ordering, and absence of
 unbounded or secret content.
 
+`tests/conformance/product/test_equivalence.py` runs the shared text-operation and
+lifecycle projection from `benchmarks.validation` through:
+
+- the direct public service/session driver;
+- the OpenAI sandbox client/session driver;
+- the OpenAI four-tool capability driver.
+
+The OpenAI sandbox driver owns framework lifecycle through the SDK client/session. It
+uses the provider's public `core_session` seam for revisioned writes, expected hashes,
+and domain-faithful results that the generic SDK stream methods do not expose. The
+capability driver invokes only the four JSON tools. Both replacement-resume paths restore
+workspace, cwd, and approved environment from backward-compatible provider state v1.
+
 ## Behavior-first coverage
 
 | Category | Required conformance behavior |
@@ -145,8 +158,9 @@ documented mutation.
 
 ## Implementation and acceptance
 
-- File: `tests/conformance/test_direct_session.py`
-- Run: `python -m pytest tests/conformance/test_direct_session.py -q`
+- Direct file: `tests/conformance/test_direct_session.py`
+- Product equivalence: `tests/conformance/product/test_equivalence.py`
+- Run: `python -m pytest tests/conformance -q`
 - The test must pass on Windows and Ubuntu with Python 3.12 and 3.14.
 - The normalized trace must contain no private object representations or unstable timing
   fields.

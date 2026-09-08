@@ -131,6 +131,7 @@ class InMemorySandboxCapability(Capability):
         domain = provider_session.core_session
 
         async def execute_tool(arguments: _ExecuteInput) -> SessionExecuteResult:
+            provider_session.require_available()
             try:
                 command_limits = CommandLimits()
                 operation_limits = OperationLimits()
@@ -158,6 +159,7 @@ class InMemorySandboxCapability(Capability):
             return await domain.execute(request)
 
         async def read_file_tool(arguments: _ReadFileInput) -> ReadFileResult:
+            provider_session.require_available()
             try:
                 request = ReadFileRequest(
                     path=arguments.path,
@@ -169,6 +171,7 @@ class InMemorySandboxCapability(Capability):
             return await domain.read_file(request)
 
         async def write_file_tool(arguments: _WriteFileInput) -> FileMutationResult:
+            provider_session.require_available()
             try:
                 if arguments.write_condition == "any_current_state":
                     precondition = AnyCurrentState()
@@ -188,6 +191,7 @@ class InMemorySandboxCapability(Capability):
             return await domain.write_file(request)
 
         async def apply_patch_tool(arguments: _ApplyPatchInput) -> PatchMutationResult:
+            provider_session.require_available()
             try:
                 workspace_limits = provider_session.state.workspace_limits
                 resolved_paths: set[SandboxPath] = set()

@@ -73,10 +73,13 @@ addopts = [
 ]
 asyncio_default_fixture_loop_scope = "function"
 asyncio_mode = "strict"
+markers = [
+  "benchmark_smoke: model-free benchmark harness validation",
+]
 testpaths = ["tests"]
 
 [tool.pyright]
-include = ["evaluations", "src", "tests"]
+include = ["benchmarks", "evaluations", "src", "tests"]
 pythonPlatform = "All"
 pythonVersion = "3.12"
 typeCheckingMode = "strict"
@@ -85,7 +88,7 @@ venvPath = "."
 
 [tool.ruff]
 line-length = 100
-src = ["src", "tests"]
+src = ["benchmarks", "src", "tests"]
 target-version = "py312"
 
 [tool.ruff.format]

@@ -1,0 +1,1537 @@
+{
+  "cases": [
+    {
+      "case": "core_create_ready",
+      "correctness_checksum": "fee3d086e1d75489f9150f74e3a8ca1a7f79f5232e4946d8a9a970e3ea289571",
+      "dimensions": {
+        "directory_count": 0,
+        "file_count": 0,
+        "largest_file_bytes": 0,
+        "max_depth": 0,
+        "total_bytes": 0
+      },
+      "driver": "direct",
+      "failures": [],
+      "memory": {
+        "process_rss_bytes": null,
+        "python_peak_bytes": null
+      },
+      "profile": "empty",
+      "profile_version": 1,
+      "samples_ns": [
+        340700,
+        310800,
+        352800,
+        324600,
+        324400
+      ],
+      "statistics": {
+        "count": 5,
+        "mean_ns": 330660,
+        "median_ns": 324600,
+        "minimum_ns": 310800,
+        "p95_ns": null,
+        "p99_ns": null,
+        "standard_deviation_ns": 14569.227845016358
+      },
+      "timing_mode": "warm",
+      "warmup_samples_ns": [
+        1083500,
+        697800
+      ]
+    },
+    {
+      "case": "create_first_operation",
+      "correctness_checksum": "d4dc3777028496ca51a9c673ad1c090096c001ff2b1a1b8003ec83cb713eee62",
+      "dimensions": {
+        "directory_count": 0,
+        "file_count": 0,
+        "largest_file_bytes": 0,
+        "max_depth": 0,
+        "total_bytes": 0
+      },
+      "driver": "direct",
+      "failures": [],
+      "memory": {
+        "process_rss_bytes": null,
+        "python_peak_bytes": null
+      },
+      "profile": "empty",
+      "profile_version": 1,
+      "samples_ns": [
+        598200,
+        635600,
+        651500,
+        846800,
+        1053000
+      ],
+      "statistics": {
+        "count": 5,
+        "mean_ns": 757020,
+        "median_ns": 651500,
+        "minimum_ns": 598200,
+        "p95_ns": null,
+        "p99_ns": null,
+        "standard_deviation_ns": 171327.57396286214
+      },
+      "timing_mode": "warm",
+      "warmup_samples_ns": [
+        806700,
+        658800
+      ]
+    },
+    {
+      "case": "memory",
+      "correctness_checksum": "1c10b03518fff8fc374a20bbf5107c66496656bec0662d6c6db123d4a898f121",
+      "dimensions": {
+        "directory_count": 0,
+        "file_count": 0,
+        "largest_file_bytes": 0,
+        "max_depth": 0,
+        "total_bytes": 0
+      },
+      "driver": "direct",
+      "failures": [],
+      "memory": {
+        "process_rss_bytes": null,
+        "python_peak_bytes": 34792
+      },
+      "profile": "empty",
+      "profile_version": 1,
+      "samples_ns": [
+        5763600,
+        4191600,
+        4533100,
+        4131800,
+        4142500
+      ],
+      "statistics": {
+        "count": 5,
+        "mean_ns": 4552520,
+        "median_ns": 4191600,
+        "minimum_ns": 4131800,
+        "p95_ns": null,
+        "p99_ns": null,
+        "standard_deviation_ns": 623293.9704505411
+      },
+      "timing_mode": "warm",
+      "warmup_samples_ns": [
+        4200300,
+        2895100
+      ]
+    },
+    {
+      "case": "seeded_create_ready",
+      "correctness_checksum": "d8026768cddd8338d0900547a825762183e29dc2e16ccdc53f0ba1190cc8c865",
+      "dimensions": {
+        "directory_count": 4,
+        "file_count": 16,
+        "largest_file_bytes": 1024,
+        "max_depth": 2,
+        "total_bytes": 16384
+      },
+      "driver": "direct",
+      "failures": [],
+      "memory": {
+        "process_rss_bytes": null,
+        "python_peak_bytes": null
+      },
+      "profile": "small_project",
+      "profile_version": 1,
+      "samples_ns": [
+        6132600,
+        6216600,
+        7115100,
+        5431200,
+        3720100
+      ],
+      "statistics": {
+        "count": 5,
+        "mean_ns": 5723120,
+        "median_ns": 6132600,
+        "minimum_ns": 3720100,
+        "p95_ns": null,
+        "p99_ns": null,
+        "standard_deviation_ns": 1135439.2196854926
+      },
+      "timing_mode": "warm",
+      "warmup_samples_ns": [
+        11922600,
+        8158400
+      ]
+    },
+    {
+      "case": "create_first_operation",
+      "correctness_checksum": "433c3036682baf9006555bfcb605fa161df4f5c7c1632439fe951d421a76af77",
+      "dimensions": {
+        "directory_count": 4,
+        "file_count": 16,
+        "largest_file_bytes": 1024,
+        "max_depth": 2,
+        "total_bytes": 16384
+      },
+      "driver": "direct",
+      "failures": [],
+      "memory": {
+        "process_rss_bytes": null,
+        "python_peak_bytes": null
+      },
+      "profile": "small_project",
+      "profile_version": 1,
+      "samples_ns": [
+        7532800,
+        8000100,
+        6693000,
+        6517000,
+        6052800
+      ],
+      "statistics": {
+        "count": 5,
+        "mean_ns": 6959140,
+        "median_ns": 6693000,
+        "minimum_ns": 6052800,
+        "p95_ns": null,
+        "p99_ns": null,
+        "standard_deviation_ns": 707170.9824363553
+      },
+      "timing_mode": "warm",
+      "warmup_samples_ns": [
+        7073200,
+        6448700
+      ]
+    },
+    {
+      "case": "snapshot_create",
+      "correctness_checksum": "90b6ac8dbb0c8b9a8fa42b32ef107b5ea9756fdbbf8f00079102bbe4f08b98a9",
+      "dimensions": {
+        "directory_count": 4,
+        "file_count": 16,
+        "largest_file_bytes": 1024,
+        "max_depth": 2,
+        "total_bytes": 16384
+      },
+      "driver": "direct",
+      "failures": [],
+      "memory": {
+        "process_rss_bytes": null,
+        "python_peak_bytes": null
+      },
+      "profile": "small_project",
+      "profile_version": 1,
+      "samples_ns": [
+        3013800,
+        2547100,
+        2384000,
+        4368100,
+        3314900
+      ],
+      "statistics": {
+        "count": 5,
+        "mean_ns": 3125580,
+        "median_ns": 3013800,
+        "minimum_ns": 2384000,
+        "p95_ns": null,
+        "p99_ns": null,
+        "standard_deviation_ns": 703814.2919833327
+      },
+      "timing_mode": "warm",
+      "warmup_samples_ns": [
+        2369000,
+        2071900
+      ]
+    },
+    {
+      "case": "resume_ready",
+      "correctness_checksum": "36af0c3b88883eb8e04c250f30d16b142bb9f66e2d1f7608bfbc30c4c28a5854",
+      "dimensions": {
+        "directory_count": 4,
+        "file_count": 16,
+        "largest_file_bytes": 1024,
+        "max_depth": 2,
+        "total_bytes": 16384
+      },
+      "driver": "direct",
+      "failures": [],
+      "memory": {
+        "process_rss_bytes": null,
+        "python_peak_bytes": null
+      },
+      "profile": "small_project",
+      "profile_version": 1,
+      "samples_ns": [
+        3220400,
+        2823400,
+        2386700,
+        3535900,
+        3922500
+      ],
+      "statistics": {
+        "count": 5,
+        "mean_ns": 3177780,
+        "median_ns": 3220400,
+        "minimum_ns": 2386700,
+        "p95_ns": null,
+        "p99_ns": null,
+        "standard_deviation_ns": 535922.9474467388
+      },
+      "timing_mode": "warm",
+      "warmup_samples_ns": [
+        3427900,
+        2681800
+      ]
+    },
+    {
+      "case": "resume_first_operation",
+      "correctness_checksum": "433c3036682baf9006555bfcb605fa161df4f5c7c1632439fe951d421a76af77",
+      "dimensions": {
+        "directory_count": 4,
+        "file_count": 16,
+        "largest_file_bytes": 1024,
+        "max_depth": 2,
+        "total_bytes": 16384
+      },
+      "driver": "direct",
+      "failures": [],
+      "memory": {
+        "process_rss_bytes": null,
+        "python_peak_bytes": null
+      },
+      "profile": "small_project",
+      "profile_version": 1,
+      "samples_ns": [
+        3478900,
+        5297900,
+        5649900,
+        4130100,
+        5148000
+      ],
+      "statistics": {
+        "count": 5,
+        "mean_ns": 4740960,
+        "median_ns": 5148000,
+        "minimum_ns": 3478900,
+        "p95_ns": null,
+        "p99_ns": null,
+        "standard_deviation_ns": 808452.9710502647
+      },
+      "timing_mode": "warm",
+      "warmup_samples_ns": [
+        3872100,
+        4336400
+      ]
+    },
+    {
+      "case": "memory",
+      "correctness_checksum": "f0d0e023f9b1a4da91c19ac15cf2ea71427f0e4a8cf70397527d67c360d80af7",
+      "dimensions": {
+        "directory_count": 4,
+        "file_count": 16,
+        "largest_file_bytes": 1024,
+        "max_depth": 2,
+        "total_bytes": 16384
+      },
+      "driver": "direct",
+      "failures": [],
+      "memory": {
+        "process_rss_bytes": null,
+        "python_peak_bytes": 16888
+      },
+      "profile": "small_project",
+      "profile_version": 1,
+      "samples_ns": [
+        22212100,
+        20938300,
+        26589200,
+        27062000,
+        17101600
+      ],
+      "statistics": {
+        "count": 5,
+        "mean_ns": 22780640,
+        "median_ns": 22212100,
+        "minimum_ns": 17101600,
+        "p95_ns": null,
+        "p99_ns": null,
+        "standard_deviation_ns": 3709558.5303914533
+      },
+      "timing_mode": "warm",
+      "warmup_samples_ns": [
+        28011900,
+        28239200
+      ]
+    },
+    {
+      "case": "burst_create",
+      "correctness_checksum": "1c10b03518fff8fc374a20bbf5107c66496656bec0662d6c6db123d4a898f121",
+      "dimensions": {
+        "directory_count": 0,
+        "file_count": 0,
+        "largest_file_bytes": 0,
+        "max_depth": 0,
+        "total_bytes": 0
+      },
+      "driver": "direct",
+      "failures": [],
+      "memory": {
+        "process_rss_bytes": null,
+        "python_peak_bytes": null
+      },
+      "profile": "empty",
+      "profile_version": 1,
+      "samples_ns": [
+        1594400,
+        1011800,
+        1141300,
+        1007200,
+        991800
+      ],
+      "statistics": {
+        "count": 5,
+        "mean_ns": 1149300,
+        "median_ns": 1011800,
+        "minimum_ns": 991800,
+        "p95_ns": null,
+        "p99_ns": null,
+        "standard_deviation_ns": 228946.68374973244
+      },
+      "timing_mode": "warm",
+      "warmup_samples_ns": [
+        1751000,
+        1902900
+      ]
+    },
+    {
+      "case": "stateful_scenario",
+      "correctness_checksum": "f6e4d91df788680f55439bc78720241b558d5cc9f564374362f4f77d39a8cf0c",
+      "dimensions": {
+        "directory_count": 0,
+        "file_count": 0,
+        "largest_file_bytes": 0,
+        "max_depth": 0,
+        "total_bytes": 0
+      },
+      "driver": "direct",
+      "failures": [],
+      "memory": {
+        "process_rss_bytes": null,
+        "python_peak_bytes": null
+      },
+      "profile": "empty",
+      "profile_version": 1,
+      "samples_ns": [
+        20483000,
+        20424500,
+        23332300,
+        25527800,
+        33180600
+      ],
+      "statistics": {
+        "count": 5,
+        "mean_ns": 24589640,
+        "median_ns": 23332300,
+        "minimum_ns": 20424500,
+        "p95_ns": null,
+        "p99_ns": null,
+        "standard_deviation_ns": 4700606.877670159
+      },
+      "timing_mode": "warm",
+      "warmup_samples_ns": [
+        27341500,
+        26927600
+      ]
+    },
+    {
+      "case": "cold_process_ready",
+      "correctness_checksum": "0:/workspace:()",
+      "dimensions": {
+        "directory_count": 0,
+        "file_count": 0,
+        "largest_file_bytes": 0,
+        "max_depth": 0,
+        "total_bytes": 0
+      },
+      "driver": "direct",
+      "failures": [],
+      "memory": {
+        "process_rss_bytes": null,
+        "python_peak_bytes": null
+      },
+      "profile": "empty",
+      "profile_version": 1,
+      "samples_ns": [
+        10406900200,
+        12230018500
+      ],
+      "statistics": {
+        "count": 2,
+        "mean_ns": 11318459350,
+        "median_ns": 11318459350.0,
+        "minimum_ns": 10406900200,
+        "p95_ns": null,
+        "p99_ns": null,
+        "standard_deviation_ns": 911559150.0
+      },
+      "timing_mode": "cold_process",
+      "warmup_samples_ns": []
+    },
+    {
+      "case": "adapter_create_ready",
+      "correctness_checksum": "fee3d086e1d75489f9150f74e3a8ca1a7f79f5232e4946d8a9a970e3ea289571",
+      "dimensions": {
+        "directory_count": 0,
+        "file_count": 0,
+        "largest_file_bytes": 0,
+        "max_depth": 0,
+        "total_bytes": 0
+      },
+      "driver": "openai_sandbox",
+      "failures": [],
+      "memory": {
+        "process_rss_bytes": null,
+        "python_peak_bytes": null
+      },
+      "profile": "empty",
+      "profile_version": 1,
+      "samples_ns": [
+        1127300,
+        941400,
+        948100,
+        897300,
+        968900
+      ],
+      "statistics": {
+        "count": 5,
+        "mean_ns": 976600,
+        "median_ns": 948100,
+        "minimum_ns": 897300,
+        "p95_ns": null,
+        "p99_ns": null,
+        "standard_deviation_ns": 78879.0973579186
+      },
+      "timing_mode": "warm",
+      "warmup_samples_ns": [
+        194440700,
+        1496600
+      ]
+    },
+    {
+      "case": "create_first_operation",
+      "correctness_checksum": "d4dc3777028496ca51a9c673ad1c090096c001ff2b1a1b8003ec83cb713eee62",
+      "dimensions": {
+        "directory_count": 0,
+        "file_count": 0,
+        "largest_file_bytes": 0,
+        "max_depth": 0,
+        "total_bytes": 0
+      },
+      "driver": "openai_sandbox",
+      "failures": [],
+      "memory": {
+        "process_rss_bytes": null,
+        "python_peak_bytes": null
+      },
+      "profile": "empty",
+      "profile_version": 1,
+      "samples_ns": [
+        2086400,
+        1731500,
+        1844400,
+        1636900,
+        1588200
+      ],
+      "statistics": {
+        "count": 5,
+        "mean_ns": 1777480,
+        "median_ns": 1731500,
+        "minimum_ns": 1588200,
+        "p95_ns": null,
+        "p99_ns": null,
+        "standard_deviation_ns": 177546.42660442367
+      },
+      "timing_mode": "warm",
+      "warmup_samples_ns": [
+        1879100,
+        2603600
+      ]
+    },
+    {
+      "case": "memory",
+      "correctness_checksum": "1c10b03518fff8fc374a20bbf5107c66496656bec0662d6c6db123d4a898f121",
+      "dimensions": {
+        "directory_count": 0,
+        "file_count": 0,
+        "largest_file_bytes": 0,
+        "max_depth": 0,
+        "total_bytes": 0
+      },
+      "driver": "openai_sandbox",
+      "failures": [],
+      "memory": {
+        "process_rss_bytes": null,
+        "python_peak_bytes": 55492
+      },
+      "profile": "empty",
+      "profile_version": 1,
+      "samples_ns": [
+        13754300,
+        13394300,
+        14548900,
+        14185400,
+        17269300
+      ],
+      "statistics": {
+        "count": 5,
+        "mean_ns": 14630440,
+        "median_ns": 14185400,
+        "minimum_ns": 13394300,
+        "p95_ns": null,
+        "p99_ns": null,
+        "standard_deviation_ns": 1375787.401599535
+      },
+      "timing_mode": "warm",
+      "warmup_samples_ns": [
+        16466000,
+        17014100
+      ]
+    },
+    {
+      "case": "seeded_create_ready",
+      "correctness_checksum": "d8026768cddd8338d0900547a825762183e29dc2e16ccdc53f0ba1190cc8c865",
+      "dimensions": {
+        "directory_count": 4,
+        "file_count": 16,
+        "largest_file_bytes": 1024,
+        "max_depth": 2,
+        "total_bytes": 16384
+      },
+      "driver": "openai_sandbox",
+      "failures": [],
+      "memory": {
+        "process_rss_bytes": null,
+        "python_peak_bytes": null
+      },
+      "profile": "small_project",
+      "profile_version": 1,
+      "samples_ns": [
+        14572000,
+        11882700,
+        11238200,
+        10615100,
+        13247900
+      ],
+      "statistics": {
+        "count": 5,
+        "mean_ns": 12311180,
+        "median_ns": 11882700,
+        "minimum_ns": 10615100,
+        "p95_ns": null,
+        "p99_ns": null,
+        "standard_deviation_ns": 1428308.0891740408
+      },
+      "timing_mode": "warm",
+      "warmup_samples_ns": [
+        13781900,
+        12794900
+      ]
+    },
+    {
+      "case": "create_first_operation",
+      "correctness_checksum": "433c3036682baf9006555bfcb605fa161df4f5c7c1632439fe951d421a76af77",
+      "dimensions": {
+        "directory_count": 4,
+        "file_count": 16,
+        "largest_file_bytes": 1024,
+        "max_depth": 2,
+        "total_bytes": 16384
+      },
+      "driver": "openai_sandbox",
+      "failures": [],
+      "memory": {
+        "process_rss_bytes": null,
+        "python_peak_bytes": null
+      },
+      "profile": "small_project",
+      "profile_version": 1,
+      "samples_ns": [
+        14765300,
+        33231300,
+        13792200,
+        16698700,
+        16867300
+      ],
+      "statistics": {
+        "count": 5,
+        "mean_ns": 19070960,
+        "median_ns": 16698700,
+        "minimum_ns": 13792200,
+        "p95_ns": null,
+        "p99_ns": null,
+        "standard_deviation_ns": 7174997.965045008
+      },
+      "timing_mode": "warm",
+      "warmup_samples_ns": [
+        11314200,
+        13090800
+      ]
+    },
+    {
+      "case": "snapshot_create",
+      "correctness_checksum": "90b6ac8dbb0c8b9a8fa42b32ef107b5ea9756fdbbf8f00079102bbe4f08b98a9",
+      "dimensions": {
+        "directory_count": 4,
+        "file_count": 16,
+        "largest_file_bytes": 1024,
+        "max_depth": 2,
+        "total_bytes": 16384
+      },
+      "driver": "openai_sandbox",
+      "failures": [],
+      "memory": {
+        "process_rss_bytes": null,
+        "python_peak_bytes": null
+      },
+      "profile": "small_project",
+      "profile_version": 1,
+      "samples_ns": [
+        6283600,
+        10601300,
+        6595400,
+        5709600,
+        5633900
+      ],
+      "statistics": {
+        "count": 5,
+        "mean_ns": 6964760,
+        "median_ns": 6283600,
+        "minimum_ns": 5633900,
+        "p95_ns": null,
+        "p99_ns": null,
+        "standard_deviation_ns": 1853183.417365912
+      },
+      "timing_mode": "warm",
+      "warmup_samples_ns": [
+        6863300,
+        8679100
+      ]
+    },
+    {
+      "case": "resume_ready",
+      "correctness_checksum": "36af0c3b88883eb8e04c250f30d16b142bb9f66e2d1f7608bfbc30c4c28a5854",
+      "dimensions": {
+        "directory_count": 4,
+        "file_count": 16,
+        "largest_file_bytes": 1024,
+        "max_depth": 2,
+        "total_bytes": 16384
+      },
+      "driver": "openai_sandbox",
+      "failures": [],
+      "memory": {
+        "process_rss_bytes": null,
+        "python_peak_bytes": null
+      },
+      "profile": "small_project",
+      "profile_version": 1,
+      "samples_ns": [
+        19971700,
+        19943900,
+        20865800,
+        21373300,
+        19265400
+      ],
+      "statistics": {
+        "count": 5,
+        "mean_ns": 20284020,
+        "median_ns": 19971700,
+        "minimum_ns": 19265400,
+        "p95_ns": null,
+        "p99_ns": null,
+        "standard_deviation_ns": 745092.07323659
+      },
+      "timing_mode": "warm",
+      "warmup_samples_ns": [
+        21781600,
+        21369100
+      ]
+    },
+    {
+      "case": "resume_first_operation",
+      "correctness_checksum": "433c3036682baf9006555bfcb605fa161df4f5c7c1632439fe951d421a76af77",
+      "dimensions": {
+        "directory_count": 4,
+        "file_count": 16,
+        "largest_file_bytes": 1024,
+        "max_depth": 2,
+        "total_bytes": 16384
+      },
+      "driver": "openai_sandbox",
+      "failures": [],
+      "memory": {
+        "process_rss_bytes": null,
+        "python_peak_bytes": null
+      },
+      "profile": "small_project",
+      "profile_version": 1,
+      "samples_ns": [
+        19359200,
+        21336800,
+        19809900,
+        34457400,
+        25832800
+      ],
+      "statistics": {
+        "count": 5,
+        "mean_ns": 24159220,
+        "median_ns": 21336800,
+        "minimum_ns": 19359200,
+        "p95_ns": null,
+        "p99_ns": null,
+        "standard_deviation_ns": 5635179.011318097
+      },
+      "timing_mode": "warm",
+      "warmup_samples_ns": [
+        21949600,
+        26190700
+      ]
+    },
+    {
+      "case": "memory",
+      "correctness_checksum": "f0d0e023f9b1a4da91c19ac15cf2ea71427f0e4a8cf70397527d67c360d80af7",
+      "dimensions": {
+        "directory_count": 4,
+        "file_count": 16,
+        "largest_file_bytes": 1024,
+        "max_depth": 2,
+        "total_bytes": 16384
+      },
+      "driver": "openai_sandbox",
+      "failures": [],
+      "memory": {
+        "process_rss_bytes": null,
+        "python_peak_bytes": 43694
+      },
+      "profile": "small_project",
+      "profile_version": 1,
+      "samples_ns": [
+        50548900,
+        49078200,
+        47782100,
+        44256500,
+        43048800
+      ],
+      "statistics": {
+        "count": 5,
+        "mean_ns": 46942900,
+        "median_ns": 47782100,
+        "minimum_ns": 43048800,
+        "p95_ns": null,
+        "p99_ns": null,
+        "standard_deviation_ns": 2851236.871955748
+      },
+      "timing_mode": "warm",
+      "warmup_samples_ns": [
+        47411700,
+        43465400
+      ]
+    },
+    {
+      "case": "burst_create",
+      "correctness_checksum": "1c10b03518fff8fc374a20bbf5107c66496656bec0662d6c6db123d4a898f121",
+      "dimensions": {
+        "directory_count": 0,
+        "file_count": 0,
+        "largest_file_bytes": 0,
+        "max_depth": 0,
+        "total_bytes": 0
+      },
+      "driver": "openai_sandbox",
+      "failures": [],
+      "memory": {
+        "process_rss_bytes": null,
+        "python_peak_bytes": null
+      },
+      "profile": "empty",
+      "profile_version": 1,
+      "samples_ns": [
+        4618600,
+        4623200,
+        6526900,
+        8441100,
+        4199800
+      ],
+      "statistics": {
+        "count": 5,
+        "mean_ns": 5681920,
+        "median_ns": 4623200,
+        "minimum_ns": 4199800,
+        "p95_ns": null,
+        "p99_ns": null,
+        "standard_deviation_ns": 1598454.417742339
+      },
+      "timing_mode": "warm",
+      "warmup_samples_ns": [
+        5447800,
+        9152800
+      ]
+    },
+    {
+      "case": "stateful_scenario",
+      "correctness_checksum": "f6e4d91df788680f55439bc78720241b558d5cc9f564374362f4f77d39a8cf0c",
+      "dimensions": {
+        "directory_count": 0,
+        "file_count": 0,
+        "largest_file_bytes": 0,
+        "max_depth": 0,
+        "total_bytes": 0
+      },
+      "driver": "openai_sandbox",
+      "failures": [],
+      "memory": {
+        "process_rss_bytes": null,
+        "python_peak_bytes": null
+      },
+      "profile": "empty",
+      "profile_version": 1,
+      "samples_ns": [
+        34023300,
+        38026300,
+        55132800,
+        51247800,
+        52145800
+      ],
+      "statistics": {
+        "count": 5,
+        "mean_ns": 46115200,
+        "median_ns": 51247800,
+        "minimum_ns": 34023300,
+        "p95_ns": null,
+        "p99_ns": null,
+        "standard_deviation_ns": 8434135.138827218
+      },
+      "timing_mode": "warm",
+      "warmup_samples_ns": [
+        46455800,
+        53263400
+      ]
+    },
+    {
+      "case": "cold_process_ready",
+      "correctness_checksum": "0:/workspace:()",
+      "dimensions": {
+        "directory_count": 0,
+        "file_count": 0,
+        "largest_file_bytes": 0,
+        "max_depth": 0,
+        "total_bytes": 0
+      },
+      "driver": "openai_sandbox",
+      "failures": [],
+      "memory": {
+        "process_rss_bytes": null,
+        "python_peak_bytes": null
+      },
+      "profile": "empty",
+      "profile_version": 1,
+      "samples_ns": [
+        7391401500,
+        8240932600
+      ],
+      "statistics": {
+        "count": 2,
+        "mean_ns": 7816167050,
+        "median_ns": 7816167050.0,
+        "minimum_ns": 7391401500,
+        "p95_ns": null,
+        "p99_ns": null,
+        "standard_deviation_ns": 424765550.0
+      },
+      "timing_mode": "cold_process",
+      "warmup_samples_ns": []
+    },
+    {
+      "case": "adapter_create_ready",
+      "correctness_checksum": "fee3d086e1d75489f9150f74e3a8ca1a7f79f5232e4946d8a9a970e3ea289571",
+      "dimensions": {
+        "directory_count": 0,
+        "file_count": 0,
+        "largest_file_bytes": 0,
+        "max_depth": 0,
+        "total_bytes": 0
+      },
+      "driver": "openai_capability",
+      "failures": [],
+      "memory": {
+        "process_rss_bytes": null,
+        "python_peak_bytes": null
+      },
+      "profile": "empty",
+      "profile_version": 1,
+      "samples_ns": [
+        4555700,
+        4883700,
+        4722200,
+        4090900,
+        4693200
+      ],
+      "statistics": {
+        "count": 5,
+        "mean_ns": 4589140,
+        "median_ns": 4693200,
+        "minimum_ns": 4090900,
+        "p95_ns": null,
+        "p99_ns": null,
+        "standard_deviation_ns": 270059.39050512575
+      },
+      "timing_mode": "warm",
+      "warmup_samples_ns": [
+        6491900,
+        4796300
+      ]
+    },
+    {
+      "case": "create_first_operation",
+      "correctness_checksum": "d4dc3777028496ca51a9c673ad1c090096c001ff2b1a1b8003ec83cb713eee62",
+      "dimensions": {
+        "directory_count": 0,
+        "file_count": 0,
+        "largest_file_bytes": 0,
+        "max_depth": 0,
+        "total_bytes": 0
+      },
+      "driver": "openai_capability",
+      "failures": [],
+      "memory": {
+        "process_rss_bytes": null,
+        "python_peak_bytes": null
+      },
+      "profile": "empty",
+      "profile_version": 1,
+      "samples_ns": [
+        5549000,
+        6460300,
+        23888800,
+        7145800,
+        15175900
+      ],
+      "statistics": {
+        "count": 5,
+        "mean_ns": 11643960,
+        "median_ns": 7145800,
+        "minimum_ns": 5549000,
+        "p95_ns": null,
+        "p99_ns": null,
+        "standard_deviation_ns": 7023717.229103119
+      },
+      "timing_mode": "warm",
+      "warmup_samples_ns": [
+        5269600,
+        5158000
+      ]
+    },
+    {
+      "case": "memory",
+      "correctness_checksum": "1c10b03518fff8fc374a20bbf5107c66496656bec0662d6c6db123d4a898f121",
+      "dimensions": {
+        "directory_count": 0,
+        "file_count": 0,
+        "largest_file_bytes": 0,
+        "max_depth": 0,
+        "total_bytes": 0
+      },
+      "driver": "openai_capability",
+      "failures": [],
+      "memory": {
+        "process_rss_bytes": null,
+        "python_peak_bytes": 169191
+      },
+      "profile": "empty",
+      "profile_version": 1,
+      "samples_ns": [
+        91211200,
+        101856000,
+        70033600,
+        75368600,
+        66023800
+      ],
+      "statistics": {
+        "count": 5,
+        "mean_ns": 80898640,
+        "median_ns": 75368600,
+        "minimum_ns": 66023800,
+        "p95_ns": null,
+        "p99_ns": null,
+        "standard_deviation_ns": 13531083.72268829
+      },
+      "timing_mode": "warm",
+      "warmup_samples_ns": [
+        84890800,
+        70697100
+      ]
+    },
+    {
+      "case": "seeded_create_ready",
+      "correctness_checksum": "d8026768cddd8338d0900547a825762183e29dc2e16ccdc53f0ba1190cc8c865",
+      "dimensions": {
+        "directory_count": 4,
+        "file_count": 16,
+        "largest_file_bytes": 1024,
+        "max_depth": 2,
+        "total_bytes": 16384
+      },
+      "driver": "openai_capability",
+      "failures": [],
+      "memory": {
+        "process_rss_bytes": null,
+        "python_peak_bytes": null
+      },
+      "profile": "small_project",
+      "profile_version": 1,
+      "samples_ns": [
+        16285300,
+        13299200,
+        17511700,
+        18254800,
+        19908000
+      ],
+      "statistics": {
+        "count": 5,
+        "mean_ns": 17051800,
+        "median_ns": 17511700,
+        "minimum_ns": 13299200,
+        "p95_ns": null,
+        "p99_ns": null,
+        "standard_deviation_ns": 2212967.4403388766
+      },
+      "timing_mode": "warm",
+      "warmup_samples_ns": [
+        21568800,
+        16088700
+      ]
+    },
+    {
+      "case": "create_first_operation",
+      "correctness_checksum": "433c3036682baf9006555bfcb605fa161df4f5c7c1632439fe951d421a76af77",
+      "dimensions": {
+        "directory_count": 4,
+        "file_count": 16,
+        "largest_file_bytes": 1024,
+        "max_depth": 2,
+        "total_bytes": 16384
+      },
+      "driver": "openai_capability",
+      "failures": [],
+      "memory": {
+        "process_rss_bytes": null,
+        "python_peak_bytes": null
+      },
+      "profile": "small_project",
+      "profile_version": 1,
+      "samples_ns": [
+        18164200,
+        17343900,
+        15478100,
+        17414700,
+        29538200
+      ],
+      "statistics": {
+        "count": 5,
+        "mean_ns": 19587820,
+        "median_ns": 17414700,
+        "minimum_ns": 15478100,
+        "p95_ns": null,
+        "p99_ns": null,
+        "standard_deviation_ns": 5053398.500573648
+      },
+      "timing_mode": "warm",
+      "warmup_samples_ns": [
+        18171700,
+        23405300
+      ]
+    },
+    {
+      "case": "snapshot_create",
+      "correctness_checksum": "90b6ac8dbb0c8b9a8fa42b32ef107b5ea9756fdbbf8f00079102bbe4f08b98a9",
+      "dimensions": {
+        "directory_count": 4,
+        "file_count": 16,
+        "largest_file_bytes": 1024,
+        "max_depth": 2,
+        "total_bytes": 16384
+      },
+      "driver": "openai_capability",
+      "failures": [],
+      "memory": {
+        "process_rss_bytes": null,
+        "python_peak_bytes": null
+      },
+      "profile": "small_project",
+      "profile_version": 1,
+      "samples_ns": [
+        7932500,
+        11253900,
+        16406500,
+        10461900,
+        8181100
+      ],
+      "statistics": {
+        "count": 5,
+        "mean_ns": 10847180,
+        "median_ns": 10461900,
+        "minimum_ns": 7932500,
+        "p95_ns": null,
+        "p99_ns": null,
+        "standard_deviation_ns": 3060171.327491322
+      },
+      "timing_mode": "warm",
+      "warmup_samples_ns": [
+        9380000,
+        6433100
+      ]
+    },
+    {
+      "case": "resume_ready",
+      "correctness_checksum": "36af0c3b88883eb8e04c250f30d16b142bb9f66e2d1f7608bfbc30c4c28a5854",
+      "dimensions": {
+        "directory_count": 4,
+        "file_count": 16,
+        "largest_file_bytes": 1024,
+        "max_depth": 2,
+        "total_bytes": 16384
+      },
+      "driver": "openai_capability",
+      "failures": [],
+      "memory": {
+        "process_rss_bytes": null,
+        "python_peak_bytes": null
+      },
+      "profile": "small_project",
+      "profile_version": 1,
+      "samples_ns": [
+        29291400,
+        34448000,
+        27131800,
+        27870100,
+        25361100
+      ],
+      "statistics": {
+        "count": 5,
+        "mean_ns": 28820480,
+        "median_ns": 27870100,
+        "minimum_ns": 25361100,
+        "p95_ns": null,
+        "p99_ns": null,
+        "standard_deviation_ns": 3085868.4115820625
+      },
+      "timing_mode": "warm",
+      "warmup_samples_ns": [
+        43166100,
+        25493300
+      ]
+    },
+    {
+      "case": "resume_first_operation",
+      "correctness_checksum": "433c3036682baf9006555bfcb605fa161df4f5c7c1632439fe951d421a76af77",
+      "dimensions": {
+        "directory_count": 4,
+        "file_count": 16,
+        "largest_file_bytes": 1024,
+        "max_depth": 2,
+        "total_bytes": 16384
+      },
+      "driver": "openai_capability",
+      "failures": [],
+      "memory": {
+        "process_rss_bytes": null,
+        "python_peak_bytes": null
+      },
+      "profile": "small_project",
+      "profile_version": 1,
+      "samples_ns": [
+        37838800,
+        29490100,
+        42206800,
+        31695300,
+        30225500
+      ],
+      "statistics": {
+        "count": 5,
+        "mean_ns": 34291300,
+        "median_ns": 31695300,
+        "minimum_ns": 29490100,
+        "p95_ns": null,
+        "p99_ns": null,
+        "standard_deviation_ns": 4930747.683262651
+      },
+      "timing_mode": "warm",
+      "warmup_samples_ns": [
+        23851600,
+        27315300
+      ]
+    },
+    {
+      "case": "memory",
+      "correctness_checksum": "f0d0e023f9b1a4da91c19ac15cf2ea71427f0e4a8cf70397527d67c360d80af7",
+      "dimensions": {
+        "directory_count": 4,
+        "file_count": 16,
+        "largest_file_bytes": 1024,
+        "max_depth": 2,
+        "total_bytes": 16384
+      },
+      "driver": "openai_capability",
+      "failures": [],
+      "memory": {
+        "process_rss_bytes": null,
+        "python_peak_bytes": 92381
+      },
+      "profile": "small_project",
+      "profile_version": 1,
+      "samples_ns": [
+        62129300,
+        68382300,
+        70030800,
+        78703300,
+        60622600
+      ],
+      "statistics": {
+        "count": 5,
+        "mean_ns": 67973660,
+        "median_ns": 68382300,
+        "minimum_ns": 60622600,
+        "p95_ns": null,
+        "p99_ns": null,
+        "standard_deviation_ns": 6445442.003338483
+      },
+      "timing_mode": "warm",
+      "warmup_samples_ns": [
+        65507000,
+        74733600
+      ]
+    },
+    {
+      "case": "burst_create",
+      "correctness_checksum": "1c10b03518fff8fc374a20bbf5107c66496656bec0662d6c6db123d4a898f121",
+      "dimensions": {
+        "directory_count": 0,
+        "file_count": 0,
+        "largest_file_bytes": 0,
+        "max_depth": 0,
+        "total_bytes": 0
+      },
+      "driver": "openai_capability",
+      "failures": [],
+      "memory": {
+        "process_rss_bytes": null,
+        "python_peak_bytes": null
+      },
+      "profile": "empty",
+      "profile_version": 1,
+      "samples_ns": [
+        16314100,
+        18550900,
+        14767000,
+        16082800,
+        20078400
+      ],
+      "statistics": {
+        "count": 5,
+        "mean_ns": 17158640,
+        "median_ns": 16314100,
+        "minimum_ns": 14767000,
+        "p95_ns": null,
+        "p99_ns": null,
+        "standard_deviation_ns": 1900210.9236608446
+      },
+      "timing_mode": "warm",
+      "warmup_samples_ns": [
+        19812500,
+        19430200
+      ]
+    },
+    {
+      "case": "stateful_scenario",
+      "correctness_checksum": "f6e4d91df788680f55439bc78720241b558d5cc9f564374362f4f77d39a8cf0c",
+      "dimensions": {
+        "directory_count": 0,
+        "file_count": 0,
+        "largest_file_bytes": 0,
+        "max_depth": 0,
+        "total_bytes": 0
+      },
+      "driver": "openai_capability",
+      "failures": [],
+      "memory": {
+        "process_rss_bytes": null,
+        "python_peak_bytes": null
+      },
+      "profile": "empty",
+      "profile_version": 1,
+      "samples_ns": [
+        64081600,
+        61770100,
+        63423400,
+        61583600,
+        65850400
+      ],
+      "statistics": {
+        "count": 5,
+        "mean_ns": 63341820,
+        "median_ns": 63423400,
+        "minimum_ns": 61583600,
+        "p95_ns": null,
+        "p99_ns": null,
+        "standard_deviation_ns": 1575344.0695924177
+      },
+      "timing_mode": "warm",
+      "warmup_samples_ns": [
+        71249200,
+        67150800
+      ]
+    },
+    {
+      "case": "cold_process_ready",
+      "correctness_checksum": "0:/workspace:()",
+      "dimensions": {
+        "directory_count": 0,
+        "file_count": 0,
+        "largest_file_bytes": 0,
+        "max_depth": 0,
+        "total_bytes": 0
+      },
+      "driver": "openai_capability",
+      "failures": [],
+      "memory": {
+        "process_rss_bytes": null,
+        "python_peak_bytes": null
+      },
+      "profile": "empty",
+      "profile_version": 1,
+      "samples_ns": [
+        9468025800,
+        9641652500
+      ],
+      "statistics": {
+        "count": 2,
+        "mean_ns": 9554839150,
+        "median_ns": 9554839150.0,
+        "minimum_ns": 9468025800,
+        "p95_ns": null,
+        "p99_ns": null,
+        "standard_deviation_ns": 86813350.0
+      },
+      "timing_mode": "cold_process",
+      "warmup_samples_ns": []
+    },
+    {
+      "case": "backend_adapter_overhead",
+      "correctness_checksum": "ca96a3775e53ab167254a656ed327f766a97528753683d82a7ef408e7aac8f7f",
+      "dimensions": {
+        "directory_count": 0,
+        "file_count": 0,
+        "largest_file_bytes": 0,
+        "max_depth": 0,
+        "total_bytes": 0
+      },
+      "driver": "openai_sandbox",
+      "failures": [],
+      "memory": {
+        "process_rss_bytes": null,
+        "python_peak_bytes": null
+      },
+      "profile": "empty",
+      "profile_version": 1,
+      "samples_ns": [
+        1029900,
+        984800,
+        991800,
+        918700,
+        6624400
+      ],
+      "statistics": {
+        "count": 5,
+        "mean_ns": 2109920,
+        "median_ns": 991800,
+        "minimum_ns": 918700,
+        "p95_ns": null,
+        "p99_ns": null,
+        "standard_deviation_ns": 2257523.65693031
+      },
+      "timing_mode": "paired",
+      "warmup_samples_ns": [
+        1022700,
+        1401500
+      ]
+    },
+    {
+      "case": "capability_overhead",
+      "correctness_checksum": "ca96a3775e53ab167254a656ed327f766a97528753683d82a7ef408e7aac8f7f",
+      "dimensions": {
+        "directory_count": 0,
+        "file_count": 0,
+        "largest_file_bytes": 0,
+        "max_depth": 0,
+        "total_bytes": 0
+      },
+      "driver": "openai_capability",
+      "failures": [],
+      "memory": {
+        "process_rss_bytes": null,
+        "python_peak_bytes": null
+      },
+      "profile": "empty",
+      "profile_version": 1,
+      "samples_ns": [
+        0,
+        5005500,
+        15458800,
+        3744000,
+        1705800
+      ],
+      "statistics": {
+        "count": 5,
+        "mean_ns": 5182820,
+        "median_ns": 3744000,
+        "minimum_ns": 0,
+        "p95_ns": null,
+        "p99_ns": null,
+        "standard_deviation_ns": 5415693.890315441
+      },
+      "timing_mode": "paired",
+      "warmup_samples_ns": [
+        5100600,
+        3009400
+      ]
+    }
+  ],
+  "environment": {
+    "architecture": "AMD64",
+    "available_memory_bytes": 15531679744,
+    "cpu_model": "Intel64 Family 6 Model 106 Stepping 6, GenuineIntel",
+    "external_provider_involved": false,
+    "garbage_collector_enabled": true,
+    "logical_cpu_count": 16,
+    "network_involved": false,
+    "operating_system": "Windows-11-10.0.22631-SP0",
+    "power_configuration": "uncontrolled-development-workstation",
+    "python_implementation": "CPython",
+    "python_version": "3.12.12",
+    "runner_identity": "windows-development-workstation"
+  },
+  "metadata": {
+    "concurrency": 4,
+    "framework_versions": {
+      "openai-agents": "0.22.0"
+    },
+    "minimum_case_duration_seconds": 0.0,
+    "package_version": "0.1.0",
+    "process_count": 1,
+    "samples": 5,
+    "source_commit": "5e09afe4e382a9163092c31c68bf46bb13ccb1f2",
+    "source_tree_hash": "b5658796554f7c0c0a05032d5ac43c4d08c66963b654fbf0613fda483a24365e",
+    "started_at": "2026-09-08T17:19:58.108131+00:00",
+    "tier": "reference",
+    "warmups": 2,
+    "working_tree_dirty": true
+  },
+  "schema_version": 1
+}

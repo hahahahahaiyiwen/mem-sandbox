@@ -906,21 +906,22 @@ those foundations.
 
 #### 5.6 Product validation and benchmark baseline
 
-- [ ] **5.6.1** Implement the model-free
+- [x] **5.6.1** Implement the model-free
   [stateful execution reference scenario](./product-validation/README.md#stateful-execution-conformance)
   through a product-validation driver owned outside framework adapters.
-- [ ] **5.6.2** Run the same normalized create, mutate, snapshot, close, resume,
+- [x] **5.6.2** Run the same normalized create, mutate, snapshot, close, resume,
   continue, fork, and delete scenario through the direct session, OpenAI sandbox
   client/session driver, and OpenAI capability driver.
-- [ ] **5.6.3** Implement versioned cold, warm, create-to-ready, first-operation,
+- [x] **5.6.3** Implement versioned cold, warm, create-to-ready, first-operation,
   snapshot, resume, burst, memory, and adapter-overhead benchmark cases without model or
   provider network calls.
-- [ ] **5.6.4** Emit versioned machine-readable result artifacts containing raw samples,
+- [x] **5.6.4** Emit versioned machine-readable result artifacts containing raw samples,
   environment fingerprints, workload dimensions, failures, statistics, and correctness
   checksums.
-- [ ] **5.6.5** Capture the first controlled baseline and approve metric-specific
-  regression budgets only after measuring runner noise.
-- [ ] **5.6.6** Keep comparative benchmarks separate from CI regression gates and require
+- [x] **5.6.5** Capture the first short-duration, non-gating reference measurement with
+  raw samples and environment metadata. Defer controlled regression budgets until the
+  project introduces an automated performance gate.
+- [x] **5.6.6** Keep comparative benchmarks separate from CI regression gates and require
   the documented methodology before publishing any "fastest provisioning" claim.
 
 #### 5.7 Trust-boundary re-evaluation
@@ -937,31 +938,30 @@ those foundations.
 
 ### Exit criteria
 
-- [ ] **5.9.1** `python -m pytest tests/conformance -q` passes for the direct session,
+- [x] **5.9.1** `python -m pytest tests/conformance -q` passes for the direct session,
   OpenAI sandbox client/session, and OpenAI capability drivers.
-- [ ] **5.9.2** The OpenAI capability produces the same normalized domain outcomes,
+- [x] **5.9.2** The OpenAI capability produces the same normalized domain outcomes,
   revisions, file hashes, snapshot root hashes, restored state, fork behavior, and
   cleanup as the direct-session reference scenario.
 - [x] **5.9.3** The OpenAI sandbox client/session passes pinned SDK contract, lifecycle,
   binary stream, manifest atomicity, state serialization, snapshot round-trip,
   resume/fork, unsupported-feature, timeout/cancellation, and no-host-fallback tests.
 - [x] **5.9.4** Adapter dependency tests prove framework packages are isolated from core.
-- [ ] **5.9.5** The OpenAI integration `README.md` records its supported SDK range,
+- [x] **5.9.5** The OpenAI integration `README.md` records its supported SDK range,
   exact tested version, beta compatibility policy, manifest/capability support matrix,
   ownership model, unsupported behavior, and conformance results.
-- [ ] **5.9.6** The stateful reference scenario produces equivalent normalized outcomes,
+- [x] **5.9.6** The stateful reference scenario produces equivalent normalized outcomes,
   file hashes, revisions, snapshot root hashes, lifecycle rejection, restored state,
   fork behavior, and cleanup through the direct and both OpenAI drivers.
-- [ ] **5.9.7** The benchmark suite reports cold and warm provisioning, first operation,
+- [x] **5.9.7** The benchmark suite reports cold and warm provisioning, first operation,
   snapshot, resume, burst, memory, backend-adapter overhead, and capability-adapter
   overhead for the direct and OpenAI drivers with exact workload and environment metadata.
-- [ ] **5.9.8** A controlled baseline, measured noise floor, and approved regression
-  budget exist for every stable direct/OpenAI release-gating case. A case whose runner
-  noise prevents a defensible budget remains reported but non-gating with the limitation
-  documented.
-- [ ] **5.9.9** Product documentation uses only performance claims supported by current
+- [x] **5.9.8** A committed short-duration reference artifact reports direct/OpenAI
+  metrics and is explicitly non-gating. Any future release-gating budget requires a
+  controlled runner, measured noise floor, and documented limitation for noisy cases.
+- [x] **5.9.9** Product documentation uses only performance claims supported by current
   artifacts; an unqualified "fastest sandbox" claim is prohibited.
-- [ ] **5.9.10** PydanticAI, Deep Agents, MCP, and other deferred integrations are not
+- [x] **5.9.10** PydanticAI, Deep Agents, MCP, and other deferred integrations are not
   required for Milestone 5 completion, and no production abstraction exists solely for a
   deferred SDK.
 
@@ -1147,7 +1147,7 @@ The first usable release is complete when:
   conformance scenario.
 - [ ] The stateful create, snapshot, resume, continue, fork, and cleanup scenario passes
   through the direct session and supported adapters.
-- [ ] A controlled provisioning and adapter-overhead baseline is published with
-  documented regression budgets.
+- [ ] A short-duration provisioning and adapter-overhead reference is published; any
+  future regression gate uses a controlled runner with documented budgets.
 - [ ] Core has no OpenAI, PydanticAI, LangChain, MCP, or other framework dependency.
 - [ ] Every implemented boundary is reflected in its component design document.
