@@ -1,9 +1,9 @@
 # MemSandbox Implementation Plan
 
 **Status:** Active implementation roadmap
-**Current focus:** Milestone 5. The OpenAI client/session, manifest, and portable archive
-foundation landed in issues #31-#33; issue #34 owns the remaining client lifecycle and
-resume-state hardening.
+**Current focus:** Milestone 5. The OpenAI integration and product evidence landed
+through issue #36; issue #37 records the final trust-boundary and deferred-integration
+review, and issue #45 is the remaining Azure OpenAI sample gate.
 
 **Approved design inputs:** [High-Level Design](./HIGH_LEVEL_DESIGN.md),
 [Workspace Design](./components/workspace/README.md), and
@@ -888,21 +888,36 @@ those foundations.
 
 #### 5.4 Additional agent SDKs
 
-- [ ] **5.4.1** Keep PydanticAI, LangChain Deep Agents, Microsoft Agent Framework,
+- [x] **5.4.1** Keep PydanticAI, LangChain Deep Agents, Microsoft Agent Framework,
   Google ADK, and other SDK adapters outside the Milestone 5 completion gate.
-- [ ] **5.4.2** After the OpenAI adapter passes conformance and product validation,
-  review actual duplication and missing semantics before selecting the next SDK.
-- [ ] **5.4.3** Open a separate approved design/implementation issue for each additional
-  adapter. Extract shared helpers only from behavior proven identical by at least two
-  adapters; do not create a global framework abstraction in anticipation of future SDKs.
+- [x] **5.4.2** With the OpenAI conformance and product-validation evidence from 5.6
+  complete, review actual duplication and missing semantics before selecting the next
+  SDK. The issue #45 live sample is not required for this structural review.
+- [x] **5.4.3** No additional SDK adapter is selected in Milestone 5. Each future
+  adapter requires a separate approved design/implementation issue. Extract shared
+  helpers only from behavior proven identical by at least two adapters; do not create a
+  global framework abstraction in anticipation of future SDKs.
+
+The issue #37 review found no framework-neutral adapter behavior to extract. The current
+OpenAI package contains SDK-owned state, lifecycle, manifest, snapshot, capability, and
+error translation. Reusable filesystem, command, lifecycle, archive, policy, secret, and
+event behavior already resides behind public core interfaces. Product-validation
+normalization remains test/benchmark infrastructure rather than a runtime adapter
+abstraction. No second SDK is selected by Milestone 5.
 
 #### 5.5 Deferred integrations
 
-- [ ] **5.5.1** Keep MCP, HTTP/OpenAPI, A2A, local subprocesses, Docker, and hosted
+- [x] **5.5.1** Keep MCP, HTTP/OpenAPI, A2A, local subprocesses, Docker, and hosted
   sandbox providers outside this implementation phase. OpenAI's provider interface is in
   scope only for the process-local MemSandbox client.
-- [ ] **5.5.2** Require a new approved design decision and support matrix before adding
-  any deferred integration.
+- [x] **5.5.2** No deferred integration is added. Each future integration requires a new
+  approved design decision and support matrix before implementation.
+
+The production package has no imports, dependencies, providers, clients, or transport
+abstractions for those deferred integrations. `openai-agents` remains the only optional
+framework dependency, isolated to `mem_sandbox.integrations.openai_agents`. Future
+integration work must start from a concrete SDK contract and its own issue rather than
+generalizing the OpenAI adapter speculatively.
 
 #### 5.6 Product validation and benchmark baseline
 
@@ -926,15 +941,50 @@ those foundations.
 
 #### 5.7 Trust-boundary re-evaluation
 
-- [ ] **5.7.1** Review the implemented OpenAI boundary for concrete authority introduced
+- [x] **5.7.1** Review the implemented OpenAI boundary for concrete authority introduced
   by caller-to-handle mapping, serialized session state, manifests, environment values,
   path grants, snapshots, or future mount/network options.
-- [ ] **5.7.2** If the supported profile introduces no new protected action beyond the
+- [x] **5.7.2** The supported profile introduces no new protected action beyond the
   implemented core policy and secret contracts, keep application-owned authorization and
   continue deferring composed policy.
-- [ ] **5.7.3** If a trigger exists, open a new design issue that defines authority,
-  identity, protected actions, enforcement ownership, prepared artifacts, fail-closed
-  behavior, and behavior-first coverage before implementation.
+- [x] **5.7.3** No current re-evaluation trigger exists. If a future trigger appears,
+  open a new design issue that defines authority, identity, protected actions,
+  enforcement ownership, prepared artifacts, fail-closed behavior, and behavior-first
+  coverage before implementation.
+
+##### Issue #37 trust-boundary decision
+
+The OpenAI adapter is a process-local translation boundary, not an authentication or
+multi-tenant authorization boundary.
+
+| Surface | Current authority and enforcement | Decision |
+|---|---|---|
+| Caller-to-handle mapping | The application constructs the client, selects `owner_id`, and controls serialized state. The service accepts an opaque process-local handle; live reattachment additionally requires the serialized core session identity to match. | Handle/session matching prevents accidental collision but is not authorization. Applications must authorize access before passing state to the adapter. |
+| Serialized provider state | Pydantic validation rejects unknown fields, malformed identities, invalid execution context, incomplete archive metadata, and unsupported profile versions. State contains no live service, session, credential, secret, or host-path object. Model-issued virtual `cd`/`export` changes may influence persisted cwd/environment and are revalidated before atomic replacement restore. | Treat serialized state and snapshot identifiers as application-controlled bearer data even though part of the execution context is model-influenced. They are never model tool inputs. |
+| Manifest and environment | The complete manifest profile is validated before allocation or mutation. Only bounded synthetic `File` and `Dir` entries are accepted; every other entry type and unsupported manifest field fails closed. Environment, users, groups, host path grants, custom mount behavior, PTY, and ports are unsupported. | Synthetic files/directories add no authority. Session environment changes remain virtual; secret overlays stay operation-scoped and non-persistent. |
+| Model-facing capability | The SDK clones and binds the capability to a host-selected live provider session. The four tool schemas contain no handle, session selector, lifecycle, snapshot, policy, secret, shell, PTY, mount, port, or network field. Execute timeout and output inputs may only narrow fixed 30-second and 256-KiB profile ceilings; policy may further narrow timeout. | The model can request only bounded core operations on the already-bound session. A returned session ID is correlation metadata, not a service lookup capability. |
+| Snapshots | The application supplies the snapshot store/dependencies and controls serialized state. The adapter checks the application-asserted owner tag together with format, schema, size, payload hash, revision, and root hash before restore. | Owner fields detect inconsistent state but are not independently authenticated principals. Shared or cross-tenant stores remain a future authorization trigger. |
+| Future mounts, network, host process, and shared persistence | Every such OpenAI SDK surface is currently rejected before host access or core mutation. | Enabling any surface introduces new resources or destinations and requires a separate behavior-first trust design. |
+
+No composed policy engine is justified for the current single-application,
+process-local profile. Workspace confinement, quotas, command admission, lifecycle,
+snapshot validation, explicit policy decisions, and secret leasing remain enforced by
+their owning modules. Re-evaluation is mandatory before multi-owner authorization,
+shared persistent snapshots/workspaces, egress, arbitrary execution, external approval
+obligations, or per-tenant capability profiles.
+
+#### 5.8 Azure OpenAI agent sample
+
+- [ ] **5.8.1** Add the issue #45 sample using an Azure OpenAI model with the pinned
+  OpenAI Agents SDK, `SandboxAgent`, and `InMemorySandboxCapability`.
+- [ ] **5.8.2** Keep live Azure execution opt-in while required CI uses a deterministic
+  model double with no credentials or network calls.
+- [ ] **5.8.3** Prove host-selected session binding, bounded stateful workspace mutation,
+  host-side result verification, and explicit cleanup without host filesystem, shell,
+  process, mount, port, or lifecycle authority in model inputs.
+- [ ] **5.8.4** Document endpoint/authentication configuration, tracing behavior,
+  supported command semantics, resource ownership, expected output, limitations, and
+  troubleshooting.
 
 ### Exit criteria
 
@@ -964,6 +1014,10 @@ those foundations.
 - [x] **5.9.10** PydanticAI, Deep Agents, MCP, and other deferred integrations are not
   required for Milestone 5 completion, and no production abstraction exists solely for a
   deferred SDK.
+- [ ] **5.9.11** The Azure OpenAI sample in issue #45 completes one documented stateful
+  task through the four-tool capability, verifies the final in-memory workspace from the
+  host, keeps live provider calls outside required CI, and documents secure configuration
+  and cleanup.
 
 ## 10. Milestone 6: workspace scalability decision
 
@@ -1126,8 +1180,9 @@ their referenced checklist task begins.
 | Session lifetime | No automatic live-session expiry; explicit deletion owns process-local cleanup | `4.7` | Resolved |
 | Snapshot expiration | Require an explicit store-level default TTL; the store assigns absolute expiry and performs lazy/explicit purge | `4.4` | Resolved |
 | Service lifecycle events | Keep `sandbox.created`/`sandbox.deleted` producer-less until shared sequencing or separate service identity is approved | `4.7` | Deferred |
-| Product validation | Stateful cross-adapter conformance plus controlled provisioning baselines; comparative evidence required for a scoped "fastest" claim | `5.6` | Resolved |
+| Product validation | Stateful cross-adapter conformance plus a non-gating reference measurement; controlled evidence is required before regression gates and comparative evidence before a scoped "fastest" claim | `5.6` | Resolved |
 | First framework adapter | OpenAI Agents SDK custom capability plus sandbox client/session | `5.2` / `5.3` | Resolved |
+| First live agent sample | Azure OpenAI model through the OpenAI Agents SDK and host-bound MemSandbox capability; live calls remain opt-in | `5.8` | Planned in #45 |
 | Workspace content offload | Revisit after Milestone 5 using measured workload and provisioning data | `6.2.3` | Deferred |
 
 ## 14. Definition of first usable release
@@ -1149,5 +1204,7 @@ The first usable release is complete when:
   through the direct session and supported adapters.
 - [ ] A short-duration provisioning and adapter-overhead reference is published; any
   future regression gate uses a controlled runner with documented budgets.
+- [ ] A documented Azure OpenAI sample completes a stateful task through the host-bound
+  four-tool capability while required CI remains deterministic and network-free.
 - [ ] Core has no OpenAI, PydanticAI, LangChain, MCP, or other framework dependency.
 - [ ] Every implemented boundary is reflected in its component design document.

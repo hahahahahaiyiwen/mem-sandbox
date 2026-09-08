@@ -25,9 +25,10 @@ from openai.types.responses import (
 )
 from openai.types.responses.response_prompt_param import ResponsePromptParam
 
-from mem_sandbox.command_executor import CommandFailureCode, EnvironmentChange
+from mem_sandbox.command_executor import CommandFailureCode, CommandLimits, EnvironmentChange
 from mem_sandbox.core import (
     OperationId,
+    OperationLimits,
     OperationResultMetadata,
     Revision,
     SessionId,
@@ -381,6 +382,57 @@ async def test_execute_translates_limits_once_and_returns_domain_faithful_result
             "environment_changes": [{"name": "MODE", "value": "test"}],
         },
     }
+
+
+@pytest.mark.asyncio
+async def test_execute_accepts_fixed_profile_limit_boundaries() -> None:
+    capability, domain = _bound_capability()
+    execute = capability.tools()[0]
+    command_limits = CommandLimits()
+    operation_limits = OperationLimits()
+
+    output = await _invoke(
+        execute,
+        {
+            "command": "pwd",
+            "timeout_seconds": min(
+                command_limits.timeout_seconds,
+                operation_limits.timeout_seconds,
+            ),
+            "max_output_bytes": min(
+                command_limits.max_stdout_bytes,
+                command_limits.max_stderr_bytes,
+            ),
+        },
+    )
+
+    assert output["ok"] is True
+    request = domain.execute_requests[0]
+    assert request.command_limits.timeout_seconds == command_limits.timeout_seconds
+    assert request.limits.timeout_seconds == operation_limits.timeout_seconds
+    assert request.command_limits.max_stdout_bytes == command_limits.max_stdout_bytes
+    assert request.command_limits.max_stderr_bytes == command_limits.max_stderr_bytes
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("timeout_seconds", OperationLimits().timeout_seconds + 0.1),
+        ("max_output_bytes", CommandLimits().max_stdout_bytes + 1),
+    ],
+)
+async def test_execute_rejects_limits_above_fixed_profile_ceiling(
+    field: str,
+    value: float | int,
+) -> None:
+    capability, domain = _bound_capability()
+    execute = capability.tools()[0]
+
+    output = await _invoke(execute, {"command": "pwd", field: value})
+
+    assert output["error"]["code"] == "invalid_tool_input"
+    assert domain.execute_requests == []
 
 
 @pytest.mark.asyncio
