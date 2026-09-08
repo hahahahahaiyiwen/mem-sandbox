@@ -1,6 +1,6 @@
 # Policy Admission Design
 
-**Status:** Minimal admission seam implemented; issue #31 path-mutation facts designed
+**Status:** Minimal admission seam implemented; OpenAI boundary re-evaluated in issue #37
 
 ## Decision
 
@@ -27,6 +27,35 @@ The essential sandbox guarantees remain enforced by the modules that own them:
 
 These guarantees do not depend on a configurable policy engine and must not be weakened
 when policy is reconsidered.
+
+## Milestone 5 re-evaluation result
+
+Issue #37 reviewed the implemented OpenAI client/session, serialized provider state,
+manifest translation, capability binding, snapshot bridge, and deferred SDK surfaces.
+The supported process-local profile introduces no new protected action:
+
+- the application owns the injected service, selects the logical owner, and decides
+  which serialized state or snapshot reference may reach the adapter;
+- opaque handles and serialized core session IDs are consistency data, not authenticated
+  credentials;
+- the model-facing capability is bound to a host-selected session and exposes no handle,
+  session selector, lifecycle, snapshot, policy, secret, mount, port, network, or host
+  process input;
+- execute timeout and output inputs may only narrow fixed profile ceilings; the existing
+  policy seam may further narrow timeout, while output remains bounded by the capability
+  and command-executor profiles;
+- manifests accept only synthetic workspace `File` and `Dir` entries and reject every
+  other entry type plus unsupported environment, host-grant, user/group, mount, PTY, and
+  port fields;
+- snapshot owner provenance prevents accidental cross-owner reuse but does not replace
+  application authorization.
+
+Application-owned authorization therefore remains correct for this release profile, and
+the composed policy engine remains deferred. A shared or multi-tenant service/snapshot
+store, model-selectable session, egress, arbitrary execution, external approval
+obligation, or per-tenant capability profile is still a mandatory re-evaluation trigger.
+The complete surface-by-surface decision is recorded in `docs/PLAN.md` section 5.7 and
+the OpenAI integration README.
 
 ## Retained minimal seam
 

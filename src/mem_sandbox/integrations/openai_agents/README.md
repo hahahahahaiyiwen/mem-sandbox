@@ -197,6 +197,11 @@ The profile exposes exactly:
 | `write_file` | `path`, `content`, explicit `write_condition`, optional `expected_hash`, optional `create_parents` |
 | `apply_patch` | `patch`, `expected_hashes[]` containing `path` and `content_hash` |
 
+Optional `timeout_seconds` and `max_output_bytes` values can only narrow the fixed
+profile ceilings: 30 seconds and 256 KiB per output stream. Values above those ceilings
+are correctable tool-input errors. The session policy may narrow the requested operation
+timeout further; the model cannot increase either ceiling.
+
 `execute` uses the constrained MemSandbox command language, never a host shell.
 `max_output_bytes` independently bounds stdout and stderr. Write conditions map exactly
 to `AnyCurrentState`, `PathMustNotExist`, or `ContentHashMustEqual`; omission of an
@@ -343,6 +348,36 @@ explicit compatibility review.
 Support is limited to the documented `>=0.22,<0.23` range. Expanding that range requires
 running the contract and conformance suites against the proposed versions and updating
 this README and the integration design documents.
+
+## Milestone 5 trust-boundary review
+
+Issue #37 confirmed that this integration remains a translation and lifecycle boundary,
+not an authorization provider.
+
+| Surface | Trust decision |
+|---|---|
+| Client and handles | The application owns the injected service and decides which caller may use a client or serialized state. `sandbox_handle` plus `core_session_id` detects stale/colliding state but grants no authority. |
+| Provider state | Strict JSON validation rejects unknown or malformed state. Serialized values contain no live services/sessions, credentials, secrets, or host paths. Model-issued virtual cwd/environment changes may be persisted, but they are revalidated before atomic replacement restore. Applications protect the state and snapshot identifiers they issue. |
+| Manifest | Only bounded synthetic `File` and `Dir` entries are accepted; every other entry type and unsupported manifest field fails before allocation or mutation. Environment, host grants, users/groups, custom mount behavior, PTY, and ports are unsupported. |
+| Capability | A per-run clone binds to the host-selected provider session. Tool schemas expose no session selector, handle, lifecycle, snapshot, policy, secret, host-shell, mount, port, or network input. Optional execute timeout/output values can only narrow the fixed 30-second and 256-KiB profile ceilings. |
+| Environment and secrets | Persistent environment changes exist only in the virtual session. Manifest environment is unsupported, and operation-scoped secret overlays remain owned by the core policy/secret contracts. |
+| Snapshots | Store/dependency selection is application-owned. The application-asserted owner tag plus format, schema, size, payload hash, revision, and root hash checks provide integrity and consistency, not caller authentication. |
+
+The model may see a core session ID in operation-result metadata, but that identifier
+cannot resolve a service session and is not accepted by any capability tool. The
+application remains responsible for authorizing serialized state and snapshot access
+before invoking `resume()`.
+
+No current surface triggers a composed policy engine. A separate behavior-first design
+is required before enabling shared or cross-tenant persistence, model-selectable
+sessions, path grants, mounts, network/egress, arbitrary host execution, externally
+required approvals, or per-tenant capability profiles.
+
+The same review found no justified cross-framework runtime abstraction. SDK state,
+manifest translation, lifecycle hooks, capability binding, snapshot protocol, and error
+mapping are OpenAI-owned concerns; reusable sandbox behavior already lives behind public
+core interfaces. Additional SDKs remain separate approved integrations until at least
+two implementations prove identical collaboration.
 
 ## Maintenance rules
 

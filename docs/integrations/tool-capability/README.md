@@ -301,6 +301,8 @@ provider. It does not gate Milestone 5.
 
 - Owner, tenant, and session identity come from trusted adapter context.
 - The model cannot select another session by passing a handle.
+- Model-provided execute timeout and output limits may only narrow fixed capability
+  ceilings; they cannot expand host-approved resource use.
 - Tool descriptions state the logical-sandbox limitation.
 - Model-provided paths and commands always pass through the session and policy engine.
 - The adapter never invokes `open`, `os`, `subprocess`, or host shell APIs for sandbox

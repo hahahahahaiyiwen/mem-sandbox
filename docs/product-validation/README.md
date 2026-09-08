@@ -497,13 +497,19 @@ Milestone 5 engineering evidence is complete when:
 - one short-duration reference artifact is captured for every required driver;
 - the artifact is explicitly non-gating and records its runner assumptions;
 - benchmark results include the correctness checksum and environment fingerprint;
-- product wording is consistent with the available evidence.
+- product wording is consistent with the available evidence;
+- the issue #45 opt-in Azure OpenAI sample proves one real model can use the host-bound
+  capability while required CI remains deterministic and network-free.
 
 Comparative evaluation may occur after the Milestone 5 engineering exit, but a public
 "fastest" claim remains blocked until that evaluation passes.
 
 PydanticAI, Deep Agents, and other SDK drivers are added only with their own approved
 adapter work. Their absence does not block the OpenAI-first Milestone 5 engineering exit.
+
+The Azure sample is integration evidence, not benchmark evidence. Provider latency,
+model behavior, credentials, and network availability must not enter conformance or
+required benchmark gates.
 
 Milestone 6 consumes the baseline to decide whether workspace content offload or a
 simpler optimization addresses a measured constraint.

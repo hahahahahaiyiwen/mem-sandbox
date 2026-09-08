@@ -3,9 +3,9 @@
 **Pinned SDK:** `openai-agents==0.22.0`
 **Pinned source:** commit
 [`89c02c8`](https://github.com/openai/openai-agents-python/tree/89c02c828ee8510fe9a84ee6675608193aa13b02)
-**Status:** Milestone 5.2 client/session and manifest foundation implemented with
-behavior-first tests; issue #34 defines the remaining lifecycle and resume-state
-hardening. Sandbox Agents are beta.
+**Status:** Milestone 5 client/session, manifest, lifecycle, capability, conformance, and
+benchmark work implemented; issue #37 completed the trust-boundary review. Issue #45 is
+the remaining live Azure OpenAI sample gate. Sandbox Agents are beta.
 
 ## Package boundary
 
@@ -282,18 +282,16 @@ The completed Milestone 5.1 audit confirms that the public core already provides
 binary reads and writes, stat/list operations, service-owned lifecycle, process-local
 snapshots, and deterministic constrained command execution.
 
-The remaining owning-module prerequisites are:
+The completed implementation provides:
 
-- native directory creation and removal through an owning core/session boundary
-  (issue #31)
-- POSIX path normalization and confinement, including safe symlink behavior if symlinks
-  are supported
-- bounded workspace-wide export and import for OpenAI snapshot persistence (issue #32)
+- native directory creation and removal through the public session boundary;
+- POSIX-shaped path normalization and confinement, with symlinks explicitly unsupported;
+- bounded workspace-wide export and import for OpenAI snapshot persistence;
 - exact mapping of OpenAI create, start, running, stop, close, delete, serialized state,
-  and resume behavior onto `SandboxService` ownership
-- manifest materialization or explicit rejection of unsupported manifest features
-- a deliberate choice between POSIX-compatible `sh -lc` execution and custom
-  model-facing capabilities
+  and resume behavior onto `SandboxService` ownership;
+- synthetic manifest materialization plus pre-allocation rejection of unsupported
+  manifest features;
+- a custom four-tool model-facing capability instead of unsupported `sh -lc` behavior.
 
 The ranged-read API should remain model-facing because it controls context size. OpenAI
 backend reads should translate through the existing public `SandboxSession.read_bytes`
@@ -306,16 +304,16 @@ understand the shell form and commands used by both the model and SDK internals,
 at least `sh -lc`, `ls`, `mkdir`, `rm`, `chmod`, and commonly `cat` and `rg`. Optional
 manifest features add more commands and semantics.
 
-This level is not required for the first Python version. A cleaner first milestone is:
+This level is not required for the first Python version. Milestone 5 therefore:
 
-1. Keep the original four operations as explicit typed tools in a custom OpenAI
+1. Keeps the original four operations as explicit typed tools in a custom OpenAI
    capability.
-2. Reuse the existing public binary read/write and stat/list operations; add only the
-   missing native directory and portable workspace-persistence ports.
-3. Implement the OpenAI client/session lifecycle and snapshot bridge.
-4. Replace the default OpenAI shell/filesystem capabilities instead of claiming support
+2. Reuses the public binary read/write, stat/list, native directory, and portable
+   workspace-persistence operations.
+3. Implements the OpenAI client/session lifecycle and snapshot bridge.
+4. Replaces the default OpenAI shell/filesystem capabilities instead of claiming support
    for their POSIX assumptions.
-5. Add POSIX compatibility incrementally only where it provides concrete value.
+5. Adds POSIX compatibility incrementally only where it provides concrete value.
 
 This makes the design functionally complete without pretending that the in-memory
 workspace is a full Unix machine.

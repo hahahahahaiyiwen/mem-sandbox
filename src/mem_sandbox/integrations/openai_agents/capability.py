@@ -43,6 +43,16 @@ from mem_sandbox.workspace import (
 
 _PROVIDER_TYPE = "mem_sandbox"
 _LOGGER = logging.getLogger(__name__)
+_DEFAULT_COMMAND_LIMITS = CommandLimits()
+_DEFAULT_OPERATION_LIMITS = OperationLimits()
+_MAX_EXECUTE_TIMEOUT_SECONDS = min(
+    _DEFAULT_COMMAND_LIMITS.timeout_seconds,
+    _DEFAULT_OPERATION_LIMITS.timeout_seconds,
+)
+_MAX_EXECUTE_OUTPUT_BYTES = min(
+    _DEFAULT_COMMAND_LIMITS.max_stdout_bytes,
+    _DEFAULT_COMMAND_LIMITS.max_stderr_bytes,
+)
 
 
 class _ToolInput(BaseModel):
@@ -55,8 +65,16 @@ class _InvalidToolInput(Exception):
 
 class _ExecuteInput(_ToolInput):
     command: str = Field(min_length=1)
-    timeout_seconds: float | None = Field(default=None, gt=0)
-    max_output_bytes: int | None = Field(default=None, gt=0)
+    timeout_seconds: float | None = Field(
+        default=None,
+        gt=0,
+        le=_MAX_EXECUTE_TIMEOUT_SECONDS,
+    )
+    max_output_bytes: int | None = Field(
+        default=None,
+        gt=0,
+        le=_MAX_EXECUTE_OUTPUT_BYTES,
+    )
 
 
 class _ReadFileInput(_ToolInput):
@@ -133,8 +151,8 @@ class InMemorySandboxCapability(Capability):
         async def execute_tool(arguments: _ExecuteInput) -> SessionExecuteResult:
             provider_session.require_available()
             try:
-                command_limits = CommandLimits()
-                operation_limits = OperationLimits()
+                command_limits = _DEFAULT_COMMAND_LIMITS
+                operation_limits = _DEFAULT_OPERATION_LIMITS
                 if arguments.timeout_seconds is not None:
                     timeout = arguments.timeout_seconds
                     command_limits = replace(command_limits, timeout_seconds=timeout)
