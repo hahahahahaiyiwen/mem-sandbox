@@ -8,6 +8,7 @@ from typing import cast
 
 from mem_sandbox.command_executor import (
     CancellationSignal,
+    CommandEnvironment,
     CommandFailureCode,
     CommandLimits,
     EnvironmentChange,
@@ -304,6 +305,20 @@ class RestoreSnapshotRequest:
 class RestoreSnapshotResult:
     metadata: OperationResultMetadata
     snapshot_ref: SnapshotRef
+
+
+@dataclass(frozen=True, slots=True)
+class SessionExecutionContext:
+    """Trusted cwd and approved environment restored with a portable workspace."""
+
+    cwd: SandboxPath
+    approved_environment: CommandEnvironment
+
+    def __post_init__(self) -> None:
+        if not isinstance(cast(object, self.cwd), SandboxPath):
+            raise TypeError("cwd must be a SandboxPath")
+        if not isinstance(cast(object, self.approved_environment), CommandEnvironment):
+            raise TypeError("approved_environment must be a CommandEnvironment")
 
 
 def _require_text(name: str, value: object) -> str:

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
-from typing import Any, Literal, Protocol, cast
+from typing import Any, cast
 from uuid import UUID
 
 import pytest
@@ -30,7 +30,6 @@ from mem_sandbox.core import (
     OperationId,
     OperationResultMetadata,
     Revision,
-    SandboxError,
     SessionId,
 )
 from mem_sandbox.integrations.openai_agents import (
@@ -40,20 +39,13 @@ from mem_sandbox.integrations.openai_agents import (
     InMemorySandboxSession,
     InMemorySandboxSessionState,
 )
-from mem_sandbox.service import (
-    OwnerId,
-    ResumeSandboxRequest,
-    SandboxNotFound,
-    SandboxService,
-)
+from mem_sandbox.service import SandboxService
 from mem_sandbox.session import (
     ApplyPatchRequest,
-    CreateSnapshotRequest,
     FileMutationResult,
     PatchMutationResult,
     ReadFileRequest,
     ReadFileResult,
-    RestoreSnapshotRequest,
     SandboxSessionState,
     SessionExecuteRequest,
     SessionExecuteResult,
@@ -63,7 +55,6 @@ from mem_sandbox.session import (
     SessionPolicyDenied,
     WriteFileRequest,
 )
-from mem_sandbox.snapshots import JsonSessionSnapshotCodec
 from mem_sandbox.workspace import (
     AnyCurrentState,
     ContentHash,
@@ -270,256 +261,6 @@ class DeterministicToolModel(Model):
         )
         raise NotImplementedError
         yield
-
-
-class _ScenarioDriver(Protocol):
-    async def execute(self, command: str) -> dict[str, object]: ...
-
-    async def read_file(
-        self,
-        path: str,
-        *,
-        start_line: int = 1,
-        end_line: int | None = None,
-    ) -> dict[str, object]: ...
-
-    async def write_file(
-        self,
-        path: str,
-        content: str,
-        *,
-        write_condition: Literal[
-            "any_current_state",
-            "path_must_not_exist",
-            "content_hash_must_equal",
-        ],
-        expected_hash: str | None = None,
-        create_parents: bool = False,
-    ) -> dict[str, object]: ...
-
-    async def apply_patch(
-        self,
-        patch: str,
-        expected_hashes: list[dict[str, str]],
-    ) -> dict[str, object]: ...
-
-
-class _DirectScenarioDriver:
-    def __init__(self, session: Any) -> None:
-        self._session = session
-
-    async def execute(self, command: str) -> dict[str, object]:
-        result = await self._session.execute(SessionExecuteRequest(command=command))
-        return {
-            "ok": True,
-            "revision": result.metadata.workspace_revision.value,
-            "exit_code": result.exit_code,
-            "failure_code": (None if result.failure_code is None else result.failure_code.value),
-            "stdout": result.stdout,
-            "resulting_cwd": result.resulting_cwd.value,
-            "environment_changes": [
-                (change.name, change.value) for change in result.environment_changes
-            ],
-        }
-
-    async def read_file(
-        self,
-        path: str,
-        *,
-        start_line: int = 1,
-        end_line: int | None = None,
-    ) -> dict[str, object]:
-        result = await self._session.read_file(
-            ReadFileRequest(path=path, start_line=start_line, end_line=end_line)
-        )
-        return {
-            "ok": True,
-            "revision": result.metadata.workspace_revision.value,
-            "content": result.content,
-            "content_hash": result.content_hash.value,
-        }
-
-    async def write_file(
-        self,
-        path: str,
-        content: str,
-        *,
-        write_condition: Literal[
-            "any_current_state",
-            "path_must_not_exist",
-            "content_hash_must_equal",
-        ],
-        expected_hash: str | None = None,
-        create_parents: bool = False,
-    ) -> dict[str, object]:
-        if write_condition == "any_current_state":
-            precondition = AnyCurrentState()
-        elif write_condition == "path_must_not_exist":
-            precondition = PathMustNotExist()
-        else:
-            assert expected_hash is not None
-            precondition = ContentHashMustEqual(ContentHash(expected_hash))
-        try:
-            result = await self._session.write_file(
-                WriteFileRequest(
-                    path=path,
-                    content=content,
-                    precondition=precondition,
-                    create_parents=create_parents,
-                )
-            )
-        except SandboxError as error:
-            return {
-                "ok": False,
-                "category": error.category.value,
-                "code": error.code,
-            }
-        return {
-            "ok": True,
-            "revision": result.metadata.workspace_revision.value,
-            "created": result.created,
-            "changed": result.changed,
-            "current_hash": (None if result.current_hash is None else result.current_hash.value),
-        }
-
-    async def apply_patch(
-        self,
-        patch: str,
-        expected_hashes: list[dict[str, str]],
-    ) -> dict[str, object]:
-        result = await self._session.apply_patch(
-            ApplyPatchRequest(
-                patch=patch,
-                expected_hashes=tuple(
-                    SessionExpectedFileHash(
-                        item["path"],
-                        ContentHash(item["content_hash"]),
-                    )
-                    for item in expected_hashes
-                ),
-            )
-        )
-        return {
-            "ok": True,
-            "revision": result.metadata.workspace_revision.value,
-            "files": [
-                {
-                    "path": item.path.value,
-                    "previous_hash": item.previous_hash.value,
-                    "current_hash": item.current_hash.value,
-                }
-                for item in result.files
-            ],
-        }
-
-
-class _CapabilityScenarioDriver:
-    def __init__(self, capability: InMemorySandboxCapability) -> None:
-        self._tools = {tool.name: tool for tool in capability.tools()}
-
-    async def execute(self, command: str) -> dict[str, object]:
-        output = await _invoke(self._tools["execute"], {"command": command})
-        if not output["ok"]:
-            return _normalized_error(output)
-        result = cast(dict[str, Any], output["result"])
-        metadata = cast(dict[str, Any], result["metadata"])
-        return {
-            "ok": True,
-            "revision": metadata["workspace_revision"],
-            "exit_code": result["exit_code"],
-            "failure_code": result["failure_code"],
-            "stdout": result["stdout"],
-            "resulting_cwd": result["resulting_cwd"],
-            "environment_changes": [
-                (item["name"], item["value"])
-                for item in cast(list[dict[str, Any]], result["environment_changes"])
-            ],
-        }
-
-    async def read_file(
-        self,
-        path: str,
-        *,
-        start_line: int = 1,
-        end_line: int | None = None,
-    ) -> dict[str, object]:
-        output = await _invoke(
-            self._tools["read_file"],
-            {"path": path, "start_line": start_line, "end_line": end_line},
-        )
-        if not output["ok"]:
-            return _normalized_error(output)
-        result = cast(dict[str, Any], output["result"])
-        metadata = cast(dict[str, Any], result["metadata"])
-        return {
-            "ok": True,
-            "revision": metadata["workspace_revision"],
-            "content": result["content"],
-            "content_hash": result["content_hash"],
-        }
-
-    async def write_file(
-        self,
-        path: str,
-        content: str,
-        *,
-        write_condition: Literal[
-            "any_current_state",
-            "path_must_not_exist",
-            "content_hash_must_equal",
-        ],
-        expected_hash: str | None = None,
-        create_parents: bool = False,
-    ) -> dict[str, object]:
-        output = await _invoke(
-            self._tools["write_file"],
-            {
-                "path": path,
-                "content": content,
-                "write_condition": write_condition,
-                "expected_hash": expected_hash,
-                "create_parents": create_parents,
-            },
-        )
-        if not output["ok"]:
-            return _normalized_error(output)
-        result = cast(dict[str, Any], output["result"])
-        metadata = cast(dict[str, Any], result["metadata"])
-        return {
-            "ok": True,
-            "revision": metadata["workspace_revision"],
-            "created": result["created"],
-            "changed": result["changed"],
-            "current_hash": result["current_hash"],
-        }
-
-    async def apply_patch(
-        self,
-        patch: str,
-        expected_hashes: list[dict[str, str]],
-    ) -> dict[str, object]:
-        output = await _invoke(
-            self._tools["apply_patch"],
-            {"patch": patch, "expected_hashes": expected_hashes},
-        )
-        if not output["ok"]:
-            return _normalized_error(output)
-        result = cast(dict[str, Any], output["result"])
-        metadata = cast(dict[str, Any], result["metadata"])
-        return {
-            "ok": True,
-            "revision": metadata["workspace_revision"],
-            "files": result["files"],
-        }
-
-
-def _normalized_error(output: dict[str, Any]) -> dict[str, object]:
-    error = cast(dict[str, Any], output["error"])
-    return {
-        "ok": False,
-        "category": error["category"],
-        "code": error["code"],
-    }
 
 
 def _provider_session(
@@ -878,192 +619,6 @@ async def test_unexpected_failures_are_redacted_with_a_correlation_id() -> None:
     assert error["message"] == "The sandbox operation failed unexpectedly"
     assert "secret implementation detail" not in json.dumps(output)
     UUID(cast(str, error["correlation_id"]))
-
-
-@pytest.mark.asyncio
-async def test_model_free_capability_conformance_preserves_state_and_fork_isolation() -> None:
-    direct_trace = await _run_stateful_tool_scenario(use_capability=False)
-    capability_trace = await _run_stateful_tool_scenario(use_capability=True)
-
-    assert direct_trace["first_write"] == {
-        "ok": True,
-        "revision": 1,
-        "created": True,
-        "changed": True,
-        "current_hash": ContentHash.from_bytes(b"alpha\nbeta\ngamma\n").value,
-    }
-    assert cast(dict[str, object], direct_trace["second_write"])["revision"] == 2
-    assert cast(dict[str, object], direct_trace["execute"])["stdout"] == (
-        "/workspace/project\nalpha\nbeta\ngamma\n"
-    )
-    assert cast(dict[str, object], direct_trace["bounded"])["content"] == "beta\ngamma"
-    assert cast(dict[str, object], direct_trace["patched"])["revision"] == 3
-    assert direct_trace["stale"] == {
-        "ok": False,
-        "category": "conflict",
-        "code": "stale_content",
-    }
-    assert cast(dict[str, object], direct_trace["after_stale"])["revision"] == 3
-    assert direct_trace["checkpoint_revision"] == 3
-    assert direct_trace["checkpoint_root_hash"] == direct_trace["restored_root_hash"]
-    assert direct_trace["checkpoint_cwd"] == direct_trace["restored_cwd"] == "/workspace/project"
-    assert direct_trace["checkpoint_mode"] == direct_trace["restored_mode"] == "base"
-    assert direct_trace["restored_snapshot_matches"] is True
-    assert cast(dict[str, object], direct_trace["unsupported"])["failure_code"] == (
-        "command_not_found"
-    )
-    assert direct_trace["source_identity_preserved"] is True
-    assert direct_trace["fork_identity_changed"] is True
-    assert direct_trace["fork_content"] == "alpha\ndelta\ngamma"
-    assert direct_trace["fork_hash"] == direct_trace["patched_hash"]
-    assert direct_trace["source_cleanup"] is True
-    assert direct_trace["fork_cleanup"] is True
-    assert direct_trace["snapshot_count"] == 0
-    assert capability_trace == direct_trace
-
-
-async def _run_stateful_tool_scenario(*, use_capability: bool) -> dict[str, object]:
-    bundle = create_service_bundle()
-    client = InMemorySandboxClient(bundle.service)
-    sdk_session = await client.create(
-        manifest=Manifest(),
-        options=InMemorySandboxClientOptions(owner_id="scenario-source"),
-    )
-    await sdk_session.start()
-    provider = cast(InMemorySandboxSession, cast(Any, sdk_session)._inner)
-    driver: _ScenarioDriver
-    if use_capability:
-        capability = InMemorySandboxCapability()
-        capability.bind(sdk_session)
-        driver = _CapabilityScenarioDriver(capability)
-    else:
-        driver = _DirectScenarioDriver(provider.core_session)
-
-    first_write = await driver.write_file(
-        "/workspace/project/app.txt",
-        "alpha\nbeta\ngamma\n",
-        write_condition="path_must_not_exist",
-        create_parents=True,
-    )
-    second_write = await driver.write_file(
-        "/workspace/project/second.txt",
-        "second\n",
-        write_condition="path_must_not_exist",
-    )
-    executed = await driver.execute("cd /workspace/project; export MODE=base; pwd; cat app.txt")
-    bounded = await driver.read_file(
-        "app.txt",
-        start_line=2,
-        end_line=3,
-    )
-    bounded_hash = cast(str, bounded["content_hash"])
-    patched = await driver.apply_patch(
-        (
-            "--- /workspace/project/app.txt\n"
-            "+++ /workspace/project/app.txt\n"
-            "@@ -1,3 +1,3 @@\n"
-            " alpha\n"
-            "-beta\n"
-            "+delta\n"
-            " gamma\n"
-        ),
-        [
-            {
-                "path": "app.txt",
-                "content_hash": bounded_hash,
-            }
-        ],
-    )
-    stale = await driver.write_file(
-        "app.txt",
-        "stale\n",
-        write_condition="content_hash_must_equal",
-        expected_hash=bounded_hash,
-    )
-    after_stale = await driver.read_file("app.txt")
-    checkpoint = await provider.core_session.create_snapshot(CreateSnapshotRequest())
-    checkpoint_data = await bundle.snapshot_store.load(checkpoint.snapshot_ref)
-    checkpoint_state = JsonSessionSnapshotCodec().decode(checkpoint_data)
-
-    await driver.write_file(
-        "app.txt",
-        "mutated\n",
-        write_condition="content_hash_must_equal",
-        expected_hash=cast(str, after_stale["content_hash"]),
-    )
-    await driver.execute("cd /workspace; export MODE=mutated")
-    restored = await provider.core_session.restore_snapshot(
-        RestoreSnapshotRequest(snapshot_ref=checkpoint.snapshot_ref)
-    )
-    restored_content = await driver.read_file("/workspace/project/app.txt")
-    restored_checkpoint = await provider.core_session.create_snapshot(CreateSnapshotRequest())
-    restored_data = await bundle.snapshot_store.load(restored_checkpoint.snapshot_ref)
-    restored_state = JsonSessionSnapshotCodec().decode(restored_data)
-    unsupported = await driver.execute('python -c \'open("host-canary", "w")\'')
-
-    source_session_id = provider.core_session.session_id
-    await client.delete(sdk_session)
-    source_missing = False
-    try:
-        await bundle.service.get_session(provider.handle)
-    except SandboxNotFound:
-        source_missing = True
-    fork_handle = await bundle.service.resume(
-        ResumeSandboxRequest(
-            owner_id=OwnerId("scenario-fork"),
-            snapshot_ref=checkpoint.snapshot_ref,
-        )
-    )
-    fork = await bundle.service.get_session(fork_handle)
-    fork_content = await fork.read_file(ReadFileRequest(path="app.txt"))
-    await fork.write_file(
-        WriteFileRequest(
-            path="fork.txt",
-            content="fork\n",
-            create_parents=False,
-        )
-    )
-    await fork.close()
-    await bundle.service.delete(fork_handle)
-    fork_missing = False
-    try:
-        await bundle.service.get_session(fork_handle)
-    except SandboxNotFound:
-        fork_missing = True
-    await bundle.snapshot_store.delete(checkpoint.snapshot_ref)
-    await bundle.snapshot_store.delete(restored_checkpoint.snapshot_ref)
-    snapshot_count = (await bundle.snapshot_store.stats()).snapshot_count
-    await bundle.service.close()
-
-    patched_files = cast(list[dict[str, Any]], patched["files"])
-    return {
-        "first_write": first_write,
-        "second_write": second_write,
-        "execute": executed,
-        "bounded": bounded,
-        "patched": patched,
-        "stale": stale,
-        "after_stale": after_stale,
-        "checkpoint_revision": checkpoint_state.workspace.workspace_revision.value,
-        "checkpoint_root_hash": checkpoint_state.workspace.root_hash.value,
-        "checkpoint_cwd": checkpoint_state.cwd.value,
-        "checkpoint_mode": checkpoint_state.approved_environment.get("MODE"),
-        "restored_revision": restored.metadata.workspace_revision.value,
-        "restored_content": restored_content,
-        "restored_root_hash": restored_state.workspace.root_hash.value,
-        "restored_cwd": provider.core_session.cwd.value,
-        "restored_mode": provider.core_session.environment.get("MODE"),
-        "restored_snapshot_matches": restored_checkpoint.content_hash == checkpoint.content_hash,
-        "unsupported": unsupported,
-        "source_identity_preserved": restored.metadata.session_id == source_session_id,
-        "fork_identity_changed": fork.session_id != source_session_id,
-        "fork_content": fork_content.content,
-        "fork_hash": fork_content.content_hash.value,
-        "patched_hash": patched_files[0]["current_hash"],
-        "source_cleanup": source_missing,
-        "fork_cleanup": fork_missing,
-        "snapshot_count": snapshot_count,
-    }
 
 
 @pytest.mark.asyncio

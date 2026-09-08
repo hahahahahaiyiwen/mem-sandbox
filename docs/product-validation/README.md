@@ -1,6 +1,6 @@
 # Product Validation and Benchmark Design
 
-**Status:** Milestone 4 direct reference implemented; OpenAI-first Milestone 5 proposed
+**Status:** Three-driver conformance, benchmark harness, and non-gating reference implemented
 
 ## Purpose
 
@@ -38,7 +38,7 @@ Milestone 5 should deliver three related but distinct forms of evidence:
 | Evidence | Question answered | Release role |
 |---|---|---|
 | Stateful execution conformance | Does state survive and behave identically through every supported surface? | Required correctness gate |
-| Provisioning regression benchmarks | Is MemSandbox still fast, and did this change make it materially slower? | Required controlled baseline and regression gate |
+| Provisioning measurements | How fast is MemSandbox on the named runner, and what should future regression work measure? | Required non-gating reference now; controlled gate only when introduced |
 | Comparative provisioning benchmarks | Is MemSandbox faster than named alternatives under a fair documented profile? | Required only for a comparative "fastest" claim |
 
 Shared public CI is suitable for correctness and benchmark smoke tests. Stable performance
@@ -260,10 +260,10 @@ The initial profile set includes:
 
 | Profile | Purpose | Required tier |
 |---|---|---|
-| `empty` | Primary provisioning path and per-session overhead | PR smoke and controlled |
-| `small_project` | Typical short agent task with a modest seeded tree | Controlled |
-| `active_project` | Larger state, mutation, snapshot, and resume behavior | Controlled |
-| `quota_edge` | Near-limit accounting, snapshot, and memory behavior | Scheduled or release |
+| `empty` | Primary provisioning path and per-session overhead | PR smoke, reference, and future controlled |
+| `small_project` | Typical short agent task with a modest seeded tree | Reference and future controlled |
+| `active_project` | Larger state, mutation, snapshot, and resume behavior | Future controlled |
+| `quota_edge` | Near-limit accounting, snapshot, and memory behavior | Future scheduled or release |
 
 Exact profile sizes are versioned with the benchmark suite. Changing a profile creates a
 new profile version rather than silently rewriting historical results.
@@ -276,7 +276,7 @@ new profile version rather than silently rewriting historical results.
 4. Snapshot creation for each non-empty profile.
 5. Resume to ready and resume through the first state-verifying operation.
 6. Complete stateful reference scenario duration.
-7. Bounded sequential creation of multiple independent sessions.
+7. Bounded concurrent creation of multiple independent sessions.
 8. Resident memory for an empty session and each fixture profile.
 9. Adapter overhead relative to the direct driver.
 
@@ -296,8 +296,9 @@ and must not exhaust the host or turn a benchmark failure into a machine-wide fa
 - Do not report p95 from fewer than 100 measured samples.
 - Do not report p99 from fewer than 1,000 measured samples.
 - Run cold-process cases in fresh child interpreters.
-- Run warm cases in multiple fresh processes so one long-lived interpreter does not
-  define the result.
+- Run comparable controlled warm cases in multiple fresh processes so one long-lived
+  interpreter does not define the result. Smoke and short reference artifacts may use
+  one process because they are explicitly non-comparative and non-gating.
 
 The implementation task selects sample counts that meet a documented minimum duration
 and quantile sample requirement. Quick PR smoke runs may use fewer samples but must be
@@ -379,13 +380,15 @@ correctness checksum are compatible.
 |---|---|---|---|
 | Conformance | Every PR | Stateful behavior and adapter equivalence | Required |
 | Benchmark smoke | Relevant PRs | Harness validity and gross failure detection | Required, non-comparative |
-| Controlled regression | Scheduled, release, or performance-sensitive PR | Candidate versus approved baseline | Required for Milestone 5 baseline and releases |
+| Reference measurement | Milestone or design checkpoint | Short-duration approximate product metrics | Recorded, non-gating |
+| Controlled regression | Scheduled, release, or performance-sensitive PR | Candidate versus approved baseline | Required only when automated performance gating is introduced |
 | Comparative | Explicit product evaluation | Substantiate a scoped market claim | Required only before publishing that claim |
 
 ### Regression budgets
 
-Absolute latency budgets must not be invented before the first controlled baseline.
-Milestone 5 records approved per-case budgets after baseline collection.
+Absolute latency budgets must not be invented from smoke or reference measurements.
+Milestone 5 records a short-duration non-gating reference. Controlled per-case budgets
+are added only when the project introduces an automated release or regression gate.
 
 Each budget defines:
 
@@ -441,44 +444,58 @@ The project must not publish an unqualified "fastest sandbox" claim. If comparat
 evidence is absent, stale, or statistically indistinguishable, product language remains
 "optimized for fast provisioning."
 
-## Proposed repository layout
+## Implemented repository layout
 
-The implementation milestone may add:
+The implementation uses:
 
 ```text
 benchmarks/
   README.md
-  profiles/
+  profiles.py
+  validation.py
+  support.py
   drivers/
     direct.py
-    openai_sandbox.py
-    openai_capability.py
-  cases/
-    provisioning.py
-    snapshot_resume.py
-    stateful_scenario.py
+    openai.py
+    core.py
+  cases.py
+  cold_worker.py
   runner.py
   schema.py
   reports.py
 tests/
+  benchmarks/
   conformance/
     product/
 ```
 
-Benchmark framework and memory-measurement packages, if approved, belong only to
-development dependency groups. The benchmark package may import MemSandbox and adapter
-packages; production modules never import the benchmark package.
+The implementation uses only the standard library for timing, statistics, subprocess
+control, environment fingerprinting, and Python allocation peaks. No benchmark
+dependency enters the runtime package. The benchmark package may import MemSandbox and
+adapter packages; production modules never import the benchmark package.
+
+The product driver contract is defined in `benchmarks.validation`, outside every runtime
+adapter. OpenAI client/session lifecycle remains SDK-managed. The OpenAI sandbox driver
+uses the provider's public `core_session` collaboration seam only for revisioned
+operations, expected-hash preconditions, and domain-faithful results that the generic SDK
+binary stream contract cannot express. The capability driver invokes only the four
+model-facing tools.
+
+Provider state version 1 was extended compatibly with defaulted `cwd` and
+`approved_environment` fields. Newly persisted SDK state restores execution context
+atomically with its portable workspace; older v1 payloads remain readable with the
+historical root/empty defaults.
 
 ## Milestone 5 release requirements
 
-Milestone 5 is not complete until:
+Milestone 5 engineering evidence is complete when:
 
 - the scripted stateful scenario passes through the direct session, OpenAI sandbox
   client/session, and OpenAI capability drivers;
 - cold, warm, first-operation, snapshot, resume, memory, and adapter-overhead cases are
   executable;
-- one controlled baseline artifact is captured for every required driver and profile;
-- regression budgets and runner assumptions are documented;
+- one short-duration reference artifact is captured for every required driver;
+- the artifact is explicitly non-gating and records its runner assumptions;
 - benchmark results include the correctness checksum and environment fingerprint;
 - product wording is consistent with the available evidence.
 
@@ -502,17 +519,34 @@ simpler optimization addresses a measured constraint.
 - Ranking products with different capabilities without disclosing those differences.
 - Adding content offload or another optimization before measurements identify a need.
 
-## Open implementation decisions
+## Implementation decisions
 
-The implementation issue must resolve:
+Resolved:
 
-- the designated controlled runner and how it is maintained;
-- exact versioned workspace profile dimensions;
-- minimum samples and duration for each case;
-- approved metric-specific regression budgets;
-- whether paired base-versus-candidate runs or stored baselines are authoritative;
-- the benchmark framework and process-memory tool, if any;
-- result artifact retention and publication location;
+- benchmark artifact schema version 1 is an immutable dataclass-to-JSON contract;
+- generated Python profile version 1 defines `empty`, `small_project`,
+  `active_project`, and `quota_edge` with exact recorded dimensions;
+- `time.perf_counter_ns()` supplies raw integer samples;
+- smoke uses one non-comparable sample and a bounded four-session burst;
+- reference runs use two warm-ups and five measured in-process samples, with two fresh
+  child interpreters per cold-process driver;
+- p95 and p99 are withheld below 100 and 1,000 samples respectively;
+- `tracemalloc` records Python allocation peaks without a new dependency;
+- artifacts and Markdown summaries are generated under caller-selected,
+  normally ignored `benchmark-results/` paths;
+- milestone reference artifacts are retained under `benchmarks/results/`; the initial
+  Windows development-workstation run contains 38 successful cases and no failures;
+- comparative results remain separate and cannot authorize an unqualified product claim.
+
+Deferred until automated performance gating is justified:
+
+- designated runner identity, maintenance, and stable power configuration;
+- measured runner noise and metric-specific budgets;
+- authoritative paired-main versus stored-baseline policy;
+- controlled artifact retention/publication;
+- process RSS collection on that runner;
+- fresh-process distribution and aggregation for controlled warm cases;
+- controlled sample-count and minimum-duration defaults;
 - the first comparative product matrix and refresh cadence.
 
 ## Maintenance rule

@@ -87,6 +87,7 @@ from mem_sandbox.session.models import (
     SandboxSessionState,
     SessionExecuteRequest,
     SessionExecuteResult,
+    SessionExecutionContext,
     SessionExpectedFileHash,
     SessionSecretEnvironmentBinding,
     StatRequest,
@@ -936,6 +937,7 @@ class SandboxSession:
         self,
         data: WorkspaceArchiveData,
         *,
+        execution_context: SessionExecutionContext | None = None,
         expected_current_revision: Revision | None = None,
         expected_current_root_hash: ContentHash | None = None,
     ) -> None:
@@ -951,6 +953,10 @@ class SandboxSession:
             cast(object, expected_current_root_hash), ContentHash
         ):
             raise TypeError("expected_current_root_hash must be a ContentHash or None")
+        if execution_context is not None and not isinstance(
+            cast(object, execution_context), SessionExecutionContext
+        ):
+            raise TypeError("execution_context must be a SessionExecutionContext or None")
 
         async def action(context: _OperationContext) -> tuple[None, Revision]:
             if expected_current_revision is not None:
@@ -971,7 +977,9 @@ class SandboxSession:
             candidate = await self._await_collaborator(
                 lambda: self._workspace_snapshots.prepare_archive_restore(
                     data,
-                    required_directory=self._cwd,
+                    required_directory=(
+                        self._cwd if execution_context is None else execution_context.cwd
+                    ),
                 ),
                 context.collaborator_deadline,
                 None,
@@ -979,6 +987,7 @@ class SandboxSession:
             )
             await self._publish_workspace_restore(
                 candidate,
+                execution_context,
                 context.collaborator_deadline,
                 None,
                 context.operation_id,
@@ -1367,12 +1376,16 @@ class SandboxSession:
     async def _publish_workspace_restore(
         self,
         candidate: PreparedWorkspaceRestore,
+        execution_context: SessionExecutionContext | None,
         deadline: float,
         cancellation: CancellationSignal | None,
         operation_id: OperationId,
     ) -> None:
         async def publish() -> None:
             await self._workspace_snapshots.commit_restore(candidate)
+            if execution_context is not None:
+                self._cwd = execution_context.cwd
+                self._environment = execution_context.approved_environment
 
         await self._publish_restore_action(publish, deadline, cancellation, operation_id)
 

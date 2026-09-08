@@ -41,7 +41,7 @@ from agents.sandbox.snapshot import (
 from agents.sandbox.types import ExecResult, Permissions, User
 from pydantic import ConfigDict, Field, field_validator, model_validator
 
-from mem_sandbox.command_executor import CommandLimits
+from mem_sandbox.command_executor import CommandEnvironment, CommandLimits, EnvironmentValue
 from mem_sandbox.core import Clock, OperationLimits, Revision, SessionId
 from mem_sandbox.integrations.openai_agents.snapshot import (
     InMemorySandboxSnapshot,
@@ -66,6 +66,7 @@ from mem_sandbox.session import (
     SandboxSession,
     SessionClosed,
     SessionExecuteRequest,
+    SessionExecutionContext,
     WriteBytesRequest,
 )
 from mem_sandbox.session import SandboxSessionState as CoreSandboxSessionState
@@ -127,6 +128,8 @@ class InMemorySandboxSessionState(SandboxSessionState):
     workspace_archive_format_version: int | None = None
     workspace_archive_revision: int | None = None
     workspace_archive_root_hash: str | None = None
+    cwd: str = SandboxPath.ROOT
+    approved_environment: tuple[EnvironmentValue, ...] = ()
 
     @field_validator("max_stream_bytes")
     @classmethod
@@ -154,6 +157,15 @@ class InMemorySandboxSessionState(SandboxSessionState):
             self.workspace_archive_revision,
             self.workspace_archive_root_hash,
         )
+        resolved_cwd = SandboxPath.resolve(
+            self.cwd,
+            cwd=SandboxPath.root(),
+            max_path_bytes=self.workspace_limits.max_path_bytes,
+            max_segment_bytes=self.workspace_limits.max_segment_bytes,
+        )
+        if resolved_cwd.value != self.cwd:
+            raise ValueError("cwd must be a canonical workspace path")
+        CommandEnvironment(self.approved_environment)
         return self
 
 
@@ -205,6 +217,10 @@ class InMemorySandboxSession(BaseSandboxSession):
     def core_session(self) -> SandboxSession:
         """Return the bound domain session without transferring lifecycle ownership."""
         return self._session
+
+    def require_available(self) -> None:
+        """Reject operations after the framework-facing session has closed."""
+        self._require_backend_available()
 
     async def start(self) -> None:
         async with self._lifecycle_lock:
@@ -263,6 +279,7 @@ class InMemorySandboxSession(BaseSandboxSession):
         shell: bool | list[str] = True,
         user: str | User | None = None,
     ) -> ExecResult:
+        self._require_backend_available()
         _reject_user(user)
         if shell is not False:
             raise ValueError("shell execution is not supported")
@@ -302,6 +319,7 @@ class InMemorySandboxSession(BaseSandboxSession):
         )
 
     async def read(self, path: Path, *, user: str | User | None = None) -> io.IOBase:
+        self._require_backend_available()
         _reject_user(user)
         workspace_path = self._core_path(path)
         result = await self._session.read_bytes(ReadBytesRequest(path=workspace_path.value))
@@ -314,6 +332,7 @@ class InMemorySandboxSession(BaseSandboxSession):
         *,
         user: str | User | None = None,
     ) -> None:
+        self._require_backend_available()
         _reject_user(user)
         workspace_path = self._core_path(path)
         try:
@@ -333,9 +352,15 @@ class InMemorySandboxSession(BaseSandboxSession):
         )
 
     async def running(self) -> bool:
-        return self._session.state is CoreSandboxSessionState.RUNNING
+        return (
+            not self._backend_deleted
+            and not self._dependencies_closed
+            and not self._sdk_closing_or_closed
+            and self._session.state is CoreSandboxSessionState.RUNNING
+        )
 
     async def persist_workspace(self) -> io.IOBase:
+        self._require_backend_available()
         archive = await self._session.export_portable_archive()
         _validate_archive_stream_size(archive, self.state.max_stream_bytes)
         return WorkspaceArchiveStream(
@@ -350,6 +375,8 @@ class InMemorySandboxSession(BaseSandboxSession):
             return
         archive = await self._session.export_portable_archive()
         _validate_archive_stream_size(archive, self.state.max_stream_bytes)
+        cwd = self._session.cwd.value
+        approved_environment = self._session.environment.values
         if (
             isinstance(snapshot, InMemorySandboxSnapshot)
             and self.state.workspace_archive_format_version == archive.format_version
@@ -357,6 +384,13 @@ class InMemorySandboxSession(BaseSandboxSession):
             and self.state.workspace_archive_root_hash == archive.root_hash.value
             and await snapshot.restorable(dependencies=self.dependencies)
         ):
+            if self.state.cwd != cwd or self.state.approved_environment != approved_environment:
+                self.state = self.state.model_copy(  # pyright: ignore[reportIncompatibleVariableOverride]
+                    update={
+                        "cwd": cwd,
+                        "approved_environment": approved_environment,
+                    }
+                )
             return
         candidate_snapshot = snapshot.model_copy(update={"id": uuid.uuid4().hex})
         stream = WorkspaceArchiveStream(
@@ -374,12 +408,15 @@ class InMemorySandboxSession(BaseSandboxSession):
                 "workspace_archive_format_version": archive.format_version,
                 "workspace_archive_revision": archive.workspace_revision.value,
                 "workspace_archive_root_hash": archive.root_hash.value,
+                "cwd": cwd,
+                "approved_environment": approved_environment,
                 "snapshot_fingerprint": None,
                 "snapshot_fingerprint_version": None,
             }
         )
 
     async def hydrate_workspace(self, data: io.IOBase) -> None:
+        self._require_backend_available()
         root = Path(self.state.manifest.root)
         try:
             if isinstance(data, WorkspaceArchiveStream):
@@ -409,7 +446,18 @@ class InMemorySandboxSession(BaseSandboxSession):
                 workspace_revision=Revision(revision),
                 root_hash=ContentHash(root_hash),
             )
-            await self._session.restore_portable_archive(archive)
+            execution_context = (
+                SessionExecutionContext(
+                    cwd=SandboxPath(self.state.cwd),
+                    approved_environment=CommandEnvironment(self.state.approved_environment),
+                )
+                if self._replacement_resume
+                else None
+            )
+            await self._session.restore_portable_archive(
+                archive,
+                execution_context=execution_context,
+            )
         except Exception as error:
             raise WorkspaceArchiveReadError(path=root, cause=error) from error
 
@@ -419,6 +467,7 @@ class InMemorySandboxSession(BaseSandboxSession):
         *,
         user: str | User | None = None,
     ) -> list[FileEntry]:
+        self._require_backend_available()
         _reject_user(user)
         workspace_path = self._core_path(path)
         result = await self._session.list_entries(ListEntriesRequest(path=workspace_path.value))
@@ -431,6 +480,7 @@ class InMemorySandboxSession(BaseSandboxSession):
         parents: bool = False,
         user: str | User | None = None,
     ) -> None:
+        self._require_backend_available()
         _reject_user(user)
         workspace_path = self._core_path(path)
         await self._session.create_directory(
@@ -448,6 +498,7 @@ class InMemorySandboxSession(BaseSandboxSession):
         recursive: bool = False,
         user: str | User | None = None,
     ) -> None:
+        self._require_backend_available()
         _reject_user(user)
         workspace_path = self._core_path(path)
         await self._session.remove_path(
@@ -466,6 +517,7 @@ class InMemorySandboxSession(BaseSandboxSession):
         compression_scheme: Literal["tar", "zip"] | None = None,
         archive_limits: SandboxArchiveLimits | None = None,
     ) -> None:
+        self._require_backend_available()
         _ = (path, data, compression_scheme, archive_limits)
         raise ValueError("archive extraction is not supported")
 
@@ -475,6 +527,7 @@ class InMemorySandboxSession(BaseSandboxSession):
         *,
         for_write: bool = False,
     ) -> Path:
+        self._require_backend_available()
         _ = for_write
         return Path(self._core_path(path).value)
 
@@ -521,6 +574,7 @@ class InMemorySandboxSession(BaseSandboxSession):
         manifest: Manifest | None = None,
         session_running: bool | None = None,
     ) -> None:
+        self._require_backend_available()
         _ = (only_ephemeral, session_running)
         _manifest_plan(manifest or self.state.manifest, self.state.workspace_limits)
 
@@ -530,6 +584,7 @@ class InMemorySandboxSession(BaseSandboxSession):
         only_ephemeral: bool = False,
         provision_accounts: bool = True,
     ) -> MaterializationResult:
+        self._require_backend_available()
         _ = provision_accounts
         if only_ephemeral:
             await self._validate_manifest_application(only_ephemeral=True)
@@ -544,12 +599,14 @@ class InMemorySandboxSession(BaseSandboxSession):
         *,
         base_dir: Path,
     ) -> list[MaterializedFile]:
+        self._require_backend_available()
         _ = base_dir
         plan = _entry_batch_plan(entries, self.state.workspace_limits)
         await self._apply_plan_atomically(plan)
         return []
 
     async def provision_manifest_accounts(self) -> None:
+        self._require_backend_available()
         _manifest_plan(self.state.manifest, self.state.workspace_limits)
 
     async def _apply_plan_atomically(self, plan: _ManifestPlan) -> None:
@@ -842,6 +899,9 @@ class InMemorySandboxClient(BaseSandboxClient[InMemorySandboxClientOptions]):
         wrapped.apply_manifest = inner.apply_manifest  # type: ignore[method-assign]
         wrapped.extract = inner.extract  # type: ignore[method-assign]
         wrapped._apply_entry_batch = inner._apply_entry_batch  # type: ignore[method-assign]
+        wrapped.provision_manifest_accounts = (  # type: ignore[method-assign]
+            inner.provision_manifest_accounts
+        )
         return wrapped
 
     async def _snapshot_is_restorable(self, snapshot: SnapshotBase) -> bool:

@@ -698,6 +698,9 @@ async def test_resume_allocates_replacement_and_hydrates_sdk_snapshot_when_handl
     source_inner = _inner(source)
     await source.start()
     await source.write(Path("/workspace/restored.bin"), io.BytesIO(b"restored"))
+    await source_inner.core_session.execute(
+        SessionExecuteRequest(command="mkdir project; cd project; export MODE=restored")
+    )
     await source.stop()
     original_handle = source_inner.state.sandbox_handle
     serialized = client.serialize_session_state(source_inner.state)
@@ -713,6 +716,10 @@ async def test_resume_allocates_replacement_and_hydrates_sdk_snapshot_when_handl
     assert (
         restored_state.workspace_archive_root_hash == source_inner.state.workspace_archive_root_hash
     )
+    assert restored_state.cwd == "/workspace/project"
+    assert [(item.name, item.value) for item in restored_state.approved_environment] == [
+        ("MODE", "restored")
+    ]
     await client.delete(source)
 
     resumed = await client.resume(restored_state)
@@ -721,8 +728,46 @@ async def test_resume_allocates_replacement_and_hydrates_sdk_snapshot_when_handl
 
     assert resumed_inner.state.sandbox_handle != original_handle
     assert (await resumed.read(Path("/workspace/restored.bin"))).read() == b"restored"
+    assert resumed_inner.core_session.cwd.value == "/workspace/project"
+    assert resumed_inner.core_session.environment.get("MODE") == "restored"
 
     await bundle.service.close()
+
+
+@pytest.mark.asyncio
+async def test_sdk_close_rejects_later_manifest_application() -> None:
+    bundle = create_service_bundle()
+    sdk_session = await InMemorySandboxClient(bundle.service).create(
+        manifest=Manifest(entries={"configured.txt": File(content=b"configured")}),
+    )
+    await sdk_session.start()
+    await sdk_session.aclose()
+
+    with pytest.raises(SessionClosed):
+        await sdk_session.apply_manifest()
+    with pytest.raises(SessionClosed):
+        await sdk_session.provision_manifest_accounts()
+
+    await bundle.service.close()
+
+
+def test_provider_state_v1_defaults_execution_context_for_older_payloads() -> None:
+    state = InMemorySandboxSessionState(
+        sandbox_handle="33333333-3333-3333-3333-333333333333",
+        core_session_id="44444444-4444-4444-4444-444444444444",
+        snapshot=NoopSnapshot(id="legacy-v1"),
+        manifest=Manifest(),
+    )
+    client = InMemorySandboxClient(create_service_bundle().service)
+    payload = client.serialize_session_state(state)
+    del payload["cwd"]
+    del payload["approved_environment"]
+
+    restored = client.deserialize_session_state(payload)
+
+    assert restored.provider_state_version == 1
+    assert restored.cwd == "/workspace"
+    assert restored.approved_environment == ()
 
 
 @pytest.mark.asyncio

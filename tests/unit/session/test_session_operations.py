@@ -9,11 +9,13 @@ from uuid import UUID
 import pytest
 
 from mem_sandbox.command_executor import (
+    CommandEnvironment,
     CommandExecutionContext,
     CommandFailureCode,
     CommandInternalFailure,
     CommandLimits,
     EnvironmentChange,
+    EnvironmentValue,
     ExecuteRequest,
     ExecuteResult,
 )
@@ -49,6 +51,7 @@ from mem_sandbox.session import (
     SessionEventDeliveryFailed,
     SessionEventSink,
     SessionExecuteRequest,
+    SessionExecutionContext,
     SessionFailed,
     SessionNotRunning,
     SessionOperationCancelled,
@@ -325,6 +328,28 @@ async def test_portable_archive_operations_use_the_session_owned_workspace_bound
         OperationKind.RESTORE_PORTABLE_ARCHIVE,
         OperationKind.RESTORE_PORTABLE_ARCHIVE,
     ]
+
+
+@pytest.mark.asyncio
+async def test_portable_archive_restore_can_atomically_publish_execution_context() -> None:
+    session, workspace, _, _ = make_session()
+    archive = WorkspaceArchiveData(
+        encoded=b"replacement",
+        format_version=1,
+        workspace_revision=Revision(7),
+        root_hash=ContentHash.from_bytes(b"replacement"),
+    )
+    context = SessionExecutionContext(
+        cwd=SandboxPath("/workspace/project"),
+        approved_environment=CommandEnvironment((EnvironmentValue("MODE", "restored"),)),
+    )
+    await session.start()
+
+    await session.restore_portable_archive(archive, execution_context=context)
+
+    assert workspace.archive_prepares == [(archive, context.cwd)]
+    assert session.cwd == context.cwd
+    assert session.environment == context.approved_environment
 
 
 @pytest.mark.asyncio

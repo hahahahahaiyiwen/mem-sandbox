@@ -794,7 +794,11 @@ concrete workspace. `SandboxSession` therefore owns the lifecycle/policy boundar
 portable operations:
 
 - `export_portable_archive() -> WorkspaceArchiveData`
-- `restore_portable_archive(WorkspaceArchiveData, *, expected_current_revision=None, expected_current_root_hash=None) -> None`
+- `restore_portable_archive(WorkspaceArchiveData, *, execution_context=None, expected_current_revision=None, expected_current_root_hash=None) -> None`
+
+`SessionExecutionContext` is an immutable session-owned value containing a canonical cwd
+and `CommandEnvironment`. It lets a trusted adapter restore execution context with a
+portable workspace without parsing commands or mutating session internals.
 
 The existing `SessionWorkspaceSnapshotPort` grows these two portable methods because it
 already owns complete workspace export, restore preparation, and atomic commit. The
@@ -807,6 +811,10 @@ must be supplied together and are checked while the session operation gate is he
 mismatch raises `SessionWorkspaceChanged` before restore preparation. Invalid bytes,
 incompatible metadata, quota failures, workspace-identity conflicts, or cancellation
 before publication leave the complete workspace unchanged.
+When an execution context is supplied, restore preparation verifies its cwd exists in
+the candidate tree and the workspace, cwd, and approved environment publish in one
+authoritative commit action. Omitting the context preserves the live session's current
+cwd and environment, which keeps direct workspace hydration backward-compatible.
 Once the workspace collaborator publishes a prepared candidate, the completed result is
 authoritative under the same publication rules as other session mutations, including
 native cancellation observed immediately after commit. When that authoritative result
