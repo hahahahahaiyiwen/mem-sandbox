@@ -38,13 +38,13 @@ jobs:
         run: uv sync --locked --all-groups
 
       - name: Check formatting
-        run: uv run ruff format --check benchmarks evaluations src tests
+        run: uv run ruff format --check benchmarks evaluations samples src tests
 
       - name: Lint
-        run: uv run ruff check benchmarks evaluations src tests
+        run: uv run ruff check benchmarks evaluations samples src tests
 
       - name: Type check
-        run: uv run pyright benchmarks evaluations src tests
+        run: uv run pyright benchmarks evaluations samples src tests
 
       - name: Test
         run: uv run pytest -m "not benchmark_smoke"
