@@ -570,13 +570,19 @@ Stable workspace errors include:
 
 [Workspace content offload](./content-offload/README.md) explores keeping the logical
 workspace tree in memory while optionally storing immutable file bytes through an
-external provider. It remains deferred until the post-Milestone 5 scalability review.
+external provider. The [Milestone 6 decision](./scalability-decision.md) defers it until
+a documented capacity trigger, controlled host budgets, and provider lifecycle
+requirements justify reopening the storage-placement boundary.
 
 ## Scalability evidence boundary
 
-Milestone 6A measures the public in-memory workspace boundary before selecting an
-optimization. The workload and measurement contract is maintained in
-[Workspace Scalability Evidence](../../product-validation/workspace-scalability.md).
+Milestone 6 measures the public in-memory workspace boundary and records an internal
+scaling direction without implementing it. The workload and measurement contract is
+maintained in
+[Workspace Scalability Evidence](../../product-validation/workspace-scalability.md); the
+comparison of quotas, process density, bulk seeding, structural sharing, cached subtree
+hashes, incremental accounting, and content offload is recorded in the
+[Workspace Scalability Decision](./scalability-decision.md).
 
 The controlled profile matrix separates:
 
@@ -592,8 +598,8 @@ resident file bytes and snapshot representation, but it cannot by itself remove
 whole-tree copy, metadata traversal, or hash recomputation costs.
 
 The evidence remains non-gating and process-local. It does not establish long-session
-leak behavior, process RSS, controlled performance budgets, or production workload
-percentiles.
+leak behavior, process RSS, controlled performance budgets, production workload
+percentiles, or a deployment need above the current logical limit.
 
 The initial
 [Milestone 6A reference](../../../benchmarks/results/2026-09-09-windows-development/README.md)
@@ -606,10 +612,20 @@ directory, and counter recomputation.
 Resident file bytes and portable snapshot encoding are material secondary constraints.
 At fixed topology, moving from 512 KiB to 8 MiB increased retained Python allocation
 from 535.5 KiB to 8,215.5 KiB and encoded snapshots from 703.9 KiB to 10,943.9 KiB.
-This supports keeping content offload as a capacity option, not treating it as a fix for
-the measured mutation bottleneck.
+The approved direction is to keep inline content and current default quotas, retain lower
+host quotas and process density only as operational controls, and defer content offload.
+A separately approved follow-up may add internal phase instrumentation, single-pass
+initial-tree preparation, and immutable path-copying nodes whose cached subtree summaries
+combine hashes, logical bytes, and logical node counts.
+
+Any follow-up must preserve workspace-owned path, quota, hashing, compare-and-swap,
+publication, cancellation, and snapshot invariants. A future storage-placement change
+must remain behind workspace-owned ports; it must not leak provider references into
+commands or reclassify provider work as agent-selected policy.
 
 ## Maintenance rule
 
-Changes to path behavior, node types, encoding, quotas, atomicity, or snapshot encoding
-must update this document and the snapshot-store design where applicable.
+Changes to path behavior, node types, encoding, quotas, atomicity, initial-state
+preparation, cached subtree summaries, or snapshot encoding must update this document,
+the [scalability decision](./scalability-decision.md), and the snapshot-store design where
+applicable.

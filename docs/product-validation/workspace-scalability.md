@@ -139,6 +139,13 @@ the required next measurement before selecting a mutation optimization. The evid
 also does not establish production percentiles, process RSS, long-session leakage, or a
 need for content offload.
 
+The resulting
+[Milestone 6 scalability decision](../components/workspace/scalability-decision.md)
+preserves inline content and current default quotas, treats lower process density only as
+a measured host mitigation, approves separately scoped internal phase, bulk-seeding, and
+immutable-tree design work, and defers content offload until an explicit capacity trigger
+and provider-readiness requirements are met.
+
 ## Interpretation rules
 
 - Compare `active_project` with `content_heavy` to estimate sensitivity to resident and

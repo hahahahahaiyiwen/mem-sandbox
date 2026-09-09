@@ -1,14 +1,16 @@
 # MemSandbox Implementation Plan
 
 **Status:** Active post-Milestone-5 roadmap
-**Current focus:** Milestone 6 workspace scalability evidence and the approved
-post-release architecture directions recorded in issue #49. Milestones 0 through 5 are
-complete; future external capabilities remain unimplemented and disabled by default.
+**Current focus:** Milestone 6 workspace scalability evidence and decision are complete.
+Milestones 0 through 5 are complete; future workspace optimizations and external
+capabilities remain separately scoped, unimplemented, and disabled by default.
 
 **Approved design inputs:** [High-Level Design](./HIGH_LEVEL_DESIGN.md),
 [Workspace Design](./components/workspace/README.md), and
-[Command Executor Design](./components/command-executor/README.md). Approved future
-directions are detailed in
+[Command Executor Design](./components/command-executor/README.md). The workspace
+scalability outcome is recorded in the
+[Workspace Scalability Decision](./components/workspace/scalability-decision.md).
+Approved future directions are detailed in
 [Controlled Network Egress](./components/network-egress/README.md) and
 [External Execution and Python Runtime](./components/external-execution/README.md).
 
@@ -1122,43 +1124,43 @@ priority of fastest provisioning.
 
 #### 6.2 Design review
 
-- [ ] **6.2.1** Review the deferred content-offload design against the implemented
-  workspace, session, command, event, snapshot-store, and deferred-policy boundaries.
-- [ ] **6.2.2** Compare content offload with simpler alternatives such as adjusted
-  quotas, lower process density, structural sharing, cached subtree hashes, and
-  incremental accounting.
-- [ ] **6.2.3** Decide to defer, prototype, or plan implementation and record the
-  evidence, product impact, compatibility constraints, and rationale in the workspace
-  design.
-- [ ] **6.2.4** Keep three concerns explicit and separate: immutable file-content
-  placement, durable snapshot/session metadata, and host filesystem projection. A
-  decision for one does not approve the others.
+- [x] **6.2.1** Reviewed the deferred design against workspace, session, command, event,
+  snapshot-store, service, and policy boundaries; internal tree work remains
+  workspace-owned.
+- [x] **6.2.2** Compared quotas, process density, bulk seeding, structural sharing,
+  cached subtree hashes, incremental accounting, and content offload in the
+  [workspace scalability decision](./components/workspace/scalability-decision.md).
+- [x] **6.2.3** Deferred content offload and approved separately scoped internal phase
+  instrumentation, single-pass seeding, and combined immutable path-copying tree design
+  as the preferred follow-up direction.
+- [x] **6.2.4** Kept immutable file-content placement, durable snapshot/session metadata,
+  host filesystem projection, and remote execution explicit and independently
+  unapproved.
 
 #### 6.3 Follow-up planning
 
-- [ ] **6.3.1** If approved, create a separate implementation milestone and issue set
-  with explicit provisioning-latency, memory, correctness, and provider conformance
-  acceptance criteria.
-- [ ] **6.3.2** If a prototype is approved, begin with workspace-owned content ports, an
-  in-memory fake provider, and provider-linked lazy resume. Select a controlled
-  host-directory content-addressed provider only as a production adapter, never as a
-  sandbox path mount.
-- [ ] **6.3.3** If deferred, record the measurable trigger and next review point rather
-  than leaving the decision open-ended.
+- [x] **6.3.1** Not applicable: no content-offload implementation is approved; future
+  internal or offload work requires a separate milestone or issue with explicit
+  performance, memory, correctness, and conformance criteria.
+- [x] **6.3.2** Not applicable: no prototype or provider is approved. The conditional
+  content-port and provider-linked snapshot design remains reference material only.
+- [x] **6.3.3** Recorded measurable capacity triggers, provider-readiness requirements,
+  and the next review point in the
+  [decision](./components/workspace/scalability-decision.md#content-offload-reconsideration).
 
 ### Exit criteria
 
 - [x] **6.9.1** Baseline measurements and representative workload assumptions are
   documented.
-- [ ] **6.9.2** The content-offload decision and rationale are recorded in the workspace
+- [x] **6.9.2** The content-offload decision and rationale are recorded in the workspace
   documentation.
-- [ ] **6.9.3** No content-offload implementation starts without a separately approved
+- [x] **6.9.3** No content-offload implementation starts without a separately approved
   milestone based on the review evidence.
 
 ## 11. Milestone 7: external capability foundations
 
-**Prerequisite:** Milestone 6 has recorded its scalability decision. A content-offload
-implementation, if approved, remains independently scoped.
+**Prerequisite:** Milestone 6 has recorded its scalability decision. Content offload is
+deferred; any future reconsideration and implementation remains independently scoped.
 
 ### Goal
 
@@ -1561,8 +1563,9 @@ remote-worker boundaries needed to resume work across processes or hosts.
 
 #### 10.1 Durable content and snapshots
 
-- [ ] **10.1.1** If Milestone 6 approves content offload, deliver its separately scoped
-  provider conformance milestone before depending on it for remote operation.
+- [ ] **10.1.1** Before depending on content offload for remote operation, satisfy the
+  Milestone 6 reconsideration trigger and deliver a separately approved provider
+  conformance milestone.
 - [ ] **10.1.2** Define durable snapshot and session-metadata stores separately from
   immutable file-content placement.
 - [ ] **10.1.3** Specify provider identity, compatibility, encryption, retention,
@@ -1798,7 +1801,8 @@ their referenced checklist task begins.
 | Product validation | Stateful cross-adapter conformance plus a non-gating reference measurement; controlled evidence is required before regression gates and comparative evidence before a scoped "fastest" claim | `5.6` | Resolved |
 | First framework adapter | OpenAI Agents SDK custom capability plus sandbox client/session | `5.2` / `5.3` | Resolved |
 | First live agent sample | Official OpenAI and Azure OpenAI models through the OpenAI Agents SDK and host-bound MemSandbox capability; live calls remain opt-in | `5.8` / `#7` / `#45` | Resolved |
-| Workspace content offload | Revisit after Milestone 5 using measured workload and provisioning data | `6.2.3` | Deferred |
+| Workspace mutation scaling | Prioritize phase instrumentation, single-pass seeding, and an immutable path-copying tree with cached subtree summaries in separately approved work | `6.2` / `6.9` | Resolved |
+| Workspace content offload | Deferred after Milestone 6; reconsider only on a measured capacity trigger with host budgets and provider lifecycle requirements | `6.3` / `6.9` | Deferred |
 | External capability profiles | Preserve `virtual` as the default; add host-selected `connected`, `trusted-host-execution`, and `isolated-execution` profiles without snapshot- or model-driven widening | `7.1` | Planned |
 | Unified resource accounting | Use typed operation/session scopes with worst-case reservation and exact-once settlement; keep component hard limits authoritative | `7.3` | Planned |
 | Repository ingestion and export | Host-controlled bounded archive/tree import plus revision/hash-bound diff, archive, or artifact export; no host path or Git authority | `7.4` | Planned |

@@ -1,29 +1,30 @@
 # Workspace Content Offload
 
-**Status:** Deferred; the Milestone 6A baseline does not approve implementation
+**Status:** Conditional architecture reference; content offload deferred by the
+[Milestone 6 scalability decision](../scalability-decision.md)
 
-The implementation plan revisits this design in Milestone 6, after native integrations
-are complete and representative workspace measurements are available.
-
-The initial Milestone 6A evidence is now available. It retains this document as a
-capacity design option, but identifies whole-tree mutation work rather than content
-residency as the primary operational scaling constraint.
+Milestone 6 does not approve a content provider, placement policy, provider-linked
+snapshot schema, prototype, or implementation milestone. The project retains this
+document only as a contingency if a measurable capacity trigger and provider-readiness
+requirements justify a new decision.
 
 ## Decision summary
 
-MemSandbox should preserve an in-memory workspace tree while allowing file content to be
-stored in an optional external content provider.
+The conditional design preserves an in-memory workspace tree while allowing immutable
+file content to be stored in an optional external content provider.
 
 This is not a disk-backed workspace. Paths, directories, file metadata, content hashes,
 quotas, revisions, and the committed workspace root remain in memory. Only immutable
 file bytes may be externalized and loaded on demand.
 
-The extension is worth retaining as a future direction because it can increase logical
+The extension remains useful reference material because it could increase logical
 workspace capacity without making new sandbox provisioning depend on copying all file
-bytes into memory. It should not be implemented until the current workspace, session,
-snapshot-store, and command-executor boundaries are complete and measured.
+bytes into memory. Current evidence does not establish that need: whole-tree mutation
+work is the primary measured operational constraint, and no representative workload
+requires more than the current 16 MiB logical limit.
 
-The recommended first scope is deliberately narrow:
+If a later decision approves implementation, its first scope remains deliberately
+narrow:
 
 - optimize for aggregate workspace size, not arbitrarily large individual files;
 - keep every materialized file or operation under an explicit byte limit;
@@ -43,9 +44,9 @@ offload supports that position only if:
 4. External storage placement does not change logical workspace behavior.
 5. Provider failures are explicit and never cause host-filesystem fallback.
 
-The extension must not turn MemSandbox into a remote filesystem abstraction. The
-workspace remains the consistency and policy boundary; the provider is only an immutable
-content dependency owned by that boundary.
+Any future extension must not turn MemSandbox into a remote filesystem abstraction. The
+workspace remains the consistency and policy boundary; the provider would be only an
+immutable content dependency owned by that boundary.
 
 ## Problem statement
 
@@ -53,7 +54,7 @@ The current workspace stores every file as `bytes` inside the in-memory tree. It
 workspace limit therefore also acts as a resident-memory limit. Increasing that limit
 directly increases the amount of file content retained by each live sandbox.
 
-These limits represent different concerns and should eventually be separated:
+A future approved design would separate these concerns:
 
 - total logical bytes represented by the workspace;
 - resident file-content bytes held in process memory;
@@ -65,7 +66,7 @@ For example, a future profile could permit a logical workspace much larger than 
 while still prohibiting any operation from materializing more than 20 MiB. The values are
 illustrative; this document does not select new defaults.
 
-## Goals
+## Conditional goals
 
 - Preserve fast creation of new empty workspaces.
 - Preserve fast metadata-only resume for provider-linked snapshots.
@@ -91,7 +92,7 @@ illustrative; this document does not select new defaults.
 - Solving metadata scaling, tree-copy cost, or whole-tree hash recomputation solely
   through content offload.
 
-## Proposed architecture
+## Conditional architecture
 
 ```mermaid
 flowchart TD
@@ -125,7 +126,7 @@ workspace mutation commits.
 
 ## Logical content model
 
-A future file node should separate logical identity from physical placement:
+A future file node would separate logical identity from physical placement:
 
 ```python
 @dataclass(frozen=True, slots=True)
@@ -171,7 +172,7 @@ placement profiles.
 
 ## Workspace-owned provider boundaries
 
-The consuming workspace module should own focused async interfaces. A possible shape is:
+The consuming workspace module would own focused async interfaces. A possible shape is:
 
 ```python
 class WorkspaceContentReader(Protocol):
@@ -182,7 +183,7 @@ class WorkspaceContentWriter(Protocol):
     async def put(self, request: ContentPutRequest) -> ExternalContent: ...
 ```
 
-Requests and results should use domain types rather than dictionaries:
+Requests and results would use domain types rather than dictionaries:
 
 ```python
 @dataclass(frozen=True, slots=True)
@@ -230,7 +231,7 @@ but every returned reference must remain bound to the expected hash and size.
 Content-addressing and deduplication must not reveal object existence, ownership, timing,
 or storage reuse across tenant or owner boundaries.
 
-The live workspace should not require provider listing or synchronous deletion. Blob
+The live workspace would not require provider listing or synchronous deletion. Blob
 retention and garbage collection are administration concerns because content may be
 referenced by multiple files, workspaces, or snapshots.
 
@@ -254,10 +255,11 @@ blob or hash mismatch is a hard integrity failure: reads, patches, and portable 
 exports fail explicitly and never omit or replace the file. The workspace retains the
 logical node for inspection and recovery rather than silently mutating committed state.
 
-## Placement policy
+## Conditional placement policy
 
-Placement is host-controlled and not agent-controlled. The first implementation should
-use simple immutable configuration rather than a pluggable policy engine:
+Placement remains host-controlled and not agent-controlled. If approved, the first
+implementation would use simple immutable configuration rather than a pluggable policy
+engine:
 
 ```text
 inline-only
@@ -268,7 +270,7 @@ threshold-offload
 larger content through the provider. The threshold must not exceed the per-operation
 materialization limit.
 
-The first implementation should not include:
+The first implementation would not include:
 
 - background least-recently-used eviction;
 - automatic rehydration of the complete workspace;
@@ -291,7 +293,7 @@ Resuming a provider-linked snapshot reconstructs the in-memory tree from verifie
 metadata and content references. It does not download every file. Provider
 compatibility is validated once, while individual content reads remain lazy.
 
-Provider clients should be host-scoped and reusable so creating each workspace does not
+Provider clients would be host-scoped and reusable so creating each workspace does not
 establish a new remote connection.
 
 ### Write
@@ -323,7 +325,7 @@ Inline content is returned from memory. External content is loaded through the r
 port with the operation's materialization limit. The workspace verifies the returned
 size and SHA-256 hash before exposing bytes.
 
-The initial extension should require every readable file to fit within the
+A future initial extension would require every readable file to fit within the
 materialization limit. Model-facing response limits remain independently smaller when
 appropriate.
 
@@ -356,8 +358,8 @@ Converting inline content to an external reference is a physical storage change,
 logical file mutation. If a later version supports explicit compaction, the transition
 must preserve the content identity and must not increment the workspace revision.
 
-Background tier transitions should remain deferred until lock behavior, cancellation,
-and snapshot interaction are designed and benchmarked.
+Background tier transitions remain outside the conditional first scope until lock
+behavior, cancellation, and snapshot interaction are designed and benchmarked.
 
 ## Limits and accounting
 
@@ -438,7 +440,7 @@ The following remain invariant:
 
 ## Failure semantics
 
-Future stable errors should distinguish:
+Future stable errors would distinguish:
 
 - content provider unavailable;
 - content reference not found;
@@ -510,22 +512,28 @@ limit, do not collect process RSS or real workload percentiles, and do not measu
 provider. They therefore do not satisfy the evidence needed to approve content offload
 as the next implementation.
 
-Before implementing offload, the command executor and session must consume focused
-workspace interfaces rather than the concrete `MemoryWorkspace`. Shared conformance
-tests should then run against:
+The command executor and session already consume focused workspace interfaces rather
+than the concrete `MemoryWorkspace`, and the service factory owns concrete composition.
+Internal tree optimization therefore needs no content-provider interface. If offload is
+approved later, provider ports remain workspace-owned and shared conformance tests must
+run against:
 
 - inline-only workspace content;
 - threshold-offloaded content with an in-memory fake provider;
 - provider-linked snapshot restore.
 
-## Recommended delivery sequence
+## Conditional delivery sequence
 
-### Phase 0: retain the design
+This sequence is reference material, not an approved roadmap. It may be activated only
+by a new decision that meets the entry criteria below.
 
-- Keep this document as a deferred extension.
-- Complete the current session, snapshot-store, command-executor, policy, and event work.
-- Add baseline provisioning, mutation, snapshot, and memory benchmarks.
-- Collect real workspace size and access-pattern data.
+### Phase 0: reopen the decision
+
+- Demonstrate at least one capacity trigger from the
+  [scalability decision](../scalability-decision.md#content-offload-reconsideration).
+- Re-measure internal phases or complete any separately approved internal mutation work.
+- Record named host budgets and provider ownership, durability, retention, garbage
+  collection, timeout, and recovery requirements.
 
 ### Phase 1: prove the boundary
 
@@ -560,16 +568,20 @@ tests should then run against:
 
 ## Entry criteria for implementation
 
-Implementation should begin only when:
+Implementation must not begin until at least one documented capacity trigger is
+demonstrated and all of these readiness facts exist:
 
 - the current core lifecycle and snapshot-store milestones are complete;
-- measurements show resident file bytes are a meaningful scaling constraint;
-- workloads need larger aggregate workspaces while retaining bounded individual files;
-- baseline provisioning latency exists to prevent regressions;
-- provider retention and ownership requirements are known;
-- a provider-linked snapshot is more valuable than simply raising current memory limits.
+- controlled process RSS shows resident file content, rather than whole-tree mutation
+  work, is the binding constraint against a named memory or process-density budget, or a
+  named workload cannot fit within the current logical limit;
+- provisioning, mutation, memory, and snapshot budgets exist on a controlled runner;
+- provider namespace, authenticated ownership, durability, retention, garbage
+  collection, timeout, and recovery requirements are known;
+- portable versus provider-linked snapshot semantics are approved;
+- cumulative provider-byte and operation accounting has an owning resource boundary.
 
-## Success criteria
+## Conditional success criteria
 
 The extension succeeds when:
 
@@ -586,9 +598,10 @@ The extension succeeds when:
   partial read or snapshot;
 - the inline-only profile remains simple, dependency-free, and fully supported.
 
-## Open questions
+## Questions for any future reconsideration
 
-These decisions should be made from measured workloads rather than in advance:
+These decisions remain intentionally unresolved until a future decision selects a
+provider class and approves implementation:
 
 - What aggregate workspace sizes justify offload?
 - What should the default materialization and offload thresholds be?
@@ -601,6 +614,7 @@ These decisions should be made from measured workloads rather than in advance:
 
 ## Maintenance rule
 
-Future changes to content identity, placement, logical quota semantics, provider
-contracts, snapshot portability, or lazy restore must update this document together with
-the workspace and snapshot-store designs.
+Future decisions or changes to content identity, placement, logical quota semantics,
+provider contracts, snapshot portability, or lazy restore must update this document and
+the [scalability decision](../scalability-decision.md) together with the workspace and
+snapshot-store designs.
