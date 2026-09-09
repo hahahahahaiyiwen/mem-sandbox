@@ -572,6 +572,43 @@ Stable workspace errors include:
 workspace tree in memory while optionally storing immutable file bytes through an
 external provider. It remains deferred until the post-Milestone 5 scalability review.
 
+## Scalability evidence boundary
+
+Milestone 6A measures the public in-memory workspace boundary before selecting an
+optimization. The workload and measurement contract is maintained in
+[Workspace Scalability Evidence](../../product-validation/workspace-scalability.md).
+
+The controlled profile matrix separates:
+
+- `active_project` from `content_heavy`, holding topology constant while increasing
+  logical and individual file bytes 16x;
+- `active_project` from `node_heavy`, holding logical bytes constant while increasing
+  files and directories 4x.
+
+Seed, hot read, same-size overwrite, directory copy, snapshot encoding, and retained
+Python allocation are measured independently. This distinction matters because every
+current mutation deep-copies and remeasures the complete tree. Content offload can change
+resident file bytes and snapshot representation, but it cannot by itself remove
+whole-tree copy, metadata traversal, or hash recomputation costs.
+
+The evidence remains non-gating and process-local. It does not establish long-session
+leak behavior, process RSS, controlled performance budgets, or production workload
+percentiles.
+
+The initial
+[Milestone 6A reference](../../../benchmarks/results/2026-09-09-windows-development/README.md)
+shows that whole-tree mutation work is the primary operational constraint: at the same
+512 KiB logical size, 4x files and directories produced a 15.65x seed median and 4.92x
+same-size overwrite median. Content bytes remain material because every commit
+remeasures file hashes, but the public boundary cannot separate cloning from file,
+directory, and counter recomputation.
+
+Resident file bytes and portable snapshot encoding are material secondary constraints.
+At fixed topology, moving from 512 KiB to 8 MiB increased retained Python allocation
+from 535.5 KiB to 8,215.5 KiB and encoded snapshots from 703.9 KiB to 10,943.9 KiB.
+This supports keeping content offload as a capacity option, not treating it as a fix for
+the measured mutation bottleneck.
+
 ## Maintenance rule
 
 Changes to path behavior, node types, encoding, quotas, atomicity, or snapshot encoding

@@ -9,10 +9,12 @@ from pathlib import Path
 
 from benchmarks.cases import (
     DIRECT_DRIVER,
+    MEMORY_WORKSPACE,
     OPENAI_CAPABILITY_DRIVER,
     OPENAI_SANDBOX_DRIVER,
     CaseConfig,
     DriverFactory,
+    WorkspaceFactory,
     measure_adapter_overhead,
     measure_burst_create,
     measure_cold_process_ready,
@@ -22,8 +24,14 @@ from benchmarks.cases import (
     measure_resume,
     measure_snapshot_create,
     measure_stateful_scenario,
+    measure_workspace_copy,
+    measure_workspace_memory,
+    measure_workspace_overwrite,
+    measure_workspace_read,
+    measure_workspace_seed,
+    measure_workspace_snapshot,
 )
-from benchmarks.profiles import load_profile
+from benchmarks.profiles import SCALABILITY_PROFILE_NAMES, WorkloadProfile, load_profile
 from benchmarks.reports import render_markdown
 from benchmarks.schema import (
     SCHEMA_VERSION,
@@ -36,6 +44,8 @@ from benchmarks.schema import (
 
 
 async def run_suite(config: CaseConfig, *, tier: str) -> BenchmarkRunArtifact:
+    if tier == "scalability":
+        return await run_workspace_scalability_suite(config)
     if tier not in {"smoke", "reference"}:
         raise ValueError(
             "controlled benchmark execution is deferred until fresh-process runner "
@@ -108,11 +118,50 @@ async def run_suite(config: CaseConfig, *, tier: str) -> BenchmarkRunArtifact:
     )
 
 
+async def run_workspace_scalability_suite(
+    config: CaseConfig,
+    *,
+    profiles: tuple[WorkloadProfile, ...] | None = None,
+    factory: WorkspaceFactory = MEMORY_WORKSPACE,
+) -> BenchmarkRunArtifact:
+    selected_profiles = (
+        tuple(load_profile(name) for name in SCALABILITY_PROFILE_NAMES)
+        if profiles is None
+        else profiles
+    )
+    if not selected_profiles:
+        raise ValueError("workspace scalability suite requires at least one profile")
+
+    cases: list[BenchmarkCaseResult] = []
+    for profile in selected_profiles:
+        if profile.file_count == 0:
+            raise ValueError("workspace scalability profiles must contain files")
+        cases.append(await measure_workspace_seed(factory, profile, config))
+        cases.append(await measure_workspace_read(factory, profile, config))
+        cases.append(await measure_workspace_overwrite(factory, profile, config))
+        cases.append(await measure_workspace_copy(factory, profile, config))
+        cases.append(await measure_workspace_snapshot(factory, profile, config))
+        cases.append(await measure_workspace_memory(factory, profile, config))
+
+    return BenchmarkRunArtifact(
+        schema_version=SCHEMA_VERSION,
+        metadata=build_run_metadata(
+            tier="scalability",
+            warmups=config.warmups,
+            samples=config.samples,
+            minimum_case_duration_seconds=config.minimum_duration_seconds,
+            concurrency=1,
+        ),
+        environment=build_environment_fingerprint(),
+        cases=tuple(cases),
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--tier",
-        choices=("smoke", "reference"),
+        choices=("smoke", "reference", "scalability"),
         default="smoke",
     )
     parser.add_argument("--warmups", type=int)
@@ -126,7 +175,7 @@ def main() -> None:
             burst_concurrency=4,
             minimum_duration_seconds=0.0,
         )
-    elif args.tier == "reference":
+    elif args.tier in {"reference", "scalability"}:
         config = CaseConfig(
             warmups=2 if args.warmups is None else args.warmups,
             samples=5 if args.samples is None else args.samples,

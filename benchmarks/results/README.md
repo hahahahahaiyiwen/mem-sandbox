@@ -22,3 +22,26 @@ were actually measured.
 These values can reveal order-of-magnitude behavior and large regressions. They must not
 be used to enforce small percentage budgets because background workload, CPU scaling,
 antivirus activity, and other workstation variance were not controlled.
+
+The Milestone 6A workspace scalability reference is:
+
+- evidence and analysis:
+  `2026-09-09-windows-development/README.md`;
+- artifact:
+  `2026-09-09-windows-development/workspace-scalability-v2.json`;
+- report:
+  `2026-09-09-windows-development/workspace-scalability-v2.md`;
+- runner: Windows development workstation;
+- power configuration: uncontrolled development workstation;
+- workloads: `active_project`, `quota_edge`, `content_heavy`, and `node_heavy` profile
+  version 1;
+- cases: seed, hot read, same-size overwrite, directory copy, snapshot encoding, and
+  retained Python allocation;
+- samples: two warm-ups and five measured samples per case;
+- failures: none across 24 cases.
+
+This run isolates byte and node growth through controlled profiles. It identifies
+whole-tree mutation work as the primary operational scaling constraint and resident
+content plus portable snapshot encoding as material secondary constraints. The run does
+not isolate tree clone from hash recomputation internally and does not authorize content
+offload.

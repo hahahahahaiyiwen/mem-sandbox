@@ -19,7 +19,7 @@ from typing import Literal
 
 from benchmarks.profiles import WorkloadDimensions
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 type TimingMode = Literal["warm", "cold_process", "paired"]
 
 
@@ -42,6 +42,7 @@ class SampleStatistics:
 
 @dataclass(frozen=True, slots=True)
 class MemoryMeasurements:
+    python_retained_bytes: int | None = None
     python_peak_bytes: int | None = None
     process_rss_bytes: int | None = None
 
