@@ -1110,13 +1110,13 @@ priority of fastest provisioning.
 
 #### 6.1 Evidence and baseline
 
-- [ ] **6.1.1** Extend the Milestone 5 product-validation baseline only where additional
+- [x] **6.1.1** Extend the Milestone 5 product-validation baseline only where additional
   workspace-size profiles or mutation measurements are needed for the scalability
   decision.
-- [ ] **6.1.2** Record representative workload distributions for logical workspace
+- [x] **6.1.2** Record representative workload distributions for logical workspace
   bytes, individual file bytes, node count, session lifetime, snapshot frequency, and
   file access patterns.
-- [ ] **6.1.3** Determine whether the primary scaling constraint is resident file bytes,
+- [x] **6.1.3** Determine whether the primary scaling constraint is resident file bytes,
   tree copying, hash recomputation, metadata volume, snapshot encoding, or another
   measured cause.
 
@@ -1148,7 +1148,7 @@ priority of fastest provisioning.
 
 ### Exit criteria
 
-- [ ] **6.9.1** Baseline measurements and representative workload assumptions are
+- [x] **6.9.1** Baseline measurements and representative workload assumptions are
   documented.
 - [ ] **6.9.2** The content-offload decision and rationale are recorded in the workspace
   documentation.

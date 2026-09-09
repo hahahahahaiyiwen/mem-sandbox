@@ -1,10 +1,13 @@
 # Workspace Content Offload
 
-**Status:** Deferred post-Milestone 5 design exploration; not approved for
-implementation
+**Status:** Deferred; the Milestone 6A baseline does not approve implementation
 
 The implementation plan revisits this design in Milestone 6, after native integrations
 are complete and representative workspace measurements are available.
+
+The initial Milestone 6A evidence is now available. It retains this document as a
+capacity design option, but identifies whole-tree mutation work rather than content
+residency as the primary operational scaling constraint.
 
 ## Decision summary
 
@@ -478,6 +481,34 @@ The current implementation has four relevant assumptions:
 Content offload would require changing the first three assumptions. It does not solve the
 fourth. Metadata-heavy workspaces may still require path-copying immutable nodes, cached
 subtree hashes, and incremental counters as an independent optimization.
+
+### Milestone 6A evidence
+
+The
+[workspace scalability reference](../../../../benchmarks/results/2026-09-09-windows-development/README.md)
+varies content bytes and node count independently through the public `MemoryWorkspace`
+boundary.
+
+- At fixed 512 KiB logical content, increasing files and directories 4x raised seed
+  median 15.65x and same-size overwrite median 4.92x.
+- At fixed topology, increasing content 16x raised seed median 3.39x and overwrite median
+  3.79x.
+- The same content increase raised maximum retained Python allocation from 535.5 KiB to
+  8,215.5 KiB and encoded snapshot size from 703.9 KiB to 10,943.9 KiB.
+- At fixed content, 4x nodes raised retained allocation to 601.1 KiB and encoded snapshot
+  size to 766.8 KiB.
+
+The primary measured operational constraint is therefore the combined whole-tree clone,
+remeasure, and hash path used for every mutation and every sequential seed write.
+Resident content bytes and portable snapshot encoding are material secondary capacity
+constraints. Public-boundary evidence cannot attribute exact time separately to clone,
+file hashing, directory hashing, and counter recomputation; internal phase
+instrumentation is required before selecting that optimization.
+
+These non-gating measurements do not show a deployment need above the current logical
+limit, do not collect process RSS or real workload percentiles, and do not measure a
+provider. They therefore do not satisfy the evidence needed to approve content offload
+as the next implementation.
 
 Before implementing offload, the command executor and session must consume focused
 workspace interfaces rather than the concrete `MemoryWorkspace`. Shared conformance

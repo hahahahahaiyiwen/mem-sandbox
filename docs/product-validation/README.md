@@ -268,6 +268,13 @@ The initial profile set includes:
 Exact profile sizes are versioned with the benchmark suite. Changing a profile creates a
 new profile version rather than silently rewriting historical results.
 
+Milestone 6 workspace scalability uses the representative workload assumptions and
+representative and controlled byte-versus-node matrix in
+[Workspace Scalability Evidence](./workspace-scalability.md). It reuses
+`active_project` and `quota_edge`, adds `content_heavy` with the active topology and 16x
+bytes, and adds `node_heavy` with the active bytes and 4x files and directories. The two
+added profiles are diagnostics, not new product defaults.
+
 ### Required benchmark cases
 
 1. Empty core create and delete.
@@ -279,6 +286,8 @@ new profile version rather than silently rewriting historical results.
 7. Bounded concurrent creation of multiple independent sessions.
 8. Resident memory for an empty session and each fixture profile.
 9. Adapter overhead relative to the direct driver.
+10. Isolated workspace seed, hot read, same-size hot overwrite, directory copy, snapshot
+    encoding, and retained-memory cases across the Milestone 6 diagnostic matrix.
 
 Burst measurements report both throughput and per-session latency. They remain bounded
 and must not exhaust the host or turn a benchmark failure into a machine-wide failure.
@@ -360,10 +369,14 @@ case result
   driver and adapter
   timing mode
   exact workload dimensions
+  exact operation file count and bytes
+  encoded snapshot bytes where applicable
   raw successful samples
   failed sample count and error categories
   calculated statistics
   memory measurements
+    retained Python allocation delta
+    transient Python allocation peak
   correctness checksum
 ```
 
@@ -514,6 +527,10 @@ required benchmark gates.
 Milestone 6 consumes the baseline to decide whether workspace content offload or a
 simpler optimization addresses a measured constraint.
 
+The Milestone 6 measurement contract, reproducible command, controlled comparisons, and
+interpretation limits are maintained in
+[Workspace Scalability Evidence](./workspace-scalability.md).
+
 ## Non-goals
 
 - Measuring model inference or provider API latency as sandbox provisioning.
@@ -529,9 +546,12 @@ simpler optimization addresses a measured constraint.
 
 Resolved:
 
-- benchmark artifact schema version 1 is an immutable dataclass-to-JSON contract;
+- benchmark artifact schema version 1 remains the immutable Milestone 5 historical
+  contract; schema version 2 adds operation dimensions, encoded snapshot bytes, and
+  retained Python allocation;
 - generated Python profile version 1 defines `empty`, `small_project`,
-  `active_project`, and `quota_edge` with exact recorded dimensions;
+  `active_project`, `quota_edge`, `content_heavy`, and `node_heavy` with exact recorded
+  dimensions;
 - `time.perf_counter_ns()` supplies raw integer samples;
 - smoke uses one non-comparable sample and a bounded four-session burst;
 - reference runs use two warm-ups and five measured in-process samples, with two fresh
