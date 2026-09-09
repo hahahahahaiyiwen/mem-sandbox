@@ -308,9 +308,11 @@ publication, the unreferenced content is harmless and is reclaimed by provider g
 collection. Provider deletion must not be part of the workspace commit path. The
 precheck reduces obviously doomed uploads but cannot replace the final locked check.
 
-Policy or service-level budgets must also bound aggregate published bytes and provider
-calls across operations. A per-operation limit alone does not prevent repeated failed or
-conflicting writes from creating unbounded provider cost.
+Milestone 7 unified resource accounting must also bound aggregate published bytes and
+provider calls across operations and the complete session. A per-operation limit alone
+does not prevent repeated failed or conflicting writes from creating unbounded provider
+cost. Accounting may deny or narrow publication but never increases workspace-owned
+logical, resident, file, node, or materialization limits.
 
 ### Read
 

@@ -1,6 +1,7 @@
 # Command Executor Design
 
-**Status:** Command profile and issue #20 protected-overlay behavior implemented
+**Status:** Command profile and issue #20 protected-overlay behavior implemented;
+external-resource command direction approved in issue #49
 
 ## Purpose
 
@@ -215,6 +216,33 @@ Commands use familiar operand behavior: no file operand consumes stdin, and `-`
 explicitly selects stdin among file operands. A pipeline-safe command may therefore
 consume connected stdin, named files, or an explicit `-` according to its documented
 POSIX-shaped contract.
+
+### Future external-resource commands
+
+The immutable registry is the extension seam for future network and Python commands,
+but it is not a plugin security boundary. Extension implementations loaded into the
+MemSandbox process are trusted application code and are selected by the host.
+
+A future external-resource command:
+
+- is registered only when the immutable sandbox profile grants its required resource;
+- receives a narrow resource port through constructor injection and operation context;
+- never creates a private HTTP client, resolver, host subprocess, or host path;
+- never calls a public `SandboxSession` method from inside the current `execute`
+  operation;
+- shares normalized behavior with any typed session/tool adapter over the same resource
+  service;
+- declares exact supported syntax and does not imply a broader host command.
+
+The planned HTTP command delegates to the
+[controlled network gateway](../network-egress/README.md), never a host `curl`
+executable. The planned `python` command delegates to the
+[external execution coordinator](../external-execution/README.md), never an in-process
+interpreter or directly managed host process.
+
+Future descriptor metadata may declare required resource kinds and profile compatibility.
+Registry construction rejects a command when its grant or collaborator is absent. The
+current default registry and model-facing descriptions remain unchanged.
 
 ## Grammar
 

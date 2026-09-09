@@ -305,9 +305,15 @@ hash. Host metadata and insertion order never participate.
 
 ## Portable archive boundary
 
-OpenAI workspace persistence uses a separate portable archive codec owned by the
+OpenAI workspace persistence introduced the portable archive codec owned by the
 workspace boundary. The adapter supplies and consumes bounded byte streams; it must not
 implement tar parsing, path security, workspace limit checks, or restore atomicity.
+
+Milestones 7 and 9 may reuse the same boundary for host-controlled repository ingestion,
+result export, and external-execution workspace transfer. Those consumers add their own
+narrow admission rules, such as excluding repository control directories, but still
+delegate archive decoding, node safety, workspace quotas, prepared restore, and atomic
+publication to this module. They never receive a host-directory extraction API.
 
 ### Codec-neutral tree model
 

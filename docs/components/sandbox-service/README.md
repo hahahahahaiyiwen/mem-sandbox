@@ -40,6 +40,24 @@ the public `SandboxService` protocol, while `DefaultSessionFactory`,
 - Network transport, MCP, or an HTTP control plane.
 - Producing `sandbox.created` or `sandbox.deleted` events in issue #19.
 
+## Future capability-profile composition
+
+Milestone 7 may extend `SandboxOptions` with an immutable host-selected capability
+profile and cumulative session resource budget. The service remains a composition root;
+it does not parse commands, normalize URLs, execute Python, import repositories, or
+evaluate resource-specific policy.
+
+Create selects explicit collaborators for the profile. Resume applies the current host
+configuration and may preserve or narrow authority; snapshot state never enables
+networking, host execution, a stronger isolation claim, or larger limits. Missing or
+incompatible required collaborators fail before a session is published.
+
+Repository ingestion remains a host create/restore concern over bounded workspace
+artifacts, not a model-visible path or clone operation. Network clients, execution
+backends, accounting ledgers, and provider resources follow explicit service/application
+ownership and are included in session or post-session resource scopes only when their
+lifecycle is truly per-session.
+
 ## Trust and provenance model
 
 `OwnerId` is validated application-supplied provenance, not an authenticated security

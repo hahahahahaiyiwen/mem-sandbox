@@ -1,7 +1,8 @@
 # Sandbox Session Design
 
-**Status:** Core lifecycle and issue #20 secret execution behavior implemented; issue #31
-native directory operation contract designed and under test
+**Status:** Core lifecycle, issue #20 secret execution behavior, and issue #31 native
+directory operations implemented; future external-capability coordination approved in
+issue #49
 
 ## Purpose
 
@@ -107,6 +108,27 @@ async def close() -> None: ...
 ```
 
 Adapters decide which methods become model-visible tools.
+
+### Future optional external-capability operations
+
+The default session surface remains unchanged. Future connected and execution profiles
+may add typed HTTP and run-program operations only after Milestones 7 through 9 define
+their grants, policy, accounting, events, and stable failures.
+
+A typed adapter invokes the optional session operation so the normal gate, lifecycle,
+deadline, cancellation, and terminal event sequence remains authoritative. A virtual
+HTTP or Python command is already inside one admitted `execute` operation and must not
+call back into a public session method. Instead, its `CommandExecutionContext` carries
+the current operation identity and narrow resource collaborators.
+
+One concrete network gateway or external execution coordinator may therefore implement
+both a session-owned port and a command-owned port without introducing a dependency from
+the command executor to `SandboxSession`. The session does not own URL parsing, DNS,
+runtime provisioning, workspace archive validation, or provider-specific behavior.
+
+Capability grants are host-selected configuration, not session snapshot state. Resume
+may use an equal or narrower current profile and never gains authority from serialized
+state.
 
 ### Native directory mutation contract
 
