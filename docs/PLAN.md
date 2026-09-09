@@ -1,13 +1,16 @@
 # MemSandbox Implementation Plan
 
-**Status:** Active implementation roadmap
-**Current focus:** Milestone 5. The OpenAI integration and product evidence landed
-through issue #36; issue #37 records the final trust-boundary and deferred-integration
-review, and issue #45 is the remaining Azure OpenAI sample gate.
+**Status:** Active post-Milestone-5 roadmap
+**Current focus:** Milestone 6 workspace scalability evidence and the approved
+post-release architecture directions recorded in issue #49. Milestones 0 through 5 are
+complete; future external capabilities remain unimplemented and disabled by default.
 
 **Approved design inputs:** [High-Level Design](./HIGH_LEVEL_DESIGN.md),
 [Workspace Design](./components/workspace/README.md), and
-[Command Executor Design](./components/command-executor/README.md)
+[Command Executor Design](./components/command-executor/README.md). Approved future
+directions are detailed in
+[Controlled Network Egress](./components/network-egress/README.md) and
+[External Execution and Python Runtime](./components/external-execution/README.md).
 
 ## 1. Recommendation
 
@@ -23,7 +26,11 @@ domain foundations
   -> complete workspace/executor behavior
   -> snapshots, events, and SandboxService
   -> framework adapters
-  -> policy and secret re-evaluation when a concrete trust boundary exists
+  -> workspace scalability evidence
+  -> external capability profiles, authority, and resource accounting
+  -> controlled outbound HTTP
+  -> external Python execution
+  -> conditional durable/remote operation and additional integrations
 ```
 
 The workspace is the state model and consistency boundary. The command executor consumes
@@ -34,6 +41,12 @@ Do not wait until every filesystem feature and shell command is complete before 
 a session. After the workspace and a small command set work, build one vertical slice
 through the four agent-facing operations. That validates the architecture before the
 implementation becomes large.
+
+Milestones 0 through 5 followed that sequence and are complete. Future work must preserve
+the current virtual profile rather than gradually turning its constrained interpreter
+into a host shell. External storage, networking, repository transfer, and code execution
+are separate capabilities with separate authority, limits, events, and failure
+semantics.
 
 ## 2. Implementation principles
 
@@ -51,8 +64,14 @@ implementation becomes large.
 - Use one coarse workspace state lock in version 1; do not introduce object-level locks,
   MVCC, or internal optimistic retries.
 - Preserve snapshot compatibility through explicit schema versions.
-- Keep MCP, remote transports, arbitrary Python execution, and full POSIX compatibility
-  outside this plan.
+- Keep the default virtual profile free of host filesystem, process, and network
+  authority.
+- Select optional capabilities through immutable host configuration; model input may
+  narrow granted behavior but cannot enable a capability or increase a limit.
+- Route every external dependency through a focused constructor-injected boundary.
+- Reserve and settle cumulative resources in addition to enforcing per-operation limits.
+- Keep full POSIX compatibility outside this plan. Evaluate MCP, remote transports, and
+  additional agent SDKs only after their underlying core boundaries are proven.
 
 ## 3. Proposed project structure
 
@@ -1059,21 +1078,33 @@ endpoint or credentials are required in CI.
   and cleanup.
 
 Milestone 5 is complete at merge commit
-`dedb04ee5b528c0cb3a605e086dc792c26485106`. The child-issue reconciliation,
+`6303be1bfea09b35db0d1b5728398738f6ced5f8`. The child-issue reconciliation,
 cross-platform CI matrix, benchmark reference, trust-boundary outcome, and final scope
 are recorded on tracking issue
 [#7](https://github.com/hahahahahaiyiwen/mem-sandbox/issues/7).
 
 ## 10. Milestone 6: workspace scalability decision
 
-This milestone begins only after every Milestone 5 exit criterion is complete. It is a
-post-release decision checkpoint, not a commitment to implement content offload.
+**Prerequisite:** Milestone 5 is complete.
+
+This milestone is a post-release decision checkpoint, not a commitment to implement
+content offload.
 
 ### Goal
 
 Revisit [workspace content offload](./components/workspace/content-offload/README.md)
 using representative workload data and measured performance while preserving the product
 priority of fastest provisioning.
+
+### Non-goals
+
+- Implementing a host-filesystem workspace or projecting virtual paths onto host paths.
+- Assuming that externalizing file bytes solves metadata, tree-copy, hash, or snapshot
+  costs.
+- Persisting live sessions or adding remote workers.
+- Selecting a storage provider before the workload, retention, and ownership
+  requirements are known.
+- Starting implementation merely because a deferred design already exists.
 
 ### Work
 
@@ -1099,13 +1130,20 @@ priority of fastest provisioning.
 - [ ] **6.2.3** Decide to defer, prototype, or plan implementation and record the
   evidence, product impact, compatibility constraints, and rationale in the workspace
   design.
+- [ ] **6.2.4** Keep three concerns explicit and separate: immutable file-content
+  placement, durable snapshot/session metadata, and host filesystem projection. A
+  decision for one does not approve the others.
 
 #### 6.3 Follow-up planning
 
 - [ ] **6.3.1** If approved, create a separate implementation milestone and issue set
   with explicit provisioning-latency, memory, correctness, and provider conformance
   acceptance criteria.
-- [ ] **6.3.2** If deferred, record the measurable trigger and next review point rather
+- [ ] **6.3.2** If a prototype is approved, begin with workspace-owned content ports, an
+  in-memory fake provider, and provider-linked lazy resume. Select a controlled
+  host-directory content-addressed provider only as a production adapter, never as a
+  sandbox path mount.
+- [ ] **6.3.3** If deferred, record the measurable trigger and next review point rather
   than leaving the decision open-ended.
 
 ### Exit criteria
@@ -1117,7 +1155,522 @@ priority of fastest provisioning.
 - [ ] **6.9.3** No content-offload implementation starts without a separately approved
   milestone based on the review evidence.
 
-## 11. Checklist execution rules
+## 11. Milestone 7: external capability foundations
+
+**Prerequisite:** Milestone 6 has recorded its scalability decision. A content-offload
+implementation, if approved, remains independently scoped.
+
+### Goal
+
+Define the shared authority, extension, accounting, and host-workspace exchange
+foundations required before networking or arbitrary external execution is enabled.
+Prove those foundations first with host-controlled repository import and result export,
+which do not grant a model host Git, host filesystem, or network access.
+
+### Non-goals
+
+- Implementing a generic policy language or one god interface for every resource.
+- Allowing models to install, discover, configure, or enable extension packages.
+- Treating third-party in-process extension code as untrusted.
+- Enabling network access, host processes, or arbitrary Python in this milestone.
+- Turning repository import into an agent-controlled clone operation.
+- Introducing tenant identity by treating the current provenance-only `OwnerId` as an
+  authenticated principal.
+
+### Work
+
+#### 7.1 Security profiles and extension composition
+
+- [ ] **7.1.1** Define host-selected `virtual`, `connected`,
+  `trusted-host-execution`, and `isolated-execution` profiles with accurate security
+  claims. The current network-free and process-free virtual profile remains the default.
+- [ ] **7.1.2** Define immutable capability grants selected during create or resume.
+  Snapshot state does not carry authority, and model requests may only narrow a grant.
+- [ ] **7.1.3** Extend trusted command/profile composition through constructor injection.
+  Do not add runtime package installation, implicit entry-point discovery, a service
+  locator, or host-shell fallback.
+- [ ] **7.1.4** Let extension descriptors declare their required resource kinds and
+  bounded model-facing description. Registry construction rejects missing grants,
+  duplicate names, incompatible versions, and unsupported profile combinations.
+- [ ] **7.1.5** Define extension compatibility and conformance metadata without placing
+  agent-framework or provider types in core.
+
+#### 7.2 Concrete authority and policy re-evaluation
+
+- [ ] **7.2.1** Re-evaluate the minimal session policy seam using the now-concrete
+  protected actions: repository exchange, network requests, credential attachment, and
+  external execution.
+- [ ] **7.2.2** Keep invariant enforcement in its owning component. Add focused
+  resource-specific policy contracts rather than moving URL parsing, runtime isolation,
+  workspace validation, or quota logic into a general policy engine.
+- [ ] **7.2.3** Require immutable prepared artifacts owned by the parser or resource
+  boundary whenever admission needs parsed facts. Policy must not duplicate command,
+  URL, archive, or Python parsing.
+- [ ] **7.2.4** Define fail-closed behavior for missing facts, evaluator failure, invalid
+  configuration, unsupported obligations, and required-audit failure before a protected
+  collaborator is invoked.
+- [ ] **7.2.5** Keep caller authentication and principal-to-handle authorization in the
+  application. Introduce authenticated principal and tenant contracts only if a later
+  remote or multi-tenant profile requires them.
+
+#### 7.3 Unified resource accounting
+
+- [ ] **7.3.1** Define typed accounting scopes for one operation and one session, with
+  later service or tenant scopes able to narrow them without changing component-owned
+  hard limits.
+- [ ] **7.3.2** Define distinct accounting modes for retained capacity, cumulative
+  consumption, active concurrency leases, rate windows, and observed peaks. Do not
+  convert unrelated resources into one undocumented scalar credit.
+- [ ] **7.3.3** Cover logical and resident workspace bytes, materialized bytes, snapshot
+  bytes, content-provider operations and bytes, repository transfer, HTTP requests and
+  transferred/decompressed bytes, execution wall and CPU time, memory, process count,
+  output, scratch space, secret leases, and active concurrency.
+- [ ] **7.3.4** Define atomic reservation or lease acquisition appropriate to each
+  resource mode before protected or externally billable work, exact-once settlement of
+  measured usage, and exact-once release of unused capacity on every success, denial,
+  failure, timeout, cancellation, and cleanup path.
+- [ ] **7.3.5** Keep hard component limits authoritative. Accounting may deny or narrow
+  work but cannot increase workspace, command, provider, network, or backend limits.
+- [ ] **7.3.6** Represent unavailable backend measurements explicitly rather than as
+  zero. A profile cannot claim enforcement for a dimension its backend cannot measure or
+  bound.
+- [ ] **7.3.7** Define parent-child attribution so a network request inside external
+  execution is visible in both contexts without double-charging the same session,
+  service, or tenant budget.
+- [ ] **7.3.8** Define resume semantics: a resumed session receives a new session ledger
+  and current host grant, while any application, owner, or tenant ledger persists only
+  in its external authority boundary, never through snapshot state.
+- [ ] **7.3.9** Add bounded usage, reservation, settlement, and denial events without
+  exposing content, host paths, credentials, or provider-specific exceptions.
+
+#### 7.4 Host-controlled repository ingestion and export
+
+- [ ] **7.4.1** Define a host-only import request that accepts a bounded content tree or
+  portable workspace archive, not an arbitrary host path or model-supplied repository
+  URL.
+- [ ] **7.4.2** Reuse workspace-owned archive preparation and atomic restore. Reject path
+  escapes, duplicate normalized paths, symbolic or hard links, devices, sockets,
+  unsupported metadata, invalid names, repository control directories such as `.git`,
+  and quota overflow before publication.
+- [ ] **7.4.3** Define result export as a complete bounded archive, selected artifact
+  set, or revision/root-hash-bound diff. Export never invokes host Git or chooses a host
+  destination.
+- [ ] **7.4.4** Record bounded source and result provenance without serializing host
+  checkout paths, repository credentials, remote URLs containing secrets, or Git
+  configuration.
+- [ ] **7.4.5** Keep clone, fetch, push, credential helpers, and remote mutation outside
+  this host-only boundary. Revisit a typed VCS capability after controlled egress and
+  destination-bound secrets are implemented.
+
+#### 7.5 Conformance and documentation
+
+- [ ] **7.5.1** Add fake capability, policy, accounting, and repository-transfer
+  collaborators so required tests remain deterministic and network-free.
+- [ ] **7.5.2** Test default denial, grant narrowing, reservation races, cumulative
+  exhaustion, exact-once settlement, import atomicity, export integrity, cancellation,
+  required-event failure, and cleanup.
+- [ ] **7.5.3** Generate capability descriptions from the configured profile and prove
+  that snapshots, adapters, or model inputs cannot silently widen authority.
+
+### Exit criteria
+
+- [ ] **7.9.1** The default virtual profile has exactly its existing host-free authority.
+- [ ] **7.9.2** Optional capabilities are immutable, host-selected, accurately described,
+  and composed without framework dependencies or dynamic model-controlled loading.
+- [ ] **7.9.3** Resource reservation and settlement are typed, cumulative, atomic, and
+  proven for every terminal path.
+- [ ] **7.9.4** Host-controlled repository import and export preserve workspace
+  containment, quotas, hashes, revisions, and atomicity without granting host Git,
+  filesystem, or network authority.
+- [ ] **7.9.5** Policy re-evaluation records which decisions belong to the session and
+  which remain authoritative at each resource boundary.
+
+## 12. Milestone 8: controlled outbound HTTP
+
+**Prerequisite:** Milestone 7 capability grants, focused policy decisions, resource
+accounting, and audit facts are complete.
+
+Detailed design:
+[Controlled Network Egress](./components/network-egress/README.md).
+
+### Goal
+
+Add a default-deny outbound HTTP boundary shared by trusted virtual-command and typed-tool
+adapters, with destination-aware secrets, SSRF defenses, cumulative budgets, and bounded
+audit behavior.
+
+### Non-goals
+
+- A transparent socket API, unrestricted internet profile, or host network inheritance.
+- Running a host `curl` process or shell.
+- Raw TCP, UDP, WebSockets, listeners, tunnels, inbound ports, or arbitrary protocols.
+- Browser automation, persistent cookies, model-controlled proxies or TLS roots, or
+  unrestricted file downloads.
+- Claiming library-level controls can contain arbitrary guest code.
+
+### Work
+
+#### 8.1 Gateway and profile
+
+- [ ] **8.1.1** Define an async framework-neutral `OutboundHttpGateway` using immutable
+  request, response, limits, usage, context, and stable error models.
+- [ ] **8.1.2** Keep networking absent when no connected profile is configured. A resumed
+  snapshot receives only the current host-selected equal or narrower grant.
+- [ ] **8.1.3** Support bounded HTTP and HTTPS first with `GET` and `HEAD` as the baseline
+  method grant and no ambient proxy, credential, cookie, cache, or host-client
+  configuration. State-changing methods require explicit host policy.
+- [ ] **8.1.4** Implement a fake gateway and conformance driver before one real bounded
+  transport.
+
+#### 8.2 Destination policy and SSRF controls
+
+- [ ] **8.2.1** Canonicalize scheme, hostname, effective port, and URL structure in the
+  network boundary. Reject URL user information and unsupported forms.
+- [ ] **8.2.2** Apply fail-closed scheme, hostname, port, method, and request-class
+  policy before DNS so denied names cannot become a resolver-based exfiltration channel.
+- [ ] **8.2.3** Resolve through a controlled CNAME policy and classify every final IPv4
+  and IPv6 result. Block loopback, private, link-local, multicast, reserved, unspecified,
+  and cloud metadata destinations by default.
+- [ ] **8.2.4** Bind connections to admitted resolution results while preserving normal
+  TLS hostname validation. Define and test DNS-rebinding behavior.
+- [ ] **8.2.5** Re-run normalization, admission, resolution, resource reservation, and
+  credential selection for every redirect. Define exact redirect method and credential
+  forwarding behavior.
+- [ ] **8.2.6** Enforce host-controlled schemes, destinations, ports, methods, header
+  classes, TLS, and proxy behavior. Missing facts or unsupported obligations deny before
+  transport access.
+- [ ] **8.2.7** Perform no implicit transport retry. Admit, reserve, credential, and
+  audit every future retry independently, and require an approved idempotency contract
+  before retrying a state-changing method.
+
+#### 8.3 Secrets, accounting, and events
+
+- [ ] **8.3.1** Add host-owned credential routes that select approved secret references
+  only after destination admission. The model never supplies raw values or arbitrary
+  references.
+- [ ] **8.3.2** Bind each credential lease to one operation and approved origin. Remove
+  or recompute sensitive headers across redirects and close every lease under the
+  operation deadline.
+- [ ] **8.3.3** Reserve and settle request attempts, body bytes, wire-response bytes,
+  decompressed bytes, redirects, concurrency, duration, credential leases, and
+  session-wide transfer.
+- [ ] **8.3.4** Add bounded child resource events for outcome, destination class, method,
+  status, redirects, bytes, duration, budget, and credential-route identifier. Exclude
+  full URLs, queries, headers, bodies, raw errors, and secret values by default.
+- [ ] **8.3.5** Extend secret canaries through request construction, transport,
+  redirection, output, workspace writes, snapshots, errors, events, diagnostics, and
+  object representations.
+- [ ] **8.3.6** Accept a required request-start event before transport. If terminal audit
+  fails after a request may have reached the remote service, report an explicit
+  audit-after-side-effect outcome with unknown remote state and never retry
+  automatically.
+
+#### 8.4 Command and typed-tool adapters
+
+- [ ] **8.4.1** Add one structured HTTP tool and one virtual command over the same
+  gateway and normalized conformance suite.
+- [ ] **8.4.2** Prefer a product-specific `fetch` or `http` command first. If the command
+  is named `curl`, define and test a recognizable bounded subset without config files,
+  arbitrary protocols, proxies, Unix sockets, host paths, credential files, or insecure
+  TLS.
+- [ ] **8.4.3** Let an optional bounded output-file operation publish through a narrow
+  workspace mutator. Denial, timeout, cancellation, overflow, transport failure, or
+  invalid destination leaves the target unchanged.
+- [ ] **8.4.4** Label remote content as untrusted and bound any model-visible headers or
+  body independently of transport limits.
+
+#### 8.5 Security and conformance
+
+- [ ] **8.5.1** Test URL canonicalization, IDNA behavior, IP literals, mixed DNS answers,
+  DNS rebinding, redirects, IPv4/IPv6 address classes, proxy isolation, TLS validation,
+  decompression, budgets, cancellation, audit failure, and cleanup.
+- [ ] **8.5.2** Keep required CI deterministic and public-network-free through fake
+  resolution and transport. Live endpoint tests remain optional.
+- [ ] **8.5.3** Prove trusted command/tool implementations receive no raw socket, host
+  process, host environment, or credential capability through their MemSandbox
+  contracts.
+
+### Exit criteria
+
+- [ ] **8.9.1** A default sandbox exposes and performs no networking.
+- [ ] **8.9.2** Every connection and redirect is admitted against its normalized and
+  resolved destination before transport or credential access.
+- [ ] **8.9.3** Destination-bound credentials, output, errors, events, and persistence
+  pass the complete secret-canary suite.
+- [ ] **8.9.4** Per-request and cumulative session budgets prevent unbounded request,
+  transfer, decompression, duration, and concurrency use.
+- [ ] **8.9.5** The command and typed tool are adapters over one gateway and neither
+  invokes a host shell, host `curl`, or independent HTTP client.
+- [ ] **8.9.6** Documentation states that arbitrary external code requires system-level
+  egress enforcement below the guest.
+- [ ] **8.9.7** State-changing requests are never retried implicitly, and audit failure
+  after a possible remote side effect reports unknown remote outcome truthfully.
+
+## 13. Milestone 9: external Python execution
+
+**Prerequisites:** Milestone 7 is complete. Milestone 8 is required before any execution
+profile receives network access; the first Python profile remains network-disabled.
+
+Detailed design:
+[External Execution and Python Runtime](./components/external-execution/README.md).
+
+### Goal
+
+Run a bounded Python program stored in the virtual workspace through a host-selected
+external backend while preserving explicit security tiers, atomic workspace publication,
+resource limits, cancellation, cleanup, and provenance.
+
+### Non-goals
+
+- Executing arbitrary Python in the MemSandbox application process.
+- Describing a host subprocess, AST filter, import restriction, or container name alone
+  as secure containment.
+- A full shell, PTY, REPL, notebook, debugger, detached service, or inbound port.
+- Transparent host-directory mounts or inherited host environment and credentials.
+- Agent-controlled runtime images, package indexes, `pip install`, native builds, or
+  mutable shared environments.
+- Repository cloning as an implicit execution side effect.
+
+### Work
+
+#### 9.1 Backend contract and security profile
+
+- [ ] **9.1.1** Define async framework-neutral execution requests, results, limits,
+  usage, runtime provenance, operation context, stable errors, and a narrow
+  `ExternalExecutionBackend` port.
+- [ ] **9.1.2** Keep the backend language-neutral while defining Python as the first
+  immutable runtime profile.
+- [ ] **9.1.3** Document and expose the backend security classification. A
+  `trusted-host-execution` subprocess is a development profile and makes no
+  hostile-code or multi-tenant containment claim.
+- [ ] **9.1.4** Select one isolated reference backend from representative workload,
+  cross-platform, startup, package, isolation, network-control, and maintenance
+  evidence. Record its exact threat assumptions.
+- [ ] **9.1.5** Reject execution when the selected backend cannot enforce every hard
+  limit or egress property required by its advertised profile.
+
+#### 9.2 Workspace transfer and publication
+
+- [ ] **9.2.1** Capture input revision and root hash and export one deterministic bounded
+  portable workspace archive under the serialized session operation.
+- [ ] **9.2.2** Transfer into a backend-owned workspace root without exposing a
+  model-selected host path. Reject links, devices, sockets, path escapes, duplicates,
+  unsupported metadata, and quota overflow.
+- [ ] **9.2.3** Collect a complete bounded candidate workspace after normal process
+  termination and validate it through workspace-owned archive preparation.
+- [ ] **9.2.4** Atomically publish a valid candidate after exit code zero or non-zero.
+  Publish nothing after timeout, cancellation, forced termination, infrastructure
+  failure, malformed output, transfer failure, accounting failure, or failed required
+  pre-commit audit.
+- [ ] **9.2.5** Preserve a revision precondition so future session concurrency cannot
+  cause silent lost updates.
+- [ ] **9.2.6** Measure the complete-copy baseline before considering incremental diffs,
+  RPC filesystems, FUSE, 9P, shared content providers, or copy-on-write optimization.
+
+#### 9.3 Isolation, resources, and lifecycle
+
+- [ ] **9.3.1** Enforce wall time, CPU, memory, process count, stdout, stderr, scratch,
+  workspace output, transfer, network, and concurrency limits outside agent control.
+- [ ] **9.3.2** Reserve worst-case resources before backend allocation and settle actual
+  usage exactly once on every terminal path. Missing measurements remain unavailable,
+  not zero.
+- [ ] **9.3.3** Define one cancellation-resilient lifecycle from allocation through
+  process-tree termination, candidate collection, publication decision, backend release,
+  accounting settlement, and terminal event delivery.
+- [ ] **9.3.4** Prohibit detached processes and prove complete backend resource
+  reclamation after success, non-zero exit, denial, timeout, cancellation, failure, and
+  cleanup error.
+- [ ] **9.3.5** Keep provider handles, host paths, raw runtime errors, and cleanup
+  internals outside model-visible results and events.
+
+#### 9.4 Python runtime, network, secrets, and provenance
+
+- [ ] **9.4.1** Define a host-owned runtime with exact Python version, immutable image or
+  environment identity, fixed package-set or lock digest, deterministic locale/encoding
+  where supported, and an explicit environment allowlist.
+- [ ] **9.4.2** Start with execution of a workspace script and bounded arguments.
+  Interactive stdin, `python -c`, package installation, and mutable runtimes require
+  separate evidence and approval.
+- [ ] **9.4.3** Keep network disabled by default. A connected execution profile exists
+  only when the backend enforces the Milestone 8 grant below the guest; passing a Python
+  helper object is not enforcement.
+- [ ] **9.4.4** Do not copy the current command secret overlay into guest code. Design
+  any execution secret grant separately, bind it to runtime and destination policy, and
+  prefer brokered host operations over revealing reusable values.
+- [ ] **9.4.5** Record execution ID, backend and adapter version, security profile,
+  runtime/image/package digests, input and output hashes and revisions, limits, measured
+  usage, network-policy identifier, publication outcome, and cleanup outcome as bounded
+  provenance.
+- [ ] **9.4.6** State explicitly that reproducible configuration does not make arbitrary
+  Python deterministic.
+
+#### 9.5 Command, tool, and conformance surfaces
+
+- [ ] **9.5.1** Add a constrained virtual `python` command and a typed `run_python` tool
+  over the same execution boundary.
+- [ ] **9.5.2** If using the `python` command name, publish exact supported CLI behavior
+  and do not imply access to the host interpreter, REPL, package manager, or full
+  environment.
+- [ ] **9.5.3** Add fake-backend conformance for output, files, exit status, publication,
+  provenance, accounting, events, cancellation, and cleanup before backend-specific
+  tests.
+- [ ] **9.5.4** Run the same representative Python workspace scenario through the direct
+  session, command adapter, typed-tool adapter, trusted-host development backend if
+  shipped, and isolated reference backend.
+- [ ] **9.5.5** Extend secret and host-boundary canaries through guest input, environment,
+  files, output, snapshots, events, exceptions, provider diagnostics, and
+  representations.
+
+### Exit criteria
+
+- [ ] **9.9.1** Arbitrary agent-supplied Python never executes inside the MemSandbox
+  process and remains absent from the default profile.
+- [ ] **9.9.2** Every backend exposes accurate isolation, runtime, package, and limit
+  provenance without overstating a subprocess or container boundary.
+- [ ] **9.9.3** Workspace transfer is bounded and integrity-checked, and returned changes
+  follow the documented atomic publication matrix.
+- [ ] **9.9.4** Hard backend limits and cumulative session accounting cover all required
+  resource dimensions and terminal paths.
+- [ ] **9.9.5** Session deletion, timeout, and cancellation leave no running process or
+  retained per-execution resource.
+- [ ] **9.9.6** Networking is disabled or enforced below the guest through the controlled
+  egress grant.
+- [ ] **9.9.7** Command and typed-tool adapters produce equivalent normalized results
+  through the same backend contract.
+
+## 14. Milestone 10: durable state and remote operation
+
+**Prerequisites:** Milestone 6 supplies the content-placement decision; Milestone 7
+supplies authority and accounting; Milestone 9 supplies external-execution lifecycle
+semantics before remote workers are considered.
+
+### Goal
+
+Decide and, only with demonstrated deployment demand, implement the durable state and
+remote-worker boundaries needed to resume work across processes or hosts.
+
+### Non-goals
+
+- Assuming content offload alone persists complete live sessions.
+- Turning a host directory into a transparent sandbox mount.
+- Adding multi-tenancy without authenticated principals, authorization, quotas, and
+  tenant-safe retention.
+- Committing to a hosted MemSandbox service before a concrete deployment use case exists.
+
+### Work
+
+#### 10.1 Durable content and snapshots
+
+- [ ] **10.1.1** If Milestone 6 approves content offload, deliver its separately scoped
+  provider conformance milestone before depending on it for remote operation.
+- [ ] **10.1.2** Define durable snapshot and session-metadata stores separately from
+  immutable file-content placement.
+- [ ] **10.1.3** Specify provider identity, compatibility, encryption, retention,
+  reachability, garbage collection, corruption, retry, timeout, and permanent-loss
+  behavior.
+- [ ] **10.1.4** Prove cross-process resume without eagerly materializing content where
+  provider-linked snapshots are supported.
+
+#### 10.2 Ownership and recovery
+
+- [ ] **10.2.1** Introduce authenticated principals and tenant authorization before
+  sharing stores, handles, snapshots, budgets, or workers across trust boundaries.
+- [ ] **10.2.2** Define exclusive session leases, fencing, heartbeat/expiry, idempotent
+  operations, crash recovery, and orphan cleanup.
+- [ ] **10.2.3** Extend cumulative accounting and audit export across process and tenant
+  boundaries without trusting worker-supplied identity or usage blindly.
+
+#### 10.3 Remote execution
+
+- [ ] **10.3.1** Define a versioned remote worker protocol only after the local external
+  execution contract passes conformance.
+- [ ] **10.3.2** Authenticate and encrypt control, workspace, result, event, and
+  cancellation channels.
+- [ ] **10.3.3** Preserve the same workspace publication, failure, resource, egress,
+  provenance, and cleanup semantics across local and remote backends.
+
+### Exit criteria
+
+- [ ] **10.9.1** The deployment requirement and selected durable/remote scope are
+  documented; unused service abstractions are not added speculatively.
+- [ ] **10.9.2** Content placement, snapshot durability, live-session ownership, and
+  remote execution remain distinct contracts.
+- [ ] **10.9.3** Approved durable state survives process loss with explicit integrity,
+  retention, and recovery behavior.
+- [ ] **10.9.4** Approved remote execution preserves local conformance and uses
+  authenticated ownership, fencing, cumulative accounting, and complete audit.
+
+## 15. Milestone 11: ecosystem and extension maturity
+
+**Prerequisites:** Select only surfaces backed by completed core behavior. A second SDK
+does not block networking or execution, and a transport does not redefine domain models.
+
+### Goal
+
+Prove that mature workspace and external-capability contracts can support additional
+agent frameworks, transports, and repository-aware workflows without framework leakage
+or weaker security semantics.
+
+### Non-goals
+
+- Supporting every framework, transport, hosted provider, VCS, or shell feature.
+- Extracting a shared framework abstraction before two real adapters prove it.
+- Letting MCP, HTTP, or an SDK become the core domain model.
+- Implementing typed VCS by invoking an unrestricted host Git process.
+
+### Work
+
+#### 11.1 Additional agent SDK
+
+- [ ] **11.1.1** Select PydanticAI, LangChain Deep Agents, or another SDK from current
+  adoption, extension fit, maintenance cost, and user evidence.
+- [ ] **11.1.2** Implement only the tool/capability or workspace/backend surface justified
+  by that SDK and run the shared stateful conformance scenario.
+- [ ] **11.1.3** Extract framework-neutral sample scenarios only where the second
+  integration proves the abstraction.
+
+#### 11.2 Repository-aware capability decision
+
+- [ ] **11.2.1** Evaluate whether host-controlled import/export is sufficient for agent
+  workflows before adding model-visible VCS operations.
+- [ ] **11.2.2** If justified, design typed status, diff, commit, branch, fetch, and push
+  operations with separate local-state and remote-mutation authority.
+- [ ] **11.2.3** Route remote VCS access through controlled egress and
+  destination-bound credentials. Do not expose credential helpers, host Git
+  configuration, host checkout paths, or arbitrary Git subprocess arguments.
+
+#### 11.3 Protocol and extension packaging
+
+- [ ] **11.3.1** Re-evaluate MCP and an HTTP/OpenAPI control plane against implemented
+  lifecycle, identity, streaming, cancellation, event, and authorization requirements.
+- [ ] **11.3.2** Separate model-facing tools from host administrative lifecycle and
+  policy endpoints.
+- [ ] **11.3.3** Define extension package compatibility, optional dependency ownership,
+  support policy, capability discovery by the host, and conformance certification.
+- [ ] **11.3.4** Keep untrusted or model-controlled extension installation unsupported.
+
+#### 11.4 Product and operational evidence
+
+- [ ] **11.4.1** Extend benchmarks to external provider, network, repository-transfer,
+  and execution profiles without weakening the fast dependency-free virtual baseline.
+- [ ] **11.4.2** Add deterministic replay/provenance evidence where recorded workspace
+  hashes, runtime versions, policy outcomes, usage, and external-input identities make
+  reconstruction possible.
+- [ ] **11.4.3** Publish a compatibility and security-profile matrix that distinguishes
+  logical, connected, trusted-host, container/managed, VM/microVM, and WASM claims.
+
+### Exit criteria
+
+- [ ] **11.9.1** At least two agent SDK integrations pass shared conformance without
+  framework imports in core.
+- [ ] **11.9.2** Any typed VCS surface preserves host-path isolation, destination-bound
+  credentials, explicit remote-mutation authority, and atomic workspace semantics.
+- [ ] **11.9.3** Any transport preserves domain errors, lifecycle, authorization,
+  cancellation, limits, events, and model-versus-host authority.
+- [ ] **11.9.4** Extension and profile compatibility are versioned, tested, and
+  accurately documented.
+
+## 16. Checklist execution rules
 
 - Checklist IDs use `milestone.area.task`; for example, `1.3.4` is milestone 1, workspace
   read area 3, task 4.
@@ -1131,7 +1684,7 @@ priority of fastest provisioning.
 - Mark a work item complete only when its tests pass and the affected component
   `README.md` reflects the behavior.
 
-## 12. Test strategy
+## 17. Test strategy
 
 ### Unit tests
 
@@ -1152,6 +1705,11 @@ Required paths for every behavior:
 - Session plus all in-memory components.
 - Snapshot round-trip.
 - Adapter plus fake framework boundary when possible.
+- Host-controlled repository archive import and result export.
+- Network gateway plus fake resolver, policy, credential, transport, event, and
+  accounting boundaries.
+- External execution plus fake backend, workspace transfer, publication, cleanup, and
+  accounting boundaries.
 
 ### Conformance tests
 
@@ -1163,6 +1721,14 @@ One behavior suite runs against:
 
 PydanticAI capabilities and LangChain Deep Agents backends remain future candidates and
 are added to the shared suite only after separate adapter decisions and implementations.
+
+Future external profiles add conformance drivers only after their direct domain boundary
+passes:
+
+- controlled HTTP gateway, virtual command, and typed tool;
+- external execution service, virtual Python command, and typed run-Python tool;
+- trusted-host and isolated backends with distinct security assertions;
+- local and remote backends if Milestone 10 approves remote execution.
 
 The expected workspace hashes and domain outcomes remain the same. The complete
 create-through-resume lifecycle and normalized trace are defined in
@@ -1189,8 +1755,12 @@ Use generated operation sequences for:
 - snapshot round-trips
 - parser tokenization
 - deterministic execution
+- resource reservation and settlement
+- repository archive validation and diff integrity
+- URL normalization, destination classification, and redirect admission
+- external-execution publication and cleanup state machines
 
-## 13. Decision gates
+## 18. Decision gates
 
 Milestone 0 decisions are resolved. Later implementation decisions remain open until
 their referenced checklist task begins.
@@ -1227,29 +1797,41 @@ their referenced checklist task begins.
 | Service lifecycle events | Keep `sandbox.created`/`sandbox.deleted` producer-less until shared sequencing or separate service identity is approved | `4.7` | Deferred |
 | Product validation | Stateful cross-adapter conformance plus a non-gating reference measurement; controlled evidence is required before regression gates and comparative evidence before a scoped "fastest" claim | `5.6` | Resolved |
 | First framework adapter | OpenAI Agents SDK custom capability plus sandbox client/session | `5.2` / `5.3` | Resolved |
-| First live agent sample | Azure OpenAI model through the OpenAI Agents SDK and host-bound MemSandbox capability; live calls remain opt-in | `5.8` | Planned in #45 |
+| First live agent sample | Official OpenAI and Azure OpenAI models through the OpenAI Agents SDK and host-bound MemSandbox capability; live calls remain opt-in | `5.8` / `#7` / `#45` | Resolved |
 | Workspace content offload | Revisit after Milestone 5 using measured workload and provisioning data | `6.2.3` | Deferred |
+| External capability profiles | Preserve `virtual` as the default; add host-selected `connected`, `trusted-host-execution`, and `isolated-execution` profiles without snapshot- or model-driven widening | `7.1` | Planned |
+| Unified resource accounting | Use typed operation/session scopes with worst-case reservation and exact-once settlement; keep component hard limits authoritative | `7.3` | Planned |
+| Repository ingestion and export | Host-controlled bounded archive/tree import plus revision/hash-bound diff, archive, or artifact export; no host path or Git authority | `7.4` | Planned |
+| Network egress | Default-deny HTTP/HTTPS through one host-owned gateway with destination policy, SSRF controls, destination-bound credentials, cumulative budgets, and audit | `8` | Planned |
+| First network command | Prefer `fetch` or `http`; use `curl` only for a documented compatible subset; never invoke a host executable | `8.4` | Open |
+| External execution | Run agent-supplied code only through a host-selected external backend with explicit security classification and atomic workspace publication | `9` | Planned |
+| First external runtime | Immutable bounded Python workspace-script profile with package installation and networking disabled initially | `9.4` | Planned |
+| First isolated backend | Select from measured workload and threat-model evidence; a trusted host subprocess is not an isolation candidate | `9.1.4` | Open |
+| Durable and remote operation | Require a concrete deployment need, authenticated ownership, fencing, retention, recovery, and local-contract conformance | `10` | Deferred |
+| Typed VCS capability | Evaluate only after host-controlled repository exchange and controlled egress are proven | `11.2` | Deferred |
+| Second agent SDK | Select from user and ecosystem evidence after the OpenAI integration; do not pre-build a framework abstraction | `11.1` | Deferred |
 
-## 14. Definition of first usable release
+## 19. First usable release closure
 
-The first usable release is complete when:
+The first usable release was completed by Milestone 5:
 
-- [ ] A host can create, use, and close an in-memory session.
-- [ ] The four default agent operations work through `SandboxSession`.
-- [ ] Paths and mutations are deterministic, atomic, and quota-safe.
-- [ ] The virtual command executor supports the documented command profile without host
+- [x] A host can create, use, and close an in-memory session.
+- [x] The four default agent operations work through `SandboxSession`.
+- [x] Paths and mutations are deterministic, atomic, and quota-safe.
+- [x] The virtual command executor supports the documented command profile without host
   fallback.
-- [ ] Snapshots restore files, cwd, and approved environment state.
-- [ ] The minimal explicit admission seam and dependency failures produce stable domain
+- [x] Snapshots restore files, cwd, and approved environment state.
+- [x] The minimal explicit admission seam and dependency failures produce stable domain
   errors; a composed policy engine is not required for the first usable release.
-- [ ] Events contain no secret or unbounded content.
-- [ ] The OpenAI Agents SDK sandbox client/session and custom capability pass the shared
+- [x] Events contain no secret or unbounded content.
+- [x] The OpenAI Agents SDK sandbox client/session and custom capability pass the shared
   conformance scenario.
-- [ ] The stateful create, snapshot, resume, continue, fork, and cleanup scenario passes
+- [x] The stateful create, snapshot, resume, continue, fork, and cleanup scenario passes
   through the direct session and supported adapters.
-- [ ] A short-duration provisioning and adapter-overhead reference is published; any
+- [x] A short-duration provisioning and adapter-overhead reference is published; any
   future regression gate uses a controlled runner with documented budgets.
-- [ ] A documented Azure OpenAI sample completes a stateful task through the host-bound
-  four-tool capability while required CI remains deterministic and network-free.
-- [ ] Core has no OpenAI, PydanticAI, LangChain, MCP, or other framework dependency.
-- [ ] Every implemented boundary is reflected in its component design document.
+- [x] Documented official OpenAI and Azure OpenAI samples complete stateful tasks through
+  the host-bound four-tool capability while required CI remains deterministic and
+  network-free.
+- [x] Core has no OpenAI, PydanticAI, LangChain, MCP, or other framework dependency.
+- [x] Every implemented boundary is reflected in its component design document.

@@ -11,11 +11,17 @@ successor to the original .NET Agent Sandbox.
 - Design two native integration levels:
   - tool/capability adapters
   - workspace/backend adapters
-- Add first-class adapters for PydanticAI capabilities, LangChain Deep Agents backends,
-  and the OpenAI Agents SDK sandbox client/session contract.
-- Treat an OpenAI Agents SDK `SandboxAgent` integration as an experimental adapter while
-  that API remains beta.
-- Defer MCP until the native boundaries are implemented and validated.
+- Keep the implemented OpenAI Agents SDK capability and sandbox client/session as the
+  first native integration; select a second SDK from user and ecosystem evidence.
+- Preserve the host-free `virtual` profile as the default.
+- Add external capabilities only through immutable host-selected profiles, focused
+  policy, cumulative resource accounting, and bounded audit.
+- Sequence host-controlled repository exchange before model-visible VCS authority.
+- Add controlled outbound HTTP before composing network access with external Python.
+- Execute arbitrary Python only through an external backend with an explicit security
+  classification.
+- Defer MCP and remote control planes until their underlying domain boundaries are
+  implemented and validated.
 - Describe the product as a deterministic virtual workspace, not an OS security boundary.
 
 ## Design documents
@@ -33,13 +39,24 @@ successor to the original .NET Agent Sandbox.
 - [Secret broker](./components/secret-broker/README.md)
 - [Event sink](./components/event-sink/README.md)
 - [Snapshot store](./components/snapshot-store/README.md)
+- [Controlled network egress](./components/network-egress/README.md)
+- [External execution and Python runtime](./components/external-execution/README.md)
 - [Product validation and benchmarks](./product-validation/README.md)
 
-## Deferred design explorations
+## Post-Milestone-5 design directions
 
 - [Workspace content offload](./components/workspace/content-offload/README.md) - keep
   the workspace tree in memory while optionally externalizing immutable file bytes for
-  larger logical workspaces and lazy resume.
+  larger logical workspaces and lazy resume; implementation remains conditional on
+  Milestone 6 evidence.
+- [Controlled network egress](./components/network-egress/README.md) - default-deny
+  outbound HTTP shared by trusted command and typed-tool adapters.
+- [External execution and Python runtime](./components/external-execution/README.md) -
+  external backend execution with bounded workspace transfer, accurate isolation
+  profiles, and Python as the first planned runtime.
+- [Implementation plan](./PLAN.md#11-milestone-7-external-capability-foundations) -
+  capability grants, unified resource accounting, and host-controlled repository
+  ingestion and result export.
 
 ## Research references
 

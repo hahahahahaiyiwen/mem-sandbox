@@ -35,6 +35,35 @@ and a policy implementation appropriate for the references they expose.
   inspection, or traceback tooling configured to capture local variables.
 - A general policy rule language or composed policy engine.
 
+## Post-Milestone-5 direction
+
+The current environment overlay remains implemented behavior for trusted virtual
+commands. It is not automatically reused by future network or external-execution
+profiles.
+
+Controlled HTTP introduces a destination-bound credential route:
+
+```text
+normalize and admit hostname
+  -> resolve and admit every destination
+  -> reserve resources
+  -> select a host-approved credential route
+  -> lease for this operation and origin
+  -> attach inside the transport boundary
+  -> close after the request
+```
+
+The model never supplies raw values or arbitrary secret references. Redirects do not
+inherit credentials across origins. See
+[Controlled Network Egress](../network-egress/README.md).
+
+External Python receives no current command-overlay values by default. Arbitrary code
+can copy a revealed secret into output, files, errors, or network traffic, so any future
+execution secret grant requires runtime- and destination-aware policy plus a backend
+injection and canary design. Brokered host operations are preferred when they can avoid
+revealing reusable values to guest code. See
+[External Execution and Python Runtime](../external-execution/README.md).
+
 ## Public contracts
 
 The initial functional boundary remains text-oriented because the approved integration

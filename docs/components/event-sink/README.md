@@ -30,6 +30,24 @@ Events are observability records, not the source of truth for workspace or sessi
 - Treating event delivery as an operating-system isolation or authorization boundary.
 - Agent-framework callback APIs.
 
+## Future resource events
+
+Milestones 7 through 9 may add bounded child resource events for repository transfer,
+accounting, HTTP, and external execution. Those events remain correlated with one parent
+sandbox operation and follow the same classification, redaction, payload, sequencing,
+delivery, and failure rules.
+
+The resource-owning module defines its event facts; it does not emit raw provider
+exceptions through the generic sink. Candidate facts include resource kind, outcome,
+stable reason, bounded usage, destination class, runtime/profile identifier, workspace
+hash, and publication outcome. Full URLs, queries, headers, bodies, source code, command
+arguments, stdout, stderr, workspace content, host paths, and secret values remain
+excluded by default.
+
+Required audit availability must be decided before an irreversible external side effect.
+Adding resource events does not retroactively make current policy-decision or secret
+lifecycle events part of the implemented profile.
+
 ## Boundary ownership
 
 `SandboxSession` consumes only the emit capability:

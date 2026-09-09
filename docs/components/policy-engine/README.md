@@ -1,6 +1,7 @@
 # Policy Admission Design
 
-**Status:** Minimal admission seam implemented; OpenAI boundary re-evaluated in issue #37
+**Status:** Minimal admission seam implemented; OpenAI boundary re-evaluated in issue
+#37; focused external-resource direction approved in issue #49
 
 ## Decision
 
@@ -56,6 +57,38 @@ store, model-selectable session, egress, arbitrary execution, external approval
 obligation, or per-tenant capability profile is still a mandatory re-evaluation trigger.
 The complete surface-by-surface decision is recorded in `docs/PLAN.md` section 5.7 and
 the OpenAI integration README.
+
+## Post-Milestone-5 direction
+
+Issue #49 identifies concrete future protected actions:
+
+- host-controlled repository import and result export;
+- outbound HTTP requests and redirects;
+- destination-bound credential attachment;
+- external Python execution and workspace publication;
+- cumulative resource reservation and settlement.
+
+These actions trigger policy re-evaluation but still do not justify one general rule
+language. The approved direction is layered:
+
+1. The host selects an immutable capability profile at create or resume.
+2. `SandboxSession` admits an optional operation and owns its lifecycle and deadline.
+3. The resource boundary evaluates its own prepared facts immediately before the
+   protected action.
+4. Component invariants and hard limits remain authoritative regardless of policy.
+
+The [controlled network design](../network-egress/README.md) owns pre-DNS hostname and
+post-resolution destination admission. The
+[external execution design](../external-execution/README.md) owns runtime, backend,
+workspace-publication, and isolation facts. Repository exchange uses workspace-owned
+prepared archives. Unified resource accounting may deny or narrow work but never
+increases component limits.
+
+Current `PolicyRequest` and `PolicyDecision` do not yet gain speculative union fields for
+these resources. Each implementation milestone must first define the narrow
+consumer-owned policy port and immutable facts required by that protected action.
+Authenticated principal or tenant fields remain application concerns until a remote or
+multi-tenant service boundary exists.
 
 ## Retained minimal seam
 

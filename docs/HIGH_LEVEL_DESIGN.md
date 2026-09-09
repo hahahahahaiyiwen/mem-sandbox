@@ -1,8 +1,10 @@
 # Python Agent Sandbox High-Level Design
 
-**Status:** Approved direction
-**Scope:** Framework-neutral core, tool/capability adapters, and workspace/backend adapters
-**Deferred:** MCP, remote control-plane protocols, and arbitrary-code isolation
+**Status:** Implemented core direction with approved post-Milestone-5 extensions
+**Scope:** Framework-neutral core, tool/capability adapters, workspace/backend adapters,
+and documented future external-capability boundaries
+**Not implemented:** Controlled network egress, external Python execution, durable remote
+operation, MCP, and remote control-plane protocols
 
 Implementation sequencing is defined in the
 [Python Agent Sandbox Implementation Plan](./PLAN.md).
@@ -64,6 +66,20 @@ through its own APIs, but it is not an operating-system isolation boundary.
   after that integration passes conformance; do not pre-build a global framework layer.
 - Treat MCP as a possible future integration point, not part of the current architecture
   or implementation phase.
+- Preserve the current network-free and process-free virtual profile as the default.
+- Select every future external capability through an immutable host-owned profile.
+  Snapshots and model requests cannot widen authority.
+- Put outbound HTTP behind one controlled network gateway shared by trusted command and
+  typed-tool adapters. Do not let commands create private clients or invoke host
+  executables.
+- Execute arbitrary Python only through an external backend with an explicit security
+  classification. A host subprocess is a trusted-development profile, not an
+  untrusted-code boundary.
+- Keep repository ingestion and result export host-controlled. Import and export bounded
+  workspace artifacts rather than exposing host checkout paths or unrestricted Git.
+- Add cumulative operation and session resource accounting while preserving
+  independently authoritative workspace, command, provider, network, and execution
+  limits.
 
 ## 3. Goals
 
@@ -76,6 +92,10 @@ through its own APIs, but it is not an operating-system isolation boundary.
 - Framework adapters translate contracts rather than reimplement domain behavior.
 - Unsupported capabilities fail explicitly instead of silently falling back to host
   behavior.
+- Optional external capabilities remain disabled unless selected by the host and are
+  described accurately to adapters and models.
+- Network, storage, repository, and execution resources are bounded per operation and
+  cumulatively per session.
 
 ## 4. Non-goals
 
@@ -85,6 +105,8 @@ through its own APIs, but it is not an operating-system isolation boundary.
 - Executing arbitrary Python safely in the application process.
 - Multi-owner collaborative mutation of one session.
 - Transparent access to the host filesystem, environment, processes, or network.
+- Allowing model input or restored snapshot data to install extensions, grant
+  capabilities, select host paths, or increase resource limits.
 - Making workflow checkpoints interchangeable with sandbox snapshots.
 - Defining MCP, HTTP, A2A, or another remote protocol in the current phase.
 - Supporting every feature exposed by every agent framework.
@@ -119,6 +141,44 @@ flowchart TD
     Session --> Snapshots
     Executor --> Workspace
 ```
+
+Approved future external capabilities extend the same inward dependency direction:
+
+```mermaid
+flowchart TD
+    Host["Host-selected capability profile"]
+    Session["Sandbox session"]
+    Executor["Command executor"]
+    HttpCommand["Trusted HTTP command"]
+    PythonCommand["Trusted Python command"]
+    Network["Controlled HTTP gateway"]
+    Execution["External execution coordinator"]
+    Backend["Host-selected execution backend"]
+    Resources["Unified resource accounting"]
+    Repository["Host repository exchange"]
+    Workspace["Workspace"]
+
+    Host --> Session
+    Host --> Repository
+    Repository --> Workspace
+    Session --> Resources
+    Session --> Network
+    Session --> Execution
+    Session --> Executor
+    Executor --> HttpCommand
+    Executor --> PythonCommand
+    HttpCommand --> Network
+    PythonCommand --> Execution
+    Execution --> Backend
+    Execution --> Workspace
+    Network --> Resources
+    Execution --> Resources
+```
+
+The diagram shows logical relationships, not implemented modules. Typed HTTP and Python
+tools enter through optional session operations. Their virtual-command equivalents are
+already inside one `execute` operation and receive narrow resource ports through the
+command execution context; they never call back into a public session method.
 
 The dependency direction always points inward:
 
@@ -177,6 +237,8 @@ Detailed design:
 | Secret broker | Resolving approved secret references into scoped leases | [Secret broker](./components/secret-broker/README.md) |
 | Event sink | Structured operation, audit, and lifecycle event delivery | [Event sink](./components/event-sink/README.md) |
 | Snapshot store | Durable or process-local storage of versioned sandbox snapshots | [Snapshot store](./components/snapshot-store/README.md) |
+| Controlled network egress | Future normalized HTTP admission, SSRF defense, destination-bound credentials, transfer limits, and network events | [Controlled network egress](./components/network-egress/README.md) |
+| External execution | Future runtime orchestration, workspace transfer, backend isolation classification, publication, and Python profile | [External execution and Python runtime](./components/external-execution/README.md) |
 
 ## 8. Public boundaries
 
@@ -248,6 +310,11 @@ Optional tools such as `list_files`, `file_info`, and `search_files` may be enab
 capability profile. Snapshot creation, restore, policy configuration, secret grants, and
 session deletion remain host-controlled by default.
 
+Future connected or execution profiles may expose typed HTTP or run-Python tools. Those
+tools are optional adapters over session-coordinated core boundaries; they do not change
+the default four-tool surface or grant an SDK direct access to a transport, secret, host
+process, or execution backend.
+
 ## 10. Component dependency rules
 
 1. `SandboxService` constructs and owns sessions but does not implement filesystem or
@@ -273,6 +340,18 @@ session deletion remain host-controlled by default.
 9. `SnapshotStore` stores and retrieves snapshots and consumes workspace snapshot data
    as an immutable contract; it does not mutate a workspace or decide snapshot timing.
 10. Adapters depend on service/session contracts only and contain no core policy.
+11. A future network gateway owns URL normalization, pre-resolution and
+    post-resolution admission, redirects, transfer limits, and transport error mapping.
+    Trusted commands and typed session operations consume it through narrow ports.
+12. A future external execution coordinator owns workspace transfer, backend invocation,
+    result validation, and publication ordering. Provider adapters implement only the
+    external backend port and never receive the live workspace.
+13. Unified resource accounting may deny or narrow work and record cumulative use, but
+    it cannot increase hard limits owned by the workspace, executor, provider, network,
+    secret, or execution boundaries.
+14. Repository ingestion and export are host operations over bounded workspace
+    artifacts. They do not accept model-selected host paths or give the workspace Git
+    behavior.
 
 ### 10.1 Parser ownership and sharing
 
@@ -415,6 +494,19 @@ It does not provide:
 Arbitrary or untrusted code requires a future process, container, VM, microVM, or WASM
 executor behind the same command/session contracts.
 
+Future profiles use these terms:
+
+| Profile | Authority and claim |
+|---|---|
+| `virtual` | Current in-memory workspace and constrained virtual commands; logical/API boundary only |
+| `connected` | Virtual profile plus controlled outbound HTTP; still a logical/API boundary |
+| `trusted-host-execution` | Local development subprocess; process separation without hostile-code containment |
+| `isolated-execution` | External backend whose documented runtime and deployment controls define the isolation claim |
+
+Extension packages loaded into the MemSandbox process are trusted application code.
+Arbitrary external code requires network enforcement below the guest because a Python
+library wrapper cannot prevent direct socket access.
+
 ## 15. Current design phase
 
 Included:
@@ -426,13 +518,24 @@ Included:
 - tool/capability adapters
 - workspace/backend adapters
 
-Deferred:
+Approved roadmap directions, not implemented:
+
+- evidence-based workspace content-placement decision
+- immutable external capability profiles
+- unified operation and session resource accounting
+- host-controlled repository ingestion and result export
+- controlled outbound HTTP
+- external execution with a bounded Python runtime profile
+
+Deferred until their prerequisites and concrete use cases exist:
 
 - MCP
 - HTTP or OpenAPI control plane
 - A2A
 - hosted sandbox providers
-- local subprocess and container executors
+- durable and remote session operation
+- typed VCS operations
+- additional agent SDKs
 - multi-owner sessions
 
 MCP remains a possible future interoperability adapter. It must be evaluated after the
@@ -453,6 +556,8 @@ docs/
     secret-broker/
     event-sink/
     snapshot-store/
+    network-egress/
+    external-execution/
   integrations/
     tool-capability/
     workspace-backend/

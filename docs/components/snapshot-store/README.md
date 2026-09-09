@@ -167,6 +167,17 @@ wrap the service/store boundary.
 `created_by` and `source_session_id` remain unchanged. New snapshots from the resumed
 session use the resumed session's new identity and logical owner provenance.
 
+## Future capability and accounting rule
+
+A snapshot transfers sandbox data and compatibility metadata, never authority. Future
+network grants, execution profiles, repository permissions, secret routes, hard limits,
+and resource-budget balances are not serialized into snapshot payloads.
+
+Resume uses the current host-selected profile. Compatibility metadata may require that a
+host provide a particular data decoder or runtime feature, but it cannot enable that
+feature. A resumed session receives a new session accounting ledger; any longer-lived
+application, owner, or tenant usage remains in its external authority boundary.
+
 ## Quota accounting
 
 `SnapshotStoreLimits` has positive immutable count and
