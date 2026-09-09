@@ -1,3 +1,5 @@
+"""Azure provider and shared behavior tests for the OpenAI Agents SDK samples."""
+
 from __future__ import annotations
 
 import asyncio
@@ -22,61 +24,59 @@ from openai.types.responses import (
     ResponseOutputText,
 )
 from openai.types.responses.response_prompt_param import ResponsePromptParam
-from samples.azure_openai_agent.__main__ import build_parser, main
-from samples.azure_openai_agent.app import (
-    InspectionContext,
-    create_azure_model,
-    run_scenario,
-)
-from samples.azure_openai_agent.cli import run_inspection_cli
-from samples.azure_openai_agent.config import AzureOpenAISettings
-from samples.azure_openai_agent.scenarios import get_scenario, list_scenarios
-from samples.azure_openai_agent.scenarios.config_migration import (
+from samples.openai_agents_sdk.application import build_sample_parser, run_provider_sample
+from samples.openai_agents_sdk.providers.azure_openai.__main__ import build_parser, main
+from samples.openai_agents_sdk.providers.azure_openai.config import AzureOpenAISettings
+from samples.openai_agents_sdk.providers.azure_openai.model import create_azure_model
+from samples.openai_agents_sdk.runner import InspectionContext, run_scenario
+from samples.openai_agents_sdk.scenarios import get_scenario, list_scenarios
+from samples.openai_agents_sdk.scenarios.config_migration import (
     API_PATH,
     WORKER_PATH,
 )
-from samples.azure_openai_agent.scenarios.config_migration import (
+from samples.openai_agents_sdk.scenarios.config_migration import (
     REPORT_CONTENT as MIGRATION_REPORT,
 )
-from samples.azure_openai_agent.scenarios.config_migration import (
+from samples.openai_agents_sdk.scenarios.config_migration import (
     REPORT_PATH as MIGRATION_REPORT_PATH,
 )
-from samples.azure_openai_agent.scenarios.data_pipeline import OUTPUT_PATH as PIPELINE_PATH
-from samples.azure_openai_agent.scenarios.incident_triage import (
+from samples.openai_agents_sdk.scenarios.data_pipeline import OUTPUT_PATH as PIPELINE_PATH
+from samples.openai_agents_sdk.scenarios.incident_triage import (
     REPORT_CONTENT as INCIDENT_REPORT,
 )
-from samples.azure_openai_agent.scenarios.incident_triage import (
+from samples.openai_agents_sdk.scenarios.incident_triage import (
     REPORT_PATH as INCIDENT_REPORT_PATH,
 )
-from samples.azure_openai_agent.scenarios.multi_agent_handoff import (
+from samples.openai_agents_sdk.scenarios.multi_agent_handoff import (
     CONFIG_PATH,
     PLAN_CONTENT,
     PLAN_PATH,
     REVIEW_CONTENT,
     REVIEW_PATH,
 )
-from samples.azure_openai_agent.scenarios.policy_recovery import (
+from samples.openai_agents_sdk.scenarios.policy_recovery import (
     REPORT_CONTENT as POLICY_REPORT,
 )
-from samples.azure_openai_agent.scenarios.policy_recovery import (
+from samples.openai_agents_sdk.scenarios.policy_recovery import (
     REPORT_PATH as POLICY_REPORT_PATH,
 )
-from samples.azure_openai_agent.scenarios.quota_recovery import (
+from samples.openai_agents_sdk.scenarios.quota_recovery import (
     OUTPUT_CONTENT as QUOTA_CONTENT,
 )
-from samples.azure_openai_agent.scenarios.quota_recovery import (
+from samples.openai_agents_sdk.scenarios.quota_recovery import (
     OUTPUT_PATH as QUOTA_PATH,
 )
-from samples.azure_openai_agent.scenarios.snapshot_branching import (
+from samples.openai_agents_sdk.scenarios.snapshot_branching import (
     CHOICE_PATH,
 )
-from samples.azure_openai_agent.scenarios.snapshot_branching import (
+from samples.openai_agents_sdk.scenarios.snapshot_branching import (
     PLAN_PATH as BRANCH_PLAN_PATH,
 )
-from samples.azure_openai_agent.scenarios.workspace_edit import (
+from samples.openai_agents_sdk.scenarios.workspace_edit import (
     SAMPLE_PATH,
 )
-from samples.azure_openai_agent.service import (
+from samples.shared.cli import run_inspection_cli
+from samples.shared.service import (
     create_sample_service,
     create_sample_service_bundle,
 )
@@ -136,6 +136,14 @@ class RecordingService:
 
     async def close(self) -> None:
         await self.delegate.close()
+
+
+class RecordingModelClient:
+    def __init__(self) -> None:
+        self.closed = False
+
+    async def close(self) -> None:
+        self.closed = True
 
 
 class DeterministicScenarioModel(Model):
@@ -616,6 +624,24 @@ async def test_list_scenarios_does_not_require_azure_configuration(
     output = capsys.readouterr().out
     for name in _SCENARIO_NAMES:
         assert f"{name}:" in output
+
+
+@pytest.mark.asyncio
+async def test_provider_application_runs_without_network_and_closes_client(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    client = RecordingModelClient()
+    model = DeterministicScenarioModel()
+
+    await run_provider_sample(
+        argv=["--scenario", "workspace-edit"],
+        parser=build_sample_parser(description="Test provider"),
+        model_factory=lambda: (client, model),
+        client_name="test client",
+    )
+
+    assert client.closed is True
+    assert "Verified /workspace/demo/report.txt:" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("scenario_name", _SCENARIO_NAMES)

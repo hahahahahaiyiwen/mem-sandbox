@@ -1,32 +1,35 @@
-"""Live Azure OpenAI entry point for registered MemSandbox scenarios."""
+"""Shared application lifecycle for provider-backed OpenAI Agents samples."""
 
 from __future__ import annotations
 
 import argparse
-import asyncio
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from typing import Protocol
 
-from openai import AsyncAzureOpenAI
+from agents.models.interface import Model
 
 from mem_sandbox.session import SandboxSession
-from samples.azure_openai_agent.app import (
-    InspectionContext,
-    ScenarioResult,
-    create_azure_model,
-    run_scenario,
-)
-from samples.azure_openai_agent.cli import run_inspection_cli
-from samples.azure_openai_agent.config import AzureOpenAISettings
-from samples.azure_openai_agent.scenarios import get_scenario, list_scenarios
-from samples.azure_openai_agent.service import create_sample_service_bundle
+from samples.openai_agents_sdk.runner import InspectionContext, ScenarioResult, run_scenario
+from samples.openai_agents_sdk.scenarios import get_scenario, list_scenarios
+from samples.shared.cli import run_inspection_cli
+from samples.shared.service import create_sample_service_bundle
 
 
-def build_parser() -> argparse.ArgumentParser:
-    """Create the stable sample command-line interface."""
-    parser = argparse.ArgumentParser(
-        description="Run an Azure OpenAI agent task inside MemSandbox."
-    )
+class AsyncModelClient(Protocol):
+    """Minimum provider-client lifetime required by the sample application."""
+
+    async def close(self) -> None:
+        """Release provider client resources."""
+        ...
+
+
+type ModelFactory = Callable[[], tuple[AsyncModelClient, Model]]
+
+
+def build_sample_parser(*, description: str) -> argparse.ArgumentParser:
+    """Create the common command-line interface for one provider entry point."""
+    parser = argparse.ArgumentParser(description=description)
     parser.add_argument(
         "--scenario",
         default="workspace-edit",
@@ -46,25 +49,30 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--list-scenarios",
         action="store_true",
-        help="list registered scenarios without requiring Azure configuration",
+        help="list registered scenarios without requiring provider configuration",
     )
     return parser
 
 
-async def main(argv: Sequence[str] | None = None) -> None:
-    """Run one configured scenario and release all application-owned resources."""
-    args = build_parser().parse_args(argv)
+async def run_provider_sample(
+    *,
+    argv: Sequence[str] | None,
+    parser: argparse.ArgumentParser,
+    model_factory: ModelFactory,
+    client_name: str,
+) -> None:
+    """Run one provider model through the shared scenario and application lifecycle."""
+    args = parser.parse_args(argv)
     if args.list_scenarios:
         for scenario in list_scenarios():
             print(f"{scenario.name}: {scenario.description}")
         return
 
     scenario = get_scenario(args.scenario)
-    settings = AzureOpenAISettings.from_environment()
-    azure_client: AsyncAzureOpenAI | None = None
+    model_client: AsyncModelClient | None = None
     service = None
     try:
-        azure_client, model = create_azure_model(settings)
+        model_client, model = model_factory()
         bundle = create_sample_service_bundle(policy_engine=scenario.policy_engine_factory())
         service = bundle.service
 
@@ -95,20 +103,12 @@ async def main(argv: Sequence[str] | None = None) -> None:
                 await service.close()
             except BaseException as error:
                 cleanup_errors.append(("MemSandbox service close", error))
-        if azure_client is not None:
+        if model_client is not None:
             try:
-                await azure_client.close()
+                await model_client.close()
             except BaseException as error:
-                cleanup_errors.append(("Azure client close", error))
-        if primary is not None:
-            for operation, error in cleanup_errors:
-                primary.add_note(f"secondary {operation} failure: {error}")
-        elif cleanup_errors:
-            operation, failure = cleanup_errors[0]
-            failure.add_note(f"{operation} failed during sample cleanup")
-            for secondary_operation, secondary in cleanup_errors[1:]:
-                failure.add_note(f"secondary {secondary_operation} failure: {secondary}")
-            raise failure
+                cleanup_errors.append((f"{client_name} close", error))
+        _surface_cleanup_errors(primary, cleanup_errors)
 
 
 def _print_inspection_context(context: InspectionContext) -> None:
@@ -133,5 +133,19 @@ def _print_result(result: ScenarioResult) -> None:
         print(artifact.content.decode("utf-8"), end="")
 
 
-if __name__ == "__main__":
-    asyncio.run(main())
+def _surface_cleanup_errors(
+    primary: BaseException | None,
+    cleanup_errors: list[tuple[str, BaseException]],
+) -> None:
+    if not cleanup_errors:
+        return
+    if primary is not None:
+        for operation, error in cleanup_errors:
+            primary.add_note(f"secondary {operation} failure: {error}")
+        return
+
+    operation, failure = cleanup_errors[0]
+    failure.add_note(f"{operation} failed during sample cleanup")
+    for secondary_operation, secondary in cleanup_errors[1:]:
+        failure.add_note(f"secondary {secondary_operation} failure: {secondary}")
+    raise failure

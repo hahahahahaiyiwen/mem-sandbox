@@ -5,7 +5,7 @@ from agents.sandbox.entries import Dir, File
 
 from mem_sandbox.integrations.openai_agents import InMemorySandboxClientOptions
 from mem_sandbox.workspace import WorkspaceLimits
-from samples.azure_openai_agent.scenarios.types import (
+from samples.openai_agents_sdk.scenarios.types import (
     AgentStage,
     ArtifactExpectation,
     StagedScenario,

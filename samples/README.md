@@ -11,4 +11,7 @@ network, and compatibility assumptions.
 
 Available samples:
 
-- [Azure OpenAI agent scenarios](./azure_openai_agent/README.md)
+- [SDK-independent shared utilities](./shared/README.md)
+- [OpenAI Agents SDK runner and scenarios](./openai_agents_sdk/README.md)
+- [Azure OpenAI provider](./openai_agents_sdk/providers/azure_openai/README.md)
+- [Official OpenAI provider](./openai_agents_sdk/providers/openai/README.md)

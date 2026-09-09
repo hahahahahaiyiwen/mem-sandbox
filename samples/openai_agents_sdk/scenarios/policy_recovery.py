@@ -6,7 +6,7 @@ from agents.sandbox.entries import Dir, File
 from mem_sandbox.core import OperationKind
 from mem_sandbox.policy import PolicyDecision, PolicyRequest
 from mem_sandbox.session import SessionPolicyEngine
-from samples.azure_openai_agent.scenarios.types import (
+from samples.openai_agents_sdk.scenarios.types import (
     AgentStage,
     ArtifactExpectation,
     StagedScenario,

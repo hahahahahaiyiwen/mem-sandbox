@@ -2,17 +2,13 @@
 
 ## Purpose and boundary
 
-This sample suite demonstrates OpenAI Agents SDK `SandboxAgent` instances using an Azure
-OpenAI model deployment to complete stateful tasks through
-`InMemorySandboxCapability`.
+This package configures an Azure OpenAI deployment for the
+[OpenAI Agents SDK sample runner](../../README.md). It owns Azure environment
+configuration, endpoint validation, `AsyncAzureOpenAI` client construction, the Chat
+Completions model adapter, and the executable provider entry point.
 
-The application owns:
-
-- Azure endpoint, deployment, API version, and credentials;
-- the concrete Azure model client;
-- MemSandbox service composition and lifetime;
-- creation and deletion of the SDK sandbox session;
-- the prompt and host-side result verification.
+Scenarios, MemSandbox composition, agent capability binding, host verification,
+inspection, and lifecycle behavior are shared with the official OpenAI sample.
 
 The model receives only the four capability tools: `execute`, `read_file`, `write_file`,
 and `apply_patch`. It cannot choose a sandbox handle, manage lifecycle or snapshots,
@@ -67,7 +63,9 @@ $env:AZURE_OPENAI_ENDPOINT = 'https://<resource-name>.openai.azure.com'
 $env:AZURE_OPENAI_API_KEY = '<key>'
 $env:AZURE_OPENAI_API_VERSION = '<api-version>'
 $env:AZURE_OPENAI_DEPLOYMENT = '<deployment-name>'
-uv run python -m samples.azure_openai_agent --scenario workspace-edit --inspect
+uv run python -m samples.openai_agents_sdk.providers.azure_openai `
+  --scenario workspace-edit `
+  --inspect
 ```
 
 Do not put credentials in source files, command history, issue comments, test fixtures,
@@ -100,6 +98,9 @@ initial files, bounded agent stages, and host-side verification.
 The host-side verifier is authoritative. A natural-language final response without the
 required in-memory state is a failed scenario.
 
+See the [SDK scenario design](../../scenarios/README.md) for scenario
+ownership and lifecycle invariants.
+
 ## Interactive inspection
 
 Pass `--inspect` to open an interactive CLI after successful verification. Pass
@@ -127,6 +128,7 @@ the CLI closes and deletes the in-memory sandbox.
 
 ```text
 construct Azure client and model
+  -> delegate to the OpenAI Agents SDK application runner
   -> construct MemSandbox service
   -> create SDK sandbox session
   -> run SandboxAgent with tracing disabled
@@ -147,8 +149,8 @@ to a separate trace exporter.
 
 ## Expected output
 
-The exact model wording varies. A successful run prints the final response and verified artifacts. With `--inspect`, it
-then opens the CLI:
+The exact model wording varies. A successful run prints the final response and verified
+artifacts. With `--inspect`, it then opens the CLI:
 
 ```text
 Verified /workspace/demo/report.txt:
@@ -157,7 +159,8 @@ mem-sandbox:/workspace>
 ```
 
 The run performs a billable Azure model request and requires network access. Required CI
-uses a deterministic model double and performs no Azure/OpenAI request.
+constructs and closes the Azure client without issuing a request. Shared scenario tests
+use a deterministic model double and perform no Azure/OpenAI request.
 
 ## Limitations and troubleshooting
 
@@ -179,7 +182,7 @@ uses a deterministic model double and performs no Azure/OpenAI request.
 
 ## Maintenance
 
-Keep Azure/provider configuration in this sample, OpenAI translation in
-`mem_sandbox.integrations.openai_agents`, and sandbox behavior in core modules. Update
-the deterministic model tests whenever scenario invariants or capability contracts
-change. See [scenario design](./scenarios/README.md).
+Keep Azure configuration and model construction in this package, SDK-specific sample
+behavior in `samples.openai_agents_sdk`, reusable sample utilities in `samples.shared`,
+OpenAI SDK translation in `mem_sandbox.integrations.openai_agents`, and sandbox behavior
+in core modules.

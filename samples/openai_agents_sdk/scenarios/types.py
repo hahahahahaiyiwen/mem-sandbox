@@ -1,4 +1,4 @@
-"""Shared immutable contracts for runnable agent scenarios."""
+"""OpenAI Agents SDK-shaped contracts for runnable scenarios."""
 
 from __future__ import annotations
 
