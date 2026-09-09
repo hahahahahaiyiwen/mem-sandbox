@@ -524,12 +524,16 @@ The Azure sample is integration evidence, not benchmark evidence. Provider laten
 model behavior, credentials, and network availability must not enter conformance or
 required benchmark gates.
 
-Milestone 6 consumes the baseline to decide whether workspace content offload or a
-simpler optimization addresses a measured constraint.
+Milestone 6 consumed the baseline and selected separately scoped phase instrumentation,
+single-pass seeding, and immutable path-copying design as the direction that best
+addresses the measured whole-tree mutation constraint. It preserves inline defaults and
+defers content offload.
 
 The Milestone 6 measurement contract, reproducible command, controlled comparisons, and
 interpretation limits are maintained in
-[Workspace Scalability Evidence](./workspace-scalability.md).
+[Workspace Scalability Evidence](./workspace-scalability.md). The alternatives matrix,
+boundary review, approved direction, and reconsideration triggers are maintained in the
+[Workspace Scalability Decision](../components/workspace/scalability-decision.md).
 
 ## Non-goals
 
@@ -540,7 +544,8 @@ interpretation limits are maintained in
 - Selecting arbitrary absolute latency targets before a baseline exists.
 - Hiding setup in fixtures, global state, adapter constructors, or the first operation.
 - Ranking products with different capabilities without disclosing those differences.
-- Adding content offload or another optimization before measurements identify a need.
+- Adding content offload or another runtime optimization inside the evidence milestone;
+  implementation requires separately approved work.
 
 ## Implementation decisions
 
@@ -562,6 +567,9 @@ Resolved:
   normally ignored `benchmark-results/` paths;
 - milestone reference artifacts are retained under `benchmarks/results/`; the initial
   Windows development-workstation run contains 38 successful cases and no failures;
+- the Milestone 6 decision preserves current inline quotas, treats lower process density
+  as a host mitigation, prioritizes separately scoped internal tree work, and defers
+  content offload until a measurable capacity trigger;
 - comparative results remain separate and cannot authorize an unqualified product claim.
 
 Deferred until automated performance gating is justified:

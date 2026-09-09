@@ -45,10 +45,12 @@ successor to the original .NET Agent Sandbox.
 
 ## Post-Milestone-5 design directions
 
-- [Workspace content offload](./components/workspace/content-offload/README.md) - keep
-  the workspace tree in memory while optionally externalizing immutable file bytes for
-  larger logical workspaces and lazy resume; implementation remains conditional on
-  Milestone 6 evidence.
+- [Workspace scalability decision](./components/workspace/scalability-decision.md) -
+  Milestone 6 evidence matrix and approved direction: preserve inline defaults,
+  prioritize separately scoped internal tree work, and defer content offload.
+- [Workspace content offload](./components/workspace/content-offload/README.md) -
+  conditional architecture reference retained for the measurable reconsideration
+  triggers defined by the Milestone 6 decision.
 - [Controlled network egress](./components/network-egress/README.md) - default-deny
   outbound HTTP shared by trusted command and typed-tool adapters.
 - [External execution and Python runtime](./components/external-execution/README.md) -
