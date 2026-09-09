@@ -1,4 +1,4 @@
-"""Shared Azure OpenAI scenario runner over the MemSandbox SDK adapter."""
+"""Provider-neutral OpenAI Agents SDK scenario runner over MemSandbox."""
 
 from __future__ import annotations
 
@@ -11,10 +11,8 @@ from uuid import UUID
 
 from agents import RunConfig, Runner
 from agents.models.interface import Model
-from agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
 from agents.sandbox import SandboxAgent, SandboxRunConfig
 from agents.sandbox.session import SandboxSession as OpenAISandboxSession
-from openai import AsyncAzureOpenAI
 
 from mem_sandbox.core import Clock
 from mem_sandbox.integrations.openai_agents import (
@@ -25,8 +23,7 @@ from mem_sandbox.integrations.openai_agents import (
 )
 from mem_sandbox.service import FactorySnapshotStore, SandboxHandle, SandboxService
 from mem_sandbox.session import ReadBytesRequest, SandboxSession
-from samples.azure_openai_agent.config import AzureOpenAISettings
-from samples.azure_openai_agent.scenarios import (
+from samples.openai_agents_sdk.scenarios import (
     AgentStage,
     ArtifactExpectation,
     ScenarioDefinition,
@@ -35,7 +32,7 @@ from samples.azure_openai_agent.scenarios import (
     get_scenario,
 )
 
-_OWNER_ID = "azure-openai-agent-sample"
+_OWNER_ID = "openai-agents-sample"
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,23 +67,6 @@ class ScenarioVerificationError(RuntimeError):
 
 
 type SessionInspector = Callable[[InspectionContext, SandboxSession], Awaitable[None]]
-
-
-def create_azure_model(
-    settings: AzureOpenAISettings,
-) -> tuple[AsyncAzureOpenAI, OpenAIChatCompletionsModel]:
-    """Construct the live Azure client and Agents SDK Chat Completions model."""
-    client = AsyncAzureOpenAI(
-        azure_endpoint=settings.endpoint,
-        api_version=settings.api_version,
-        api_key=settings.api_key,
-    )
-    model = OpenAIChatCompletionsModel(
-        model=settings.deployment,
-        openai_client=client,
-        strict_feature_validation=True,
-    )
-    return client, model
 
 
 async def run_scenario(

@@ -1,4 +1,4 @@
-"""Interactive command loop over one live MemSandbox session."""
+"""SDK-independent inspection CLI over one live MemSandbox session."""
 
 from __future__ import annotations
 

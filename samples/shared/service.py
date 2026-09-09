@@ -1,4 +1,4 @@
-"""Sample-local composition root for the MemSandbox service."""
+"""SDK-independent sample composition root for the MemSandbox service."""
 
 from dataclasses import dataclass
 from datetime import timedelta

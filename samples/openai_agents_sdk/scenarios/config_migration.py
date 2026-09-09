@@ -3,7 +3,7 @@
 from agents.sandbox import Manifest
 from agents.sandbox.entries import Dir, File
 
-from samples.azure_openai_agent.scenarios.types import (
+from samples.openai_agents_sdk.scenarios.types import (
     AgentStage,
     ArtifactExpectation,
     StagedScenario,

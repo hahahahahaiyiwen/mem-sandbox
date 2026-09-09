@@ -1,10 +1,10 @@
-"""Registered Azure OpenAI MemSandbox task scenarios."""
+"""Registered provider-neutral OpenAI Agents SDK task scenarios."""
 
-from samples.azure_openai_agent.scenarios.registry import (
+from samples.openai_agents_sdk.scenarios.registry import (
     get_scenario,
     list_scenarios,
 )
-from samples.azure_openai_agent.scenarios.types import (
+from samples.openai_agents_sdk.scenarios.types import (
     AgentStage,
     ArtifactExpectation,
     ScenarioDefinition,

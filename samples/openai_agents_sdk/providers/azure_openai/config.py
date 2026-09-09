@@ -1,4 +1,4 @@
-"""Environment-backed configuration for the Azure OpenAI sample."""
+"""Environment-backed configuration for the Azure OpenAI provider sample."""
 
 from __future__ import annotations
 

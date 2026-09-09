@@ -1014,6 +1014,17 @@ enters before cleanup when a scenario fails. Registered scenarios cover workspac
 editing, incident triage, atomic configuration migration, deterministic data pipelines,
 policy and quota recovery, multi-agent handoff, and host-owned snapshot branching.
 
+Issue #7 moved SDK-independent inspection and service composition to `samples/shared`.
+Its credential-free module entry point creates an empty in-memory session so readers can
+try the constrained CLI before configuring a model provider.
+OpenAI Agents SDK application lifecycle, runner behavior, and SDK-shaped scenarios live
+under `samples/openai_agents_sdk`. Nested `providers/azure_openai` and
+`providers/openai` entry points construct the Azure Chat Completions and official OpenAI
+Responses models respectively. Both providers share arguments, verification,
+inspection, and cleanup behavior. Required tests construct clients without sending
+requests and execute scenarios through a deterministic SDK `Model`, so no inference
+endpoint or credentials are required in CI.
+
 ### Exit criteria
 
 - [x] **5.9.1** `python -m pytest tests/conformance -q` passes for the direct session,
@@ -1046,6 +1057,12 @@ policy and quota recovery, multi-agent handoff, and host-owned snapshot branchin
   task through the four-tool capability, verifies the final in-memory workspace from the
   host, keeps live provider calls outside required CI, and documents secure configuration
   and cleanup.
+
+Milestone 5 is complete at merge commit
+`dedb04ee5b528c0cb3a605e086dc792c26485106`. The child-issue reconciliation,
+cross-platform CI matrix, benchmark reference, trust-boundary outcome, and final scope
+are recorded on tracking issue
+[#7](https://github.com/hahahahahaiyiwen/mem-sandbox/issues/7).
 
 ## 10. Milestone 6: workspace scalability decision
 

@@ -1,26 +1,26 @@
-"""Stable registry of runnable Azure OpenAI agent scenarios."""
+"""Stable registry of runnable provider-neutral agent scenarios."""
 
-from samples.azure_openai_agent.scenarios.config_migration import (
+from samples.openai_agents_sdk.scenarios.config_migration import (
     SCENARIO as CONFIG_MIGRATION,
 )
-from samples.azure_openai_agent.scenarios.data_pipeline import SCENARIO as DATA_PIPELINE
-from samples.azure_openai_agent.scenarios.incident_triage import (
+from samples.openai_agents_sdk.scenarios.data_pipeline import SCENARIO as DATA_PIPELINE
+from samples.openai_agents_sdk.scenarios.incident_triage import (
     SCENARIO as INCIDENT_TRIAGE,
 )
-from samples.azure_openai_agent.scenarios.multi_agent_handoff import (
+from samples.openai_agents_sdk.scenarios.multi_agent_handoff import (
     SCENARIO as MULTI_AGENT_HANDOFF,
 )
-from samples.azure_openai_agent.scenarios.policy_recovery import (
+from samples.openai_agents_sdk.scenarios.policy_recovery import (
     SCENARIO as POLICY_RECOVERY,
 )
-from samples.azure_openai_agent.scenarios.quota_recovery import (
+from samples.openai_agents_sdk.scenarios.quota_recovery import (
     SCENARIO as QUOTA_RECOVERY,
 )
-from samples.azure_openai_agent.scenarios.snapshot_branching import (
+from samples.openai_agents_sdk.scenarios.snapshot_branching import (
     SCENARIO as SNAPSHOT_BRANCHING,
 )
-from samples.azure_openai_agent.scenarios.types import ScenarioDefinition
-from samples.azure_openai_agent.scenarios.workspace_edit import (
+from samples.openai_agents_sdk.scenarios.types import ScenarioDefinition
+from samples.openai_agents_sdk.scenarios.workspace_edit import (
     SCENARIO as WORKSPACE_EDIT,
 )
 

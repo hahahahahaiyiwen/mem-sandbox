@@ -1,10 +1,10 @@
-# Azure OpenAI Agent Scenarios
+# OpenAI Agents SDK Scenario Definitions
 
 ## Boundary
 
 Scenario modules own task-specific manifests, prompts, stage structure, policy profiles,
-limits, and exact artifact expectations. They do not construct Azure clients, create or
-delete SDK sessions, implement inspection, or duplicate cleanup.
+limits, and exact artifact expectations. They do not construct inference-provider
+clients, create or delete SDK sessions, implement inspection, or duplicate cleanup.
 
 The shared runner owns:
 
