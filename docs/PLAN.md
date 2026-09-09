@@ -975,16 +975,44 @@ obligations, or per-tenant capability profiles.
 
 #### 5.8 Azure OpenAI agent sample
 
-- [ ] **5.8.1** Add the issue #45 sample using an Azure OpenAI model with the pinned
+- [x] **5.8.1** Add the issue #45 sample using an Azure OpenAI model with the pinned
   OpenAI Agents SDK, `SandboxAgent`, and `InMemorySandboxCapability`.
-- [ ] **5.8.2** Keep live Azure execution opt-in while required CI uses a deterministic
+- [x] **5.8.2** Keep live Azure execution opt-in while required CI uses a deterministic
   model double with no credentials or network calls.
-- [ ] **5.8.3** Prove host-selected session binding, bounded stateful workspace mutation,
+- [x] **5.8.3** Prove host-selected session binding, bounded stateful workspace mutation,
   host-side result verification, and explicit cleanup without host filesystem, shell,
   process, mount, port, or lifecycle authority in model inputs.
-- [ ] **5.8.4** Document endpoint/authentication configuration, tracing behavior,
+- [x] **5.8.4** Document endpoint/authentication configuration, tracing behavior,
   supported command semantics, resource ownership, expected output, limitations, and
   troubleshooting.
+
+Issue #45 uses a sample-local composition root rather than adding a production service
+builder. The runnable path requires explicit `AZURE_OPENAI_ENDPOINT`,
+`AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_API_VERSION`, and `AZURE_OPENAI_DEPLOYMENT`
+environment variables and supports public `*.openai.azure.com` and
+`*.cognitiveservices.azure.com` resource endpoints.
+The application constructs `AsyncAzureOpenAI` plus `OpenAIChatCompletionsModel`; the
+sample runner depends only on the SDK `Model` interface and an injected `SandboxService`
+so required tests use a deterministic model double.
+
+The bounded task creates `/workspace/demo/report.txt`, reads its content hash, applies a
+guarded patch from `status=pending` to `status=complete`, and reads the result. Host code
+then verifies the exact final bytes through the SDK session. Tracing is disabled by
+default, live execution is opt-in and billable, and all SDK session/backend,
+MemSandbox-service, and Azure-client resources are explicitly released on success,
+failure, or cancellation.
+
+The endpoint validation also accepts public `*.cognitiveservices.azure.com` Azure OpenAI
+resource endpoints. After verification, the live entry point attaches a constrained
+interactive command loop to the same host-selected session so a user can inspect or
+temporarily modify the in-memory state before cleanup; the loop never invokes a host
+shell.
+
+The sample is organized as a shared scenario runner plus registered task definitions.
+`--inspect` enters the CLI after successful verification, while `--inspect-on-failure`
+enters before cleanup when a scenario fails. Registered scenarios cover workspace
+editing, incident triage, atomic configuration migration, deterministic data pipelines,
+policy and quota recovery, multi-agent handoff, and host-owned snapshot branching.
 
 ### Exit criteria
 
@@ -1014,7 +1042,7 @@ obligations, or per-tenant capability profiles.
 - [x] **5.9.10** PydanticAI, Deep Agents, MCP, and other deferred integrations are not
   required for Milestone 5 completion, and no production abstraction exists solely for a
   deferred SDK.
-- [ ] **5.9.11** The Azure OpenAI sample in issue #45 completes one documented stateful
+- [x] **5.9.11** The Azure OpenAI sample in issue #45 completes one documented stateful
   task through the four-tool capability, verifies the final in-memory workspace from the
   host, keeps live provider calls outside required CI, and documents secure configuration
   and cleanup.

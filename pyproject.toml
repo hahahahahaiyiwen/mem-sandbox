@@ -61,6 +61,7 @@ include = [
   "/README.md",
   "/SECURITY.md",
   "/docs",
+  "/samples",
   "/src",
   "/tests",
 ]
@@ -79,7 +80,7 @@ markers = [
 testpaths = ["tests"]
 
 [tool.pyright]
-include = ["benchmarks", "evaluations", "src", "tests"]
+include = ["benchmarks", "evaluations", "samples", "src", "tests"]
 pythonPlatform = "All"
 pythonVersion = "3.12"
 typeCheckingMode = "strict"
@@ -88,7 +89,7 @@ venvPath = "."
 
 [tool.ruff]
 line-length = 100
-src = ["benchmarks", "src", "tests"]
+src = ["benchmarks", "evaluations", "samples", "src", "tests"]
 target-version = "py312"
 
 [tool.ruff.format]

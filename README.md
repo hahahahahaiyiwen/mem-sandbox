@@ -37,6 +37,7 @@ backend.
 - [Implementation plan](./docs/PLAN.md)
 - [Workspace design](./docs/components/workspace/README.md)
 - [Command executor design](./docs/components/command-executor/README.md)
+- [Runnable integration samples](./samples/README.md)
 
 MCP, remote transports, host subprocesses, containers, and full POSIX compatibility are
 outside the current implementation phase.
@@ -53,9 +54,9 @@ From the repository root:
 ```console
 uv sync --all-groups
 uv run pytest
-uv run ruff format --check src tests
-uv run ruff check src tests
-uv run pyright src tests
+uv run ruff format --check benchmarks evaluations samples src tests
+uv run ruff check benchmarks evaluations samples src tests
+uv run pyright benchmarks evaluations samples src tests
 uv build
 ```
 
