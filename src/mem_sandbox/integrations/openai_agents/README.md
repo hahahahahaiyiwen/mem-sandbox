@@ -1,34 +1,232 @@
 # OpenAI Agents SDK Integration
 
-## Purpose and ownership
+Use this adapter when an application needs to give an OpenAI Agents SDK
+`SandboxAgent` a stateful MemSandbox workspace without exposing the host filesystem or
+shell.
+
+## Choose a path
+
+| Goal | Start here |
+|---|---|
+| Run a live example | Follow the repository [quick start](../../../../README.md#quick-start) and the [provider sample guides](../../../../samples/openai_agents_sdk/README.md). |
+| Embed MemSandbox in a `SandboxAgent` application | Install the optional dependency, then follow [Use with `SandboxAgent`](#use-with-sandboxagent). |
+| Add snapshot-backed SDK resume | Read [Optional snapshot and resume support](#optional-snapshot-and-resume-support) after the basic lifecycle works. |
+| Maintain or extend the adapter | Start at [Engineering reference](#engineering-reference). |
+
+## Install
+
+Install MemSandbox with its OpenAI Agents SDK dependency:
+
+```console
+pip install "mem-sandbox[openai-agents]"
+```
+
+The supported SDK range is `openai-agents>=0.22,<0.23`; contract tests run against
+exactly `0.22.0`. The application configures and owns its inference model separately.
+See the [official OpenAI](../../../../samples/openai_agents_sdk/providers/openai/README.md)
+or [Azure OpenAI](../../../../samples/openai_agents_sdk/providers/azure_openai/README.md)
+sample for provider-specific model construction and credentials.
+
+## Use with `SandboxAgent`
+
+The minimum integration has two explicit host-owned dependencies:
+
+- an OpenAI Agents SDK `Model`; and
+- a configured MemSandbox `SandboxService`.
+
+Keeping both as constructor or function inputs makes provider credentials, policy,
+events, snapshots, and service lifetime application concerns rather than adapter
+globals.
+
+### Run one sandboxed agent
+
+This complete integration-boundary flow creates one SDK session, gives a
+`SandboxAgent` exactly the four MemSandbox tools, runs it, closes SDK-owned session
+resources, and deletes the backend:
+
+```python
+from agents import RunConfig, Runner
+from agents.models.interface import Model
+from agents.sandbox import SandboxAgent, SandboxRunConfig
+
+from mem_sandbox.integrations.openai_agents import (
+    InMemorySandboxCapability,
+    InMemorySandboxClient,
+    InMemorySandboxClientOptions,
+)
+from mem_sandbox.service import SandboxService
+
+
+async def run_sandbox_agent(
+    *,
+    model: Model,
+    service: SandboxService,
+) -> object:
+    client = InMemorySandboxClient(service)
+    sdk_session = await client.create(
+        options=InMemorySandboxClientOptions(owner_id="my-application"),
+    )
+    try:
+        agent = SandboxAgent(
+            name="workspace-agent",
+            model=model,
+            capabilities=[InMemorySandboxCapability()],
+        )
+        result = await Runner.run(
+            agent,
+            "Create /workspace/result.txt containing a short status update.",
+            run_config=RunConfig(
+                tracing_disabled=True,
+                sandbox=SandboxRunConfig(session=sdk_session),
+            ),
+        )
+        return result.final_output
+    finally:
+        try:
+            await sdk_session.aclose()
+        finally:
+            await client.delete(sdk_session)
+```
+
+`Runner.run` owns SDK start/binding behavior for the supplied session. The application
+does not bind `InMemorySandboxCapability` itself and does not give the model a sandbox
+handle. Keep `SandboxRunConfig.cwd` empty in profile 1; relative tool paths resolve
+through the core session cwd, initially `/workspace`.
+
+Validate required workspace artifacts through the SDK session before leaving the
+`try` block; model prose alone is not completion evidence. The canonical runner performs
+that host-side verification for every registered scenario.
+
+The injected service remains open after `run_sandbox_agent` returns. The application
+that constructed it closes it after all sessions have been deleted:
+
+```python
+async def run_application(*, model: Model, service: SandboxService) -> object:
+    try:
+        return await run_sandbox_agent(model=model, service=service)
+    finally:
+        await service.close()
+```
+
+The
+[canonical runner](../../../../samples/openai_agents_sdk/runner.py)
+uses this same client/session/agent lifecycle, including cancellation-safe cleanup. Its
+[model-free capability test](../../../../tests/integrations/openai_agents/test_capability.py)
+runs the flow with a deterministic `Model`, verifies the exact tool set, and confirms
+the workspace result without network access.
+
+### Obtain a `SandboxService`
+
+Production applications should construct one service in their composition root and
+inject the narrow `SandboxService` protocol. The repository's
+[sample composition root](../../../../samples/shared/service.py)
+shows a complete process-local assembly using only public MemSandbox types:
+
+- `SystemClock` and `SystemUuidGenerator`;
+- `DefaultSessionFactory` with application-selected policy, secret, event, and snapshot
+  collaborators;
+- a bounded `InMemorySnapshotStore`, `JsonSessionSnapshotCodec`, and
+  `InMemoryServiceSnapshotGateway`;
+- `InMemorySandboxService`.
+
+The sample helper is repository example code, not an installed `mem_sandbox` API. Copy
+the composition pattern or replace its collaborators in the application composition
+root; do not import `samples` from production code. The service owns all sessions it
+publishes, and `service.close()` is the final process-local cleanup fallback.
+
+### Model-facing tools and common limits
+
+Registering `InMemorySandboxCapability()` replaces the SDK default shell, filesystem,
+and compaction capability set with exactly:
+
+| Tool | Purpose |
+|---|---|
+| `execute` | Run the constrained MemSandbox command language, never a host shell |
+| `read_file` | Read bounded UTF-8 line ranges from a virtual workspace path |
+| `write_file` | Write text with an explicit state/hash precondition |
+| `apply_patch` | Apply one atomic guarded multi-file patch |
+
+Profile 1 has these important application-visible constraints:
+
+- `SandboxRunConfig.cwd` must be empty. Relative paths, expected hashes, patch headers,
+  and commands resolve through the core session cwd.
+- `execute(..., shell=True)`, custom shell prefixes, PTYs, exposed ports, mounts, host
+  paths, SDK users, and arbitrary host processes are unsupported.
+- Command timeout and output inputs may narrow, but never increase, the fixed
+  30-second and 256-KiB-per-stream ceilings.
+- Expected domain failures are returned as safe structured tool results. Cancellation
+  still propagates to the runner.
+- MemSandbox is a logical/API sandbox, not an operating-system isolation boundary.
+  Arbitrary Python or native code in the host process is outside this profile.
+
+### Lifecycle and ownership map
+
+| Resource | Created by | Owned and released by |
+|---|---|---|
+| Inference `Model` and provider client | Application | Application; close the provider client according to its SDK |
+| `SandboxService` | Application composition root | Application; call `service.close()` after all work |
+| `InMemorySandboxClient` | Application | Application; it borrows the service and has no service-close responsibility |
+| SDK sandbox session | `client.create()` or `client.resume()` | Application; call `sdk_session.aclose()`, then `client.delete(sdk_session)` |
+| Backend handle and core session | Client through the injected service | Service; `client.delete()` is the normal release and `service.close()` is the final fallback |
+| `InMemorySandboxCapability` | Application on `SandboxAgent` | SDK clones and binds it per run; the original stays unbound |
+| Snapshot store and clock, when enabled | Application | Application; keep them available for the required resume lifetime |
+
+`sdk_session.aclose()` and `client.delete()` are intentionally different operations.
+The first performs SDK stop/shutdown and dependency cleanup and may persist configured
+snapshot state. The second releases the MemSandbox backend. Calling only one is not the
+complete normal lifecycle.
+
+## Public API map
+
+All supported adapter types are exported from
+`mem_sandbox.integrations.openai_agents`:
+
+| Type | Role | Typical use |
+|---|---|---|
+| `InMemorySandboxCapability` | Four-tool model-facing capability cloned and bound by `SandboxAgent` | Required on each agent that should use the sandbox |
+| `InMemorySandboxClient` | SDK client over one injected `SandboxService`; creates, resumes, and deletes sessions | Required application integration point |
+| `InMemorySandboxClientOptions` | Immutable per-session owner, workspace, lifecycle, stream, and manifest limits | Optional for defaults; set explicitly for application provenance or limits |
+| `InMemorySandboxSession` | Concrete provider session behind the SDK instrumentation wrapper | Advanced inspection and adapter extension; applications normally use the returned SDK session |
+| `InMemorySandboxSessionState` | Strict JSON-safe handle, core identity, manifest, and optional archive metadata | Persist and pass to `client.resume()` when SDK resume is required |
+| `InMemorySandboxSnapshotSpec` | Request for a new adapter-owned snapshot identity | Optional input to `client.create()` when durable SDK persistence is configured |
+| `InMemorySandboxSnapshot` | Realized OpenAI snapshot bridge bound to owner and store metadata | Advanced state/persistence handling; normally produced by the adapter |
+
+## Optional snapshot and resume support
+
+The minimum path above uses the SDK's no-op snapshot behavior and needs no
+adapter-specific snapshot configuration. Add snapshot-backed resume only when the
+application needs serialized SDK state to recreate a workspace after its original
+backend handle is unavailable.
+
+The application must then:
+
+1. construct a bounded `FactorySnapshotStore` and its `Clock`;
+2. pass those same dependencies to `InMemorySandboxClient`;
+3. create with `InMemorySandboxSnapshotSpec()`;
+4. persist the JSON-safe `InMemorySandboxSessionState` only after successful SDK stop;
+5. protect access to state and snapshot identifiers; owner tags provide consistency,
+   not authorization;
+6. call `client.resume(state)` while the referenced snapshot remains retained.
+
+The [snapshot-branching sample](../../../../samples/openai_agents_sdk/scenarios/snapshot_branching.py)
+and the canonical runner exercise persistence, independent resume branches, and cleanup.
+Read [Snapshot store integration](#snapshot-store-integration) for schema, retention,
+failure, and integrity details.
+
+## Engineering reference
+
+The remaining sections are the evolving module specification for maintainers. They
+record translation boundaries, validation rules, lifecycle ordering, snapshot
+integrity, conformance, and compatibility decisions behind the usage path above.
+
+### Purpose and ownership
 
 This package owns translation between MemSandbox public contracts and the OpenAI Agents
 SDK sandbox client, session, state, snapshot, and capability APIs. It does not own
 filesystem semantics, command execution, lifecycle state, policy, secrets, events, or
 snapshot content.
 
-Install the optional dependency with:
-
-```text
-pip install "mem-sandbox[openai-agents]"
-```
-
-The supported SDK range is `openai-agents>=0.22,<0.23`. Contract tests execute against
-exactly `0.22.0`.
-
-## Public surface
-
-The integration exports:
-
-- `InMemorySandboxClientOptions`
-- `InMemorySandboxSessionState`
-- `InMemorySandboxSession`
-- `InMemorySandboxClient`
-- `InMemorySandboxSnapshot`
-- `InMemorySandboxSnapshotSpec`
-- `InMemorySandboxCapability`
-
-## Milestone 5.2 client and session design
+### Milestone 5.2 client and session design
 
 Milestone 5.2 adds the SDK client/session profile while keeping all filesystem,
 execution, lifecycle, and archive rules in their owning core modules. The adapter owns
@@ -98,7 +296,7 @@ quotas, decompressed-size limits, entry-count limits, path validation, and atomi
 publication. The OpenAI adapter must not access `MemoryWorkspace` directly or parse
 archive members.
 
-## Manifest profile version 1
+### Manifest profile version 1
 
 The profile accepts only a lossless synthetic workspace:
 
@@ -127,7 +325,7 @@ file-size violations, aggregate-byte violations, and explicit or implicit node-c
 violations are rejected before allocation. The adapter never invokes SDK metadata
 commands such as `chmod` or `chgrp`.
 
-## Native SDK session profile
+### Native SDK session profile
 
 - `read` and `write` translate complete binary streams to public session operations.
 - SDK users are unsupported; any non-`None` `user` is rejected before a core call.
@@ -154,27 +352,13 @@ commands such as `chmod` or `chgrp`.
   service-owned sandbox, cleaned up, and then published through a revision-and-root-hash
   conditional public atomic archive restore.
 
-## Milestone 5.3 four-tool capability
+### Milestone 5.3 four-tool capability
 
-`InMemorySandboxCapability` is the model-facing profile for the OpenAI runner. Configure
-it explicitly on `SandboxAgent`; doing so replaces the SDK's default shell, filesystem,
-and compaction capability set:
-
-```python
-from agents import RunConfig, Runner
-from agents.sandbox import SandboxAgent, SandboxRunConfig
-from mem_sandbox.integrations.openai_agents import InMemorySandboxCapability
-
-agent = SandboxAgent(
-    name="sandboxed",
-    capabilities=[InMemorySandboxCapability()],
-)
-result = await Runner.run(
-    agent,
-    "Update the workspace",
-    run_config=RunConfig(sandbox=SandboxRunConfig(session=sdk_session)),
-)
-```
+`InMemorySandboxCapability` is the model-facing profile for the OpenAI runner. The
+complete [usage path](#run-one-sandboxed-agent) shows how the application configures it
+on `SandboxAgent`, supplies the created session to `Runner.run`, and performs both SDK
+and backend cleanup. Configuring it replaces the SDK's default shell, filesystem, and
+compaction capability set.
 
 The SDK clones the capability for each run and binds the clone to the live provider
 session. Binding accepts the concrete `InMemorySandboxSession` and the SDK's
@@ -220,7 +404,7 @@ The capability intentionally does not expose `sh -lc`, arbitrary shell selection
 image viewing, host filesystem access, lifecycle operations, snapshots, policy
 configuration, or secret grants.
 
-## Portable snapshot bridge
+### Portable snapshot bridge
 
 Durable SDK snapshot persistence writes only `WorkspaceArchiveData.encoded` and commits
 the following JSON-safe metadata in `InMemorySandboxSessionState` together with the new
@@ -249,7 +433,7 @@ Direct `persist_workspace()` calls return a raw-byte in-process stream that carr
 archive metadata transiently for a matching direct `hydrate_workspace()` call. They do not
 modify serialized resume metadata or the durable snapshot identity.
 
-## Snapshot store integration
+### Snapshot store integration
 
 `FactorySnapshotStore` remains the framework-neutral persistence extension point.
 `InMemorySandboxSnapshot` is the OpenAI `SnapshotBase` bridge, and
@@ -286,7 +470,7 @@ should size or purge the store according to expected durable-stop frequency.
 third-party SDK snapshot providers are caller-owned extensions; the adapter never selects
 one as a fallback.
 
-## Lifecycle ownership
+### Lifecycle ownership
 
 - A newly allocated create or replacement-resume handle is cleaned up if adapter
   construction or SDK startup fails.
@@ -306,7 +490,7 @@ one as a fallback.
 - `client.delete()` is the authoritative backend release and is safe after prior or
   concurrent deletion. Later `aclose()` calls do not attempt to persist a deleted backend.
 
-## Error translation
+### Error translation
 
 The adapter preserves core errors as causes while presenting SDK-shaped boundary errors:
 
@@ -323,7 +507,7 @@ remain exceptional and retain their original causes so later capability translat
 map them without losing domain classification. An SDK execution timeout is forwarded into
 both the core operation and command-execution limits.
 
-## Product conformance
+### Product conformance
 
 The model-free reference scenario passes through the direct service/session, OpenAI
 sandbox client/session, and OpenAI capability drivers with one identical normalized
@@ -338,7 +522,7 @@ preconditioned operations that are not represented by the SDK's generic binary s
 methods. The capability driver exercises only `execute`, `read_file`, `write_file`, and
 `apply_patch`. Neither path performs a model or provider-network call.
 
-## Compatibility policy
+### Compatibility policy
 
 OpenAI Sandbox Agents are beta. Any change to the pinned abstract methods, method
 signatures, state or run-configuration fields, lifecycle ordering, serialization,
@@ -349,7 +533,7 @@ Support is limited to the documented `>=0.22,<0.23` range. Expanding that range 
 running the contract and conformance suites against the proposed versions and updating
 this README and the integration design documents.
 
-## Milestone 5 trust-boundary review
+### Milestone 5 trust-boundary review
 
 Issue #37 confirmed that this integration remains a translation and lifecycle boundary,
 not an authorization provider.
@@ -379,7 +563,7 @@ mapping are OpenAI-owned concerns; reusable sandbox behavior already lives behin
 core interfaces. Additional SDKs remain separate approved integrations until at least
 two implementations prove identical collaboration.
 
-## Maintenance rules
+### Maintenance rules
 
 - Import MemSandbox behavior only from public package exports such as
   `mem_sandbox.session` and `mem_sandbox.service`.
@@ -398,3 +582,23 @@ two implementations prove identical collaboration.
 - Preserve SDK instrumentation by returning `BaseSandboxClient._wrap_session(inner)`.
 - Do not introduce a cross-framework adapter abstraction until another implemented SDK
   proves identical reusable behavior.
+
+## Reader-first integration README convention
+
+Future public integration READMEs should use the same progressive-disclosure order:
+
+1. identify whether the reader should run a sample, embed the integration, or maintain
+   the adapter;
+2. show installation and one complete minimum path with every collaborator defined;
+3. map public types to role, ownership, and lifetime;
+4. place common limits, unsupported behavior, and the security boundary before optional
+   features;
+5. separate snapshot, persistence, provider, or other advanced flows from the default;
+6. retain detailed invariants, compatibility policy, and implementation decisions under
+   an engineering-reference heading;
+7. link usage snippets to executable samples or focused tests that fail when the public
+   API drifts.
+
+Do not improve readability by deleting module-boundary decisions or by copying a live
+provider sample into multiple documents. Keep one tested implementation and route each
+audience to it with a clear purpose label.

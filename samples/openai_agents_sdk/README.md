@@ -1,5 +1,18 @@
 # OpenAI Agents SDK Samples
 
+## Choose a path
+
+| Goal | Documentation |
+|---|---|
+| Run a maintained live scenario | Continue with this sample guide, then select the [official OpenAI](./providers/openai/README.md) or [Azure OpenAI](./providers/azure_openai/README.md) provider. |
+| Embed MemSandbox in an application | Follow the [reader-first `SandboxAgent` integration guide](../../src/mem_sandbox/integrations/openai_agents/README.md#use-with-sandboxagent). |
+| Understand or extend the adapter | Read the integration [engineering reference](../../src/mem_sandbox/integrations/openai_agents/README.md#engineering-reference). |
+| Inspect framework-neutral service composition | Read the [shared sample utilities](../shared/README.md) and their [composition root](../shared/service.py). |
+
+The helpers under `samples` are repository examples, not installed
+`mem_sandbox` public APIs. Production applications should copy the composition pattern
+or inject their own public collaborators rather than importing `samples`.
+
 ## Purpose and boundary
 
 This package owns sample behavior specific to the OpenAI Agents SDK and the MemSandbox
