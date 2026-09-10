@@ -8,7 +8,7 @@ shell.
 
 | Goal | Start here |
 |---|---|
-| Run a live example | Follow the repository [quick start](../../../../README.md#quick-start) and the [provider sample guides](../../../../samples/openai_agents_sdk/README.md). |
+| Run a live example | Follow the repository [quick start](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/README.md#quick-start) and the [provider sample guides](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/samples/openai_agents_sdk/README.md). |
 | Embed MemSandbox in a `SandboxAgent` application | Install the optional dependency, then follow [Use with `SandboxAgent`](#use-with-sandboxagent). |
 | Add snapshot-backed SDK resume | Read [Optional snapshot and resume support](#optional-snapshot-and-resume-support) after the basic lifecycle works. |
 | Maintain or extend the adapter | Start at [Engineering reference](#engineering-reference). |
@@ -18,14 +18,25 @@ shell.
 Install MemSandbox with its OpenAI Agents SDK dependency:
 
 ```console
-pip install "mem-sandbox[openai-agents]"
+python -m pip install "mem-sandbox[openai-agents]"
+```
+
+Confirm which package version the application resolved:
+
+```console
+python -c "from importlib.metadata import version; print(version('mem-sandbox'))"
 ```
 
 The supported SDK range is `openai-agents>=0.22,<0.23`; contract tests run against
 exactly `0.22.0`. The application configures and owns its inference model separately.
-See the [official OpenAI](../../../../samples/openai_agents_sdk/providers/openai/README.md)
-or [Azure OpenAI](../../../../samples/openai_agents_sdk/providers/azure_openai/README.md)
+See the
+[official OpenAI](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/samples/openai_agents_sdk/providers/openai/README.md)
+or
+[Azure OpenAI](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/samples/openai_agents_sdk/providers/azure_openai/README.md)
 sample for provider-specific model construction and credentials.
+
+The wheel includes this guide and the adapter package. Repository samples and tests are
+linked on GitHub rather than installed as importable application modules.
 
 ## Use with `SandboxAgent`
 
@@ -37,6 +48,69 @@ The minimum integration has two explicit host-owned dependencies:
 Keeping both as constructor or function inputs makes provider credentials, policy,
 events, snapshots, and service lifetime application concerns rather than adapter
 globals.
+
+### Compose a process-local `SandboxService`
+
+MemSandbox intentionally has no global service or hidden default policy. Construct the
+service once in the application composition root from installed public types:
+
+```python
+from datetime import timedelta
+
+from mem_sandbox.core import SystemClock, SystemUuidGenerator
+from mem_sandbox.events import InMemoryEventSink
+from mem_sandbox.policy import AllowAllPolicyEngine
+from mem_sandbox.secrets import NoSecretBroker
+from mem_sandbox.service import (
+    DefaultSessionFactory,
+    InMemorySandboxService,
+    InMemoryServiceSnapshotGateway,
+)
+from mem_sandbox.snapshots import (
+    InMemorySnapshotStore,
+    JsonSessionSnapshotCodec,
+    SnapshotStoreLimits,
+)
+
+
+def create_sandbox_service() -> InMemorySandboxService:
+    clock = SystemClock()
+    uuid_generator = SystemUuidGenerator()
+    snapshot_codec = JsonSessionSnapshotCodec()
+    snapshot_store = InMemorySnapshotStore(
+        default_ttl=timedelta(days=1),
+        limits=SnapshotStoreLimits(
+            max_snapshots=20,
+            max_total_payload_bytes=64 * 1024 * 1024,
+        ),
+        clock=clock,
+    )
+    session_factory = DefaultSessionFactory(
+        policy_engine=AllowAllPolicyEngine(),
+        secret_broker=NoSecretBroker(),
+        event_sink=InMemoryEventSink(
+            max_events=500,
+            max_payload_bytes=4 * 1024 * 1024,
+        ),
+        snapshot_codec=snapshot_codec,
+        clock=clock,
+        uuid_generator=uuid_generator,
+    )
+    return InMemorySandboxService(
+        session_factory=session_factory,
+        snapshot_gateway=InMemoryServiceSnapshotGateway(snapshot_store),
+        snapshot_decoder=snapshot_codec,
+        clock=clock,
+        uuid_generator=uuid_generator,
+    )
+```
+
+This small process-local assembly uses `AllowAllPolicyEngine` and `NoSecretBroker`.
+Replace its policy, secret, event, snapshot, limits, clock, and identity collaborators
+at the composition boundary when the application needs stronger controls. The
+repository's
+[sample composition root](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/samples/shared/service.py)
+uses the same public construction pattern.
 
 ### Run one sandboxed agent
 
@@ -63,7 +137,7 @@ async def run_sandbox_agent(
     service: SandboxService,
 ) -> object:
     client = InMemorySandboxClient(service)
-    sdk_session = await client.create(
+    sandbox_session = await client.create(
         options=InMemorySandboxClientOptions(owner_id="my-application"),
     )
     try:
@@ -77,15 +151,15 @@ async def run_sandbox_agent(
             "Create /workspace/result.txt containing a short status update.",
             run_config=RunConfig(
                 tracing_disabled=True,
-                sandbox=SandboxRunConfig(session=sdk_session),
+                sandbox=SandboxRunConfig(session=sandbox_session),
             ),
         )
         return result.final_output
     finally:
         try:
-            await sdk_session.aclose()
+            await sandbox_session.aclose()
         finally:
-            await client.delete(sdk_session)
+            await client.delete(sandbox_session)
 ```
 
 `Runner.run` owns SDK start/binding behavior for the supplied session. The application
@@ -109,30 +183,11 @@ async def run_application(*, model: Model, service: SandboxService) -> object:
 ```
 
 The
-[canonical runner](../../../../samples/openai_agents_sdk/runner.py)
+[canonical runner](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/samples/openai_agents_sdk/runner.py)
 uses this same client/session/agent lifecycle, including cancellation-safe cleanup. Its
-[model-free capability test](../../../../tests/integrations/openai_agents/test_capability.py)
+[model-free capability test](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/tests/integrations/openai_agents/test_capability.py)
 runs the flow with a deterministic `Model`, verifies the exact tool set, and confirms
 the workspace result without network access.
-
-### Obtain a `SandboxService`
-
-Production applications should construct one service in their composition root and
-inject the narrow `SandboxService` protocol. The repository's
-[sample composition root](../../../../samples/shared/service.py)
-shows a complete process-local assembly using only public MemSandbox types:
-
-- `SystemClock` and `SystemUuidGenerator`;
-- `DefaultSessionFactory` with application-selected policy, secret, event, and snapshot
-  collaborators;
-- a bounded `InMemorySnapshotStore`, `JsonSessionSnapshotCodec`, and
-  `InMemoryServiceSnapshotGateway`;
-- `InMemorySandboxService`.
-
-The sample helper is repository example code, not an installed `mem_sandbox` API. Copy
-the composition pattern or replace its collaborators in the application composition
-root; do not import `samples` from production code. The service owns all sessions it
-publishes, and `service.close()` is the final process-local cleanup fallback.
 
 ### Model-facing tools and common limits
 
@@ -166,12 +221,12 @@ Profile 1 has these important application-visible constraints:
 | Inference `Model` and provider client | Application | Application; close the provider client according to its SDK |
 | `SandboxService` | Application composition root | Application; call `service.close()` after all work |
 | `InMemorySandboxClient` | Application | Application; it borrows the service and has no service-close responsibility |
-| SDK sandbox session | `client.create()` or `client.resume()` | Application; call `sdk_session.aclose()`, then `client.delete(sdk_session)` |
+| SDK sandbox session | `client.create()` or `client.resume()` | Application; call `sandbox_session.aclose()`, then `client.delete(sandbox_session)` |
 | Backend handle and core session | Client through the injected service | Service; `client.delete()` is the normal release and `service.close()` is the final fallback |
 | `InMemorySandboxCapability` | Application on `SandboxAgent` | SDK clones and binds it per run; the original stays unbound |
 | Snapshot store and clock, when enabled | Application | Application; keep them available for the required resume lifetime |
 
-`sdk_session.aclose()` and `client.delete()` are intentionally different operations.
+`sandbox_session.aclose()` and `client.delete()` are intentionally different operations.
 The first performs SDK stop/shutdown and dependency cleanup and may persist configured
 snapshot state. The second releases the MemSandbox backend. Calling only one is not the
 complete normal lifecycle.
@@ -208,7 +263,8 @@ The application must then:
    not authorization;
 6. call `client.resume(state)` while the referenced snapshot remains retained.
 
-The [snapshot-branching sample](../../../../samples/openai_agents_sdk/scenarios/snapshot_branching.py)
+The
+[snapshot-branching sample](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/samples/openai_agents_sdk/scenarios/snapshot_branching.py)
 and the canonical runner exercise persistence, independent resume branches, and cleanup.
 Read [Snapshot store integration](#snapshot-store-integration) for schema, retention,
 failure, and integrity details.
