@@ -1,10 +1,13 @@
 # MemSandbox
 
-A deterministic in-memory workspace and constrained command environment for AI agents.
+A deterministic in-memory workspace for AI agents that inspect, edit, organize, and
+review files.
 
-MemSandbox lets an application give an agent stateful files, familiar POSIX-shaped
-commands, snapshots, policy enforcement, and explicit lifecycle management without
-giving the model direct access to the host filesystem or shell.
+MemSandbox lets an application seed task artifacts, give an agent a small set of file
+and constrained-command tools, and verify the resulting workspace from host code.
+Content hashes, atomic mutations, policies, quotas, snapshots, and explicit lifecycle
+ownership keep that work bounded without giving the model direct access to the host
+filesystem or shell.
 
 > **Status:** The framework-neutral core and first native OpenAI Agents SDK
 > integration are implemented and tested on Python 3.12 and 3.14 for Linux and Windows.
@@ -69,6 +72,9 @@ async def run_sandbox_agent(
 
 See the
 [complete service composition, provider setup, and lifecycle guide](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/src/mem_sandbox/integrations/openai_agents/README.md#use-with-sandboxagent).
+This intentionally small example shows the installed public API. The repository's
+[`document-review` showcase](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/samples/openai_agents_sdk/README.md#run-the-document-review-showcase)
+demonstrates a complete guarded edit, independent review, and host verification.
 
 ### Develop and run the repository samples
 
@@ -107,7 +113,19 @@ List the maintained scenarios without credentials or a network request:
 uv run python -m samples.openai_agents_sdk.providers.openai --list-scenarios
 ```
 
-Choose one inference provider.
+Choose the task closest to your use case:
+
+| Task | Scenario | Host-verified result |
+|---|---|---|
+| Review and revise a stale document | `document-review` | Corrected release notes and an evidence-linked review |
+| Check basic SDK and tool wiring | `workspace-edit` | One hash-guarded file edit |
+| Update related configuration safely | `config-migration` | Two migrated configs and a migration report |
+| Coordinate sequential agent roles | `multi-agent-handoff` | A plan, implemented change, and reviewer verdict |
+
+`document-review` is the primary showcase. `workspace-edit` remains the smallest
+diagnostic scenario and the command-line default.
+
+Choose one inference provider to run the showcase.
 
 **OpenAI**
 
@@ -116,7 +134,7 @@ export OPENAI_API_KEY="<api-key>"
 export OPENAI_MODEL="<model>"
 
 uv run python -m samples.openai_agents_sdk.providers.openai \
-  --scenario workspace-edit \
+  --scenario document-review \
   --inspect
 ```
 
@@ -129,18 +147,25 @@ export AZURE_OPENAI_API_VERSION="<api-version>"
 export AZURE_OPENAI_DEPLOYMENT="<deployment-name>"
 
 uv run python -m samples.openai_agents_sdk.providers.azure_openai \
-  --scenario workspace-edit \
+  --scenario document-review \
   --inspect
 ```
 
-The scenario asks the agent to create a file, read its content hash, apply a guarded
-patch from `status=pending` to `status=complete`, and read the result. Host code verifies
-the exact final bytes before `--inspect` attaches the constrained CLI to the same live
-session:
+The host seeds a source brief, stale release-note draft, and editing constraints. An
+editor discovers discrepancies and applies a hash-guarded patch. A separate reviewer
+compares the result with the source material and writes a path-linked evidence report.
+Host code then verifies the source, instructions, corrected draft, and review artifact
+byte-for-byte before `--inspect` attaches the constrained CLI to the same live session:
 
 ```text
-mem-sandbox:/workspace> cat /workspace/demo/report.txt
-status=complete
+mem-sandbox:/workspace> head -n 3 /workspace/drafts/release-notes.md
+# Orion Workspace 2.4.0
+
+Orion Workspace 2.4.0 will be released on September 18, 2026.
+mem-sandbox:/workspace> head -n 3 /workspace/review/findings.md
+# Review
+
+Status: approved
 mem-sandbox:/workspace> exit
 ```
 
@@ -152,6 +177,20 @@ or
 To embed the integration in an application instead of running the repository scenario,
 follow the complete
 [`SandboxAgent` usage path](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/src/mem_sandbox/integrations/openai_agents/README.md#use-with-sandboxagent).
+
+## Current profile and direction
+
+MemSandbox currently focuses on file-based work: inspecting source material, applying
+guarded edits, organizing artifacts, and reviewing results. Workspace operations run
+in process without sandbox-owned network access or arbitrary code execution. Live
+samples still call a hosted inference provider outside the workspace, so they require
+network access and may incur provider charges.
+
+Separately gated future work may add application-selected external tools,
+[controlled network access](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/docs/components/network-egress/README.md),
+and
+[isolated execution backends](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/docs/components/external-execution/README.md).
+Those capabilities are not part of the current profile.
 
 ## How the agent integration works
 

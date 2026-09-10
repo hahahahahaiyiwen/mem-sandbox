@@ -1,5 +1,9 @@
 # OpenAI Agents SDK Samples
 
+These repository samples show agents inspecting and revising files in a host-controlled
+MemSandbox workspace. Provider-specific entry points share the same scenarios, lifecycle,
+and exact host verification.
+
 ## Choose a path
 
 | Goal | Documentation |
@@ -12,6 +16,58 @@
 The helpers under `samples` are repository examples, not installed
 `mem_sandbox` public APIs. Production applications should copy the composition pattern
 or inject their own public collaborators rather than importing `samples`.
+
+## Run the document-review showcase
+
+Configure either the [official OpenAI provider](./providers/openai/README.md) or
+[Azure OpenAI provider](./providers/azure_openai/README.md), then run:
+
+```console
+uv run python -m samples.openai_agents_sdk.providers.openai --scenario document-review --inspect
+```
+
+or:
+
+```console
+uv run python -m samples.openai_agents_sdk.providers.azure_openai --scenario document-review --inspect
+```
+
+The scenario keeps two agent roles in one host-selected session:
+
+1. The host seeds a source brief, stale Markdown draft, and review instructions.
+2. An editor discovers discrepancies, reads the draft hash, and applies a guarded patch
+   limited to permitted text.
+3. A separate reviewer compares the corrected draft with the source files and writes a
+   structured evidence report.
+4. Host code verifies the source and instructions were preserved, the draft has the
+   exact required content, and the review artifact links its findings to workspace paths.
+
+Inspect the maintained outputs before the session is deleted:
+
+```text
+mem-sandbox:/workspace> cat /workspace/drafts/release-notes.md
+mem-sandbox:/workspace> cat /workspace/review/findings.md
+```
+
+The workspace task itself needs no network or arbitrary execution. A live model run
+still sends billable requests to the configured inference provider.
+
+## Choose a scenario
+
+`workspace-edit` remains the command-line default and smallest integration smoke test.
+Use `document-review` for the representative end-to-end workflow.
+
+| Task | Scenario | Verified artifact or state |
+|---|---|---|
+| Review and correct a document | `document-review` | Corrected draft plus path-linked findings |
+| Check basic file-tool wiring | `workspace-edit` | One guarded status-file edit |
+| Search supplied operational evidence | `incident-triage` | Incident report derived from seeded logs |
+| Migrate related configuration | `config-migration` | Two updated configs plus migration report |
+| Transform deterministic input data | `data-pipeline` | Sorted event-count artifact |
+| Recover without bypassing policy | `policy-recovery` | Evidence-preservation report |
+| Recover from a workspace quota | `quota-recovery` | Compact status artifact |
+| Coordinate sequential roles | `multi-agent-handoff` | Shared plan, change, and review |
+| Compare isolated alternatives | `snapshot-branching` | Selected fork restored from a shared snapshot |
 
 ## Purpose and boundary
 
@@ -65,6 +121,8 @@ credentials or network access.
 - The model receives exactly `execute`, `read_file`, `write_file`, and `apply_patch`.
 - Provider code cannot select sandbox handles or alter scenario lifecycle behavior.
 - Host verification, rather than the model's final prose, determines success.
+- The `document-review` editor and reviewer share workspace state, not model
+  conversation state or unverified approval prose.
 - Every SDK session and backend handle is cleaned up on success, failure, or
   cancellation.
 - SDK-independent inspection uses the same live MemSandbox session and never invokes a

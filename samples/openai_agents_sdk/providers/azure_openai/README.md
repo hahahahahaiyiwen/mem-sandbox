@@ -64,7 +64,7 @@ $env:AZURE_OPENAI_API_KEY = '<key>'
 $env:AZURE_OPENAI_API_VERSION = '<api-version>'
 $env:AZURE_OPENAI_DEPLOYMENT = '<deployment-name>'
 uv run python -m samples.openai_agents_sdk.providers.azure_openai `
-  --scenario workspace-edit `
+  --scenario document-review `
   --inspect
 ```
 
@@ -86,6 +86,7 @@ initial files, bounded agent stages, and host-side verification.
 
 | Scenario | Demonstrated behavior |
 |---|---|
+| `document-review` | Correct a stale draft with a guarded patch, then produce an evidence-linked review |
 | `workspace-edit` | Create, read, hash-guarded patch, and exact verification |
 | `incident-triage` | Search seeded logs and produce a verified incident report |
 | `config-migration` | Atomically migrate multiple configuration files |
@@ -111,8 +112,14 @@ Both options connect to the same MemSandbox session used by the final agent stag
 MemSandbox inspection CLI
 Commands run in the constrained in-memory environment.
 Type 'help' for commands or 'exit' to close the sandbox.
-mem-sandbox:/workspace> cat /workspace/demo/report.txt
-status=complete
+mem-sandbox:/workspace> head -n 3 /workspace/drafts/release-notes.md
+# Orion Workspace 2.4.0
+
+Orion Workspace 2.4.0 will be released on September 18, 2026.
+mem-sandbox:/workspace> head -n 3 /workspace/review/findings.md
+# Review
+
+Status: approved
 mem-sandbox:/workspace> exit
 ```
 
@@ -132,7 +139,7 @@ construct Azure client and model
   -> construct MemSandbox service
   -> create SDK sandbox session
   -> run SandboxAgent with tracing disabled
-  -> verify final file through the host session
+  -> verify required artifacts through the host session
   -> optionally inspect the same session on success or failure
   -> close SDK session
   -> delete backend handle
@@ -149,13 +156,18 @@ to a separate trace exporter.
 
 ## Expected output
 
-The exact model wording varies. A successful run prints the final response and verified
-artifacts. With `--inspect`, it then opens the CLI:
+The exact model wording varies. A successful `document-review` run prints the final
+responses and all four verified artifacts. Its output includes:
 
 ```text
-Verified /workspace/demo/report.txt:
-status=complete
-mem-sandbox:/workspace>
+Verified /workspace/drafts/release-notes.md:
+# Orion Workspace 2.4.0
+...
+Verified /workspace/review/findings.md:
+# Review
+
+Status: approved
+...
 ```
 
 The run performs a billable Azure model request and requires network access. Required CI

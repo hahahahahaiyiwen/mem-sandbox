@@ -4,6 +4,9 @@ from samples.openai_agents_sdk.scenarios.config_migration import (
     SCENARIO as CONFIG_MIGRATION,
 )
 from samples.openai_agents_sdk.scenarios.data_pipeline import SCENARIO as DATA_PIPELINE
+from samples.openai_agents_sdk.scenarios.document_review import (
+    SCENARIO as DOCUMENT_REVIEW,
+)
 from samples.openai_agents_sdk.scenarios.incident_triage import (
     SCENARIO as INCIDENT_TRIAGE,
 )
@@ -26,6 +29,7 @@ from samples.openai_agents_sdk.scenarios.workspace_edit import (
 
 _SCENARIOS = (
     WORKSPACE_EDIT,
+    DOCUMENT_REVIEW,
     INCIDENT_TRIAGE,
     CONFIG_MIGRATION,
     DATA_PIPELINE,

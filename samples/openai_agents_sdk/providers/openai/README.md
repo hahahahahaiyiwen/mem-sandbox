@@ -35,7 +35,7 @@ PowerShell:
 $env:OPENAI_API_KEY = '<api-key>'
 $env:OPENAI_MODEL = '<model>'
 uv run python -m samples.openai_agents_sdk.providers.openai `
-  --scenario workspace-edit `
+  --scenario document-review `
   --inspect
 ```
 
@@ -45,7 +45,7 @@ Bash:
 export OPENAI_API_KEY="<api-key>"
 export OPENAI_MODEL="<model>"
 uv run python -m samples.openai_agents_sdk.providers.openai \
-  --scenario workspace-edit \
+  --scenario document-review \
   --inspect
 ```
 
@@ -60,6 +60,12 @@ List all scenarios without credentials or network access:
 ```console
 uv run python -m samples.openai_agents_sdk.providers.openai --list-scenarios
 ```
+
+`document-review` is the representative workflow: an editor corrects a seeded draft
+with a hash-guarded patch, a separate reviewer writes
+`/workspace/review/findings.md`, and host code verifies both output and preserved source
+material. `workspace-edit` remains the default when `--scenario` is omitted and is the
+smallest tool-wiring check.
 
 Use `--inspect` after successful verification or `--inspect-on-failure` before failed
 state is cleaned up. The inspection CLI executes only the constrained MemSandbox

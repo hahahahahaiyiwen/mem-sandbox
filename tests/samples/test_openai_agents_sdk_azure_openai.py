@@ -6,7 +6,7 @@ import asyncio
 import json
 from collections.abc import AsyncIterator, Mapping
 from io import StringIO
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import pytest
 from agents import ModelResponse, Usage
@@ -28,8 +28,16 @@ from samples.openai_agents_sdk.application import build_sample_parser, run_provi
 from samples.openai_agents_sdk.providers.azure_openai.__main__ import build_parser, main
 from samples.openai_agents_sdk.providers.azure_openai.config import AzureOpenAISettings
 from samples.openai_agents_sdk.providers.azure_openai.model import create_azure_model
-from samples.openai_agents_sdk.runner import InspectionContext, run_scenario
-from samples.openai_agents_sdk.scenarios import get_scenario, list_scenarios
+from samples.openai_agents_sdk.runner import (
+    InspectionContext,
+    ScenarioVerificationError,
+    run_scenario,
+)
+from samples.openai_agents_sdk.scenarios import (
+    StagedScenario,
+    get_scenario,
+    list_scenarios,
+)
 from samples.openai_agents_sdk.scenarios.config_migration import (
     API_PATH,
     WORKER_PATH,
@@ -41,6 +49,21 @@ from samples.openai_agents_sdk.scenarios.config_migration import (
     REPORT_PATH as MIGRATION_REPORT_PATH,
 )
 from samples.openai_agents_sdk.scenarios.data_pipeline import OUTPUT_PATH as PIPELINE_PATH
+from samples.openai_agents_sdk.scenarios.document_review import (
+    BRIEF_CONTENT,
+    BRIEF_PATH,
+    DRAFT_CONTENT,
+    DRAFT_PATH,
+    EXPECTED_DRAFT_CONTENT,
+    INSTRUCTIONS_CONTENT,
+    INSTRUCTIONS_PATH,
+)
+from samples.openai_agents_sdk.scenarios.document_review import (
+    REVIEW_CONTENT as DOCUMENT_REVIEW_CONTENT,
+)
+from samples.openai_agents_sdk.scenarios.document_review import (
+    REVIEW_PATH as DOCUMENT_REVIEW_PATH,
+)
 from samples.openai_agents_sdk.scenarios.incident_triage import (
     REPORT_CONTENT as INCIDENT_REPORT,
 )
@@ -88,11 +111,12 @@ from mem_sandbox.service import (
     SandboxHandle,
     SandboxNotFound,
 )
-from mem_sandbox.session import SandboxSession
+from mem_sandbox.session import ReadBytesRequest, SandboxSession
 
 _EXPECTED_TOOLS = ["execute", "read_file", "write_file", "apply_patch"]
 _SCENARIO_NAMES = [
     "workspace-edit",
+    "document-review",
     "incident-triage",
     "config-migration",
     "data-pipeline",
@@ -147,8 +171,19 @@ class RecordingModelClient:
 
 
 class DeterministicScenarioModel(Model):
-    def __init__(self, *, failure: BaseException | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        failure: BaseException | None = None,
+        failure_stage: str | None = None,
+        document_review_boundary: Literal["protected-write", "stale-hash"] | None = None,
+    ) -> None:
         self.failure = failure
+        self.failure_stage = failure_stage
+        self.document_review_boundary: Literal["protected-write", "stale-hash"] | None = (
+            document_review_boundary
+        )
+        self.boundary_output: dict[str, Any] | None = None
         self.calls: dict[str, int] = {}
         self.tool_names: list[list[str]] = []
 
@@ -175,13 +210,25 @@ class DeterministicScenarioModel(Model):
             conversation_id,
             prompt,
         )
-        if self.failure is not None:
-            raise self.failure
         stage_key = _stage_key(system_instructions)
         call = self.calls.get(stage_key, 0) + 1
         self.calls[stage_key] = call
+        if self.failure is not None and (
+            self.failure_stage is None or self.failure_stage == stage_key
+        ):
+            raise self.failure
+        if stage_key == "document-review-editor" and (
+            (self.document_review_boundary == "protected-write" and call == 2)
+            or (self.document_review_boundary == "stale-hash" and call == 5)
+        ):
+            self.boundary_output = _latest_tool_output(input)
         self.tool_names.append([tool.name for tool in tools])
-        output = _scripted_output(stage_key, call, input)
+        output = _scripted_output(
+            stage_key,
+            call,
+            input,
+            document_review_boundary=self.document_review_boundary,
+        )
         return ModelResponse(
             output=cast(Any, output),
             usage=Usage(),
@@ -222,6 +269,8 @@ def _scripted_output(
     stage: str,
     call: int,
     input: str | list[TResponseInputItem],
+    *,
+    document_review_boundary: Literal["protected-write", "stale-hash"] | None,
 ) -> list[ResponseFunctionToolCall | ResponseOutputMessage]:
     if stage == "workspace-edit":
         if call == 1:
@@ -241,6 +290,49 @@ def _scripted_output(
         if call == 4:
             return [_read("read_complete", SAMPLE_PATH)]
         return [_message("Workspace edit complete.")]
+
+    if stage == "document-review-editor":
+        if document_review_boundary == "protected-write":
+            if call == 1:
+                return [_overwrite("overwrite_brief", BRIEF_PATH, "tampered\n")]
+            assert _latest_tool_output(input)["ok"] is False
+            return [_message("Protected write rejected.")]
+        if call == 1:
+            return [_read("read_release_brief", BRIEF_PATH)]
+        if call == 2:
+            return [_read("read_review_instructions", INSTRUCTIONS_PATH)]
+        if call == 3:
+            return [_read("read_release_draft", DRAFT_PATH)]
+        if call == 4:
+            content_hash = (
+                "0" * 64 if document_review_boundary == "stale-hash" else _latest_hash(input)
+            )
+            return [_document_review_patch(content_hash)]
+        if call == 5:
+            if document_review_boundary == "stale-hash":
+                assert _latest_tool_output(input)["ok"] is False
+                return [_message("Stale draft update rejected.")]
+            return [_read("verify_release_draft", DRAFT_PATH)]
+        return [_message("Release draft corrected.")]
+
+    if stage == "document-review-reviewer":
+        if call == 1:
+            return [_read("review_release_brief", BRIEF_PATH)]
+        if call == 2:
+            return [_read("review_instructions", INSTRUCTIONS_PATH)]
+        if call == 3:
+            return [_read("review_release_draft", DRAFT_PATH)]
+        if call == 4:
+            return [
+                _write(
+                    "write_document_review",
+                    DOCUMENT_REVIEW_PATH,
+                    DOCUMENT_REVIEW_CONTENT.decode(),
+                )
+            ]
+        if call == 5:
+            return [_read("verify_document_review", DOCUMENT_REVIEW_PATH)]
+        return [_message("Document review approved.")]
 
     if stage == "incident-triage":
         if call == 1:
@@ -435,6 +527,19 @@ def _write(call_id: str, path: str, content: str) -> ResponseFunctionToolCall:
     )
 
 
+def _overwrite(call_id: str, path: str, content: str) -> ResponseFunctionToolCall:
+    return _tool_call(
+        call_id=call_id,
+        name="write_file",
+        arguments={
+            "path": path,
+            "content": content,
+            "write_condition": "any_current_state",
+            "create_parents": False,
+        },
+    )
+
+
 def _read(call_id: str, path: str) -> ResponseFunctionToolCall:
     return _tool_call(
         call_id=call_id,
@@ -464,6 +569,31 @@ def _patch(
         arguments={
             "patch": (f"--- {path}\n+++ {path}\n@@ -1 +1 @@\n-{old}\n+{new}\n"),
             "expected_hashes": [{"path": path, "content_hash": content_hash}],
+        },
+    )
+
+
+def _document_review_patch(content_hash: str) -> ResponseFunctionToolCall:
+    return _tool_call(
+        call_id="correct_release_draft",
+        name="apply_patch",
+        arguments={
+            "patch": (
+                f"--- {DRAFT_PATH}\n"
+                f"+++ {DRAFT_PATH}\n"
+                "@@ -1,7 +1,7 @@\n"
+                "-# Orion Workspace 2.3.0\n"
+                "+# Orion Workspace 2.4.0\n"
+                " \n"
+                "-Orion Workspace 2.3.0 will be released on September 12, 2026.\n"
+                "+Orion Workspace 2.4.0 will be released on September 18, 2026.\n"
+                " \n"
+                " ## Compatibility\n"
+                " \n"
+                "-Python 3.11 or newer is required.\n"
+                "+Python 3.12 or newer is required.\n"
+            ),
+            "expected_hashes": [{"path": DRAFT_PATH, "content_hash": content_hash}],
         },
     )
 
@@ -615,6 +745,26 @@ def test_registry_and_parser_expose_all_scenarios() -> None:
     assert args.inspect_on_failure is True
 
 
+def test_document_review_contract_requires_discovery_and_independent_review() -> None:
+    scenario = get_scenario("document-review")
+
+    assert isinstance(scenario, StagedScenario)
+    assert [stage.key for stage in scenario.stages] == [
+        "document-review-editor",
+        "document-review-reviewer",
+    ]
+    assert [artifact.path for artifact in scenario.expected_artifacts] == [
+        BRIEF_PATH,
+        INSTRUCTIONS_PATH,
+        DRAFT_PATH,
+        DOCUMENT_REVIEW_PATH,
+    ]
+    prompts = "\n".join(stage.prompt for stage in scenario.stages)
+    assert "2.4.0" not in prompts
+    assert "2026-09-18" not in prompts
+    assert "3.12" not in prompts
+
+
 @pytest.mark.asyncio
 async def test_list_scenarios_does_not_require_azure_configuration(
     capsys: pytest.CaptureFixture[str],
@@ -671,6 +821,125 @@ async def test_registered_scenario_runs_without_network_and_cleans_backends(
         else:
             assert result.selected_branch is None
             assert len(service.created_handles) == 1
+        await _assert_backends_deleted(service)
+    finally:
+        await service.close()
+
+
+@pytest.mark.asyncio
+async def test_document_review_guards_revision_and_verifies_evidence() -> None:
+    scenario = get_scenario("document-review")
+    bundle = create_sample_service_bundle(policy_engine=scenario.policy_engine_factory())
+    service = RecordingService(bundle.service)
+    model = DeterministicScenarioModel()
+    try:
+        result = await run_scenario(
+            model=model,
+            service=service,
+            scenario=scenario,
+        )
+
+        assert result.stage_outputs == (
+            "Release draft corrected.",
+            "Document review approved.",
+        )
+        assert [(artifact.path, artifact.content) for artifact in result.artifacts] == [
+            (BRIEF_PATH, BRIEF_CONTENT),
+            (INSTRUCTIONS_PATH, INSTRUCTIONS_CONTENT),
+            (DRAFT_PATH, EXPECTED_DRAFT_CONTENT),
+            (DOCUMENT_REVIEW_PATH, DOCUMENT_REVIEW_CONTENT),
+        ]
+        assert EXPECTED_DRAFT_CONTENT.endswith(
+            b"## Upgrade notes\n\nBack up the workspace before upgrading.\n"
+        )
+        assert model.calls == {
+            "document-review-editor": 6,
+            "document-review-reviewer": 6,
+        }
+        await _assert_backends_deleted(service)
+    finally:
+        await service.close()
+
+
+@pytest.mark.parametrize(
+    ("boundary", "expected_code"),
+    [
+        ("protected-write", "session_policy_denied"),
+        ("stale-hash", "stale_content"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_document_review_rejects_unsafe_edits_without_mutation(
+    boundary: Literal["protected-write", "stale-hash"],
+    expected_code: str,
+) -> None:
+    scenario = get_scenario("document-review")
+    bundle = create_sample_service_bundle(policy_engine=scenario.policy_engine_factory())
+    service = RecordingService(bundle.service)
+    model = DeterministicScenarioModel(document_review_boundary=boundary)
+    inspected: dict[str, bytes] = {}
+
+    async def inspect(context: InspectionContext, session: SandboxSession) -> None:
+        assert isinstance(context.error, ScenarioVerificationError)
+        inspected["brief"] = (await session.read_bytes(ReadBytesRequest(path=BRIEF_PATH))).content
+        inspected["draft"] = (await session.read_bytes(ReadBytesRequest(path=DRAFT_PATH))).content
+
+    try:
+        with pytest.raises(
+            ScenarioVerificationError,
+            match=f"{DRAFT_PATH} did not contain the required final content",
+        ):
+            await run_scenario(
+                model=model,
+                service=service,
+                scenario=scenario,
+                inspector=inspect,
+                inspect_on_failure=True,
+            )
+
+        assert model.boundary_output is not None
+        error = cast(dict[str, Any], model.boundary_output["error"])
+        assert error["code"] == expected_code
+        assert inspected == {
+            "brief": BRIEF_CONTENT,
+            "draft": DRAFT_CONTENT,
+        }
+        await _assert_backends_deleted(service)
+    finally:
+        await service.close()
+
+
+@pytest.mark.asyncio
+async def test_document_review_reviewer_failure_preserves_editor_work_and_cleans_up() -> None:
+    scenario = get_scenario("document-review")
+    bundle = create_sample_service_bundle(policy_engine=scenario.policy_engine_factory())
+    service = RecordingService(bundle.service)
+    model = DeterministicScenarioModel(
+        failure=RuntimeError("review dependency failed"),
+        failure_stage="document-review-reviewer",
+    )
+    inspected_draft: bytes | None = None
+
+    async def inspect(context: InspectionContext, session: SandboxSession) -> None:
+        nonlocal inspected_draft
+        assert isinstance(context.error, RuntimeError)
+        inspected_draft = (await session.read_bytes(ReadBytesRequest(path=DRAFT_PATH))).content
+
+    try:
+        with pytest.raises(RuntimeError, match="review dependency failed"):
+            await run_scenario(
+                model=model,
+                service=service,
+                scenario=scenario,
+                inspector=inspect,
+                inspect_on_failure=True,
+            )
+
+        assert inspected_draft == EXPECTED_DRAFT_CONTENT
+        assert model.calls == {
+            "document-review-editor": 6,
+            "document-review-reviewer": 1,
+        }
         await _assert_backends_deleted(service)
     finally:
         await service.close()
