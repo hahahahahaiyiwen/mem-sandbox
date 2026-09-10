@@ -8,7 +8,7 @@ shell.
 
 | Goal | Start here |
 |---|---|
-| Run a live example | Follow the repository [quick start](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/README.md#quick-start) and the [provider sample guides](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/samples/openai_agents_sdk/README.md). |
+| Run the document-review showcase | Follow the repository [quick start](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/README.md#quick-start) and the [provider sample guide](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/samples/openai_agents_sdk/README.md#run-the-document-review-showcase). |
 | Embed MemSandbox in a `SandboxAgent` application | Install the optional dependency, then follow [Use with `SandboxAgent`](#use-with-sandboxagent). |
 | Add snapshot-backed SDK resume | Read [Optional snapshot and resume support](#optional-snapshot-and-resume-support) after the basic lifecycle works. |
 | Maintain or extend the adapter | Start at [Engineering reference](#engineering-reference). |
@@ -188,6 +188,11 @@ uses this same client/session/agent lifecycle, including cancellation-safe clean
 [model-free capability test](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/tests/integrations/openai_agents/test_capability.py)
 runs the flow with a deterministic `Model`, verifies the exact tool set, and confirms
 the workspace result without network access.
+
+For a complete application-shaped task, the
+[`document-review` scenario](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/samples/openai_agents_sdk/scenarios/document_review.py)
+adds host-seeded inputs, a guarded editor, an independent reviewer, a restricted policy,
+and exact artifact verification without adding a document-specific public API.
 
 ### Model-facing tools and common limits
 
