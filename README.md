@@ -14,165 +14,89 @@ giving the model direct access to the host filesystem or shell.
 
 ### Install from PyPI
 
-MemSandbox requires Python 3.12 or later. Install the framework-neutral core:
-
-```console
-python -m pip install mem-sandbox
-```
-
-Install the OpenAI Agents SDK adapter and its supported SDK version:
+Python 3.12 or later:
 
 ```console
 python -m pip install "mem-sandbox[openai-agents]"
 ```
 
-Verify the installed distribution:
-
-```console
-python -c "from importlib.metadata import version; print(version('mem-sandbox'))"
-```
-
-The core package has no runtime dependencies. The `openai-agents` extra currently
-selects `openai-agents>=0.22,<0.23`.
+For the framework-neutral core only: `python -m pip install mem-sandbox`.
 
 ### Exercise the installed package
 
-Save this as `quickstart.py`:
+The application injects its provider-owned `Model` and host-owned `SandboxService`:
 
 ```python
-import asyncio
+from agents import RunConfig, Runner
+from agents.models.interface import Model
+from agents.sandbox import SandboxAgent, SandboxRunConfig
 
-from mem_sandbox.workspace import (
-    MemoryWorkspace,
-    PathMustNotExist,
-    WorkspaceWriteRequest,
+from mem_sandbox.integrations.openai_agents import (
+    InMemorySandboxCapability,
+    InMemorySandboxClient,
+    InMemorySandboxClientOptions,
 )
+from mem_sandbox.service import SandboxService
 
 
-async def main() -> None:
-    workspace = MemoryWorkspace()
-    path = workspace.resolve_path("/workspace/demo/message.txt")
-    await workspace.write(
-        WorkspaceWriteRequest(
-            path=path,
-            content=b"hello from MemSandbox\n",
-            precondition=PathMustNotExist(),
-            create_parents=True,
-        )
+async def run_workspace_agent(
+    *,
+    model: Model,
+    service: SandboxService,
+) -> object:
+    client = InMemorySandboxClient(service)
+    sdk_session = await client.create(
+        options=InMemorySandboxClientOptions(owner_id="my-application"),
     )
-    result = await workspace.read_text(path)
-    print(result.content, end="")
-
-
-asyncio.run(main())
+    try:
+        agent = SandboxAgent(
+            name="workspace-agent",
+            model=model,
+            capabilities=[InMemorySandboxCapability()],
+        )
+        result = await Runner.run(
+            agent,
+            "Create /workspace/result.txt containing status=ready, then read it back.",
+            run_config=RunConfig(
+                tracing_disabled=True,
+                sandbox=SandboxRunConfig(session=sdk_session),
+            ),
+        )
+        return result.final_output
+    finally:
+        try:
+            await sdk_session.aclose()
+        finally:
+            await client.delete(sdk_session)
 ```
 
-Run it:
+[Complete service composition, provider setup, and lifecycle guide](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/src/mem_sandbox/integrations/openai_agents/README.md#use-with-sandboxagent)
 
-```console
-python quickstart.py
-```
+### Develop and run the repository samples
 
-```text
-hello from MemSandbox
-```
-
-The example uses only public types from the installed wheel and never touches the host
-filesystem. Low-level `MemoryWorkspace` paths are absolute and rooted at `/workspace`;
-sessions add their own working-directory behavior.
-
-To give an OpenAI Agents SDK `SandboxAgent` the four model-facing tools, follow the
-complete
-[`SandboxAgent` package usage path](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/src/mem_sandbox/integrations/openai_agents/README.md#use-with-sandboxagent).
-
-### Run the repository samples
-
-The maintained command-line and live-model samples are repository source examples; they
-are not installed by the wheel. To run them, install
-[Git](https://git-scm.com/) and [uv](https://docs.astral.sh/uv/), then clone the
-repository and install its optional integration dependencies:
+Restore the locked development environment with [uv](https://docs.astral.sh/uv/):
 
 ```console
 git clone https://github.com/hahahahahaiyiwen/mem-sandbox.git
 cd mem-sandbox
-uv sync --all-groups
+uv sync --all-groups --frozen
 ```
 
-#### 1. Explore MemSandbox without a model
-
 ```console
+# Explore the constrained workspace without a model or credentials.
 uv run python -m samples.shared
-```
 
-This opens an empty, process-local sandbox with no credentials, model, or network
-request:
-
-```text
-mem-sandbox:/workspace> pwd
-/workspace
-mem-sandbox:/workspace> mkdir demo
-mem-sandbox:/workspace> echo hello > demo/message.txt
-mem-sandbox:/workspace> cat demo/message.txt
-hello
-mem-sandbox:/workspace> exit
-```
-
-Commands run in MemSandbox's constrained virtual command language, not a host shell.
-The in-memory session is deleted when the CLI exits.
-
-#### 2. Run the `workspace-edit` agent scenario
-
-Choose one inference provider.
-
-**Official OpenAI**
-
-```sh
-export OPENAI_API_KEY="<api-key>"
-export OPENAI_MODEL="<model>"
-
-uv run python -m samples.openai_agents_sdk.providers.openai \
-  --scenario workspace-edit \
-  --inspect
-```
-
-**Azure OpenAI**
-
-```sh
-export AZURE_OPENAI_ENDPOINT="https://<resource>.openai.azure.com"
-export AZURE_OPENAI_API_KEY="<api-key>"
-export AZURE_OPENAI_API_VERSION="<api-version>"
-export AZURE_OPENAI_DEPLOYMENT="<deployment-name>"
-
-uv run python -m samples.openai_agents_sdk.providers.azure_openai \
-  --scenario workspace-edit \
-  --inspect
-```
-
-The scenario asks the agent to create a file, read its content hash, apply a guarded
-patch from `status=pending` to `status=complete`, and read the result. Host code verifies
-the exact final bytes before `--inspect` attaches the constrained CLI to the same live
-session:
-
-```text
-mem-sandbox:/workspace> cat /workspace/demo/report.txt
-status=complete
-mem-sandbox:/workspace> exit
-```
-
-Live runs are billable and require network access. Credentials are read from the process
-environment and are never placed in the sandbox. For provider requirements, see the
-[official OpenAI guide](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/samples/openai_agents_sdk/providers/openai/README.md)
-or
-[Azure OpenAI guide](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/samples/openai_agents_sdk/providers/azure_openai/README.md).
-To embed the integration in an application instead of running the repository scenario,
-follow the complete
-[`SandboxAgent` usage path](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/src/mem_sandbox/integrations/openai_agents/README.md#use-with-sandboxagent).
-
-List the other available scenarios without credentials or a network request:
-
-```console
+# List maintained agent scenarios without credentials.
 uv run python -m samples.openai_agents_sdk.providers.openai --list-scenarios
+
+# Run the workspace-edit scenario after configuring an inference provider.
+uv run python -m samples.openai_agents_sdk.providers.openai --scenario workspace-edit --inspect
+uv run python -m samples.openai_agents_sdk.providers.azure_openai --scenario workspace-edit --inspect
 ```
+
+Provider configuration:
+[official OpenAI](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/samples/openai_agents_sdk/providers/openai/README.md) |
+[Azure OpenAI](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/samples/openai_agents_sdk/providers/azure_openai/README.md)
 
 ## How the agent integration works
 

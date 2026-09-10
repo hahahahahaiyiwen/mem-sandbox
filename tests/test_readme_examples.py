@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import re
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import cast
 
-import pytest
+from agents.models.interface import Model
+from samples.shared.service import create_sample_service
 
 from mem_sandbox.service import InMemorySandboxService
 
@@ -27,21 +28,47 @@ def _section(path: Path, start: str, end: str) -> str:
     return content[section_start:section_end]
 
 
-def test_root_readme_installed_package_quickstart(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
+class _ReadmeRunResult:
+    final_output: object = "done"
+
+
+class _ReadmeRunner:
+    @staticmethod
+    async def run(*args: object, **kwargs: object) -> _ReadmeRunResult:
+        assert len(args) == 2
+        assert "run_config" in kwargs
+        return _ReadmeRunResult()
+
+
+def test_root_readme_installed_package_quickstart() -> None:
     section = _section(
         _ROOT / "README.md",
         "### Exercise the installed package",
-        "### Run the repository samples",
+        "### Develop and run the repository samples",
     )
     blocks = _PYTHON_BLOCK.findall(section)
+    namespace: dict[str, object] = {"__name__": "readme_quickstart"}
 
     assert len(blocks) == 1
-    exec(compile(blocks[0], "README.md", "exec"), {"__name__": "readme_quickstart"})
+    exec(compile(blocks[0], "README.md", "exec"), namespace)
+    namespace["Runner"] = _ReadmeRunner
+    run_workspace_agent = cast(
+        Callable[..., Awaitable[object]],
+        namespace["run_workspace_agent"],
+    )
 
-    captured = capsys.readouterr()
-    assert captured.out == "hello from MemSandbox\n"
+    async def exercise() -> None:
+        service = create_sample_service()
+        try:
+            result = await run_workspace_agent(
+                model=cast(Model, "unused-model"),
+                service=service,
+            )
+            assert result == "done"
+        finally:
+            await service.close()
+
+    asyncio.run(exercise())
 
 
 def test_openai_readme_public_composition_constructs_and_closes() -> None:
