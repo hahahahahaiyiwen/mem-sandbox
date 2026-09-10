@@ -1,7 +1,9 @@
 # Core and OpenAI Agents Package Split
 
-**Status:** Implemented for issue #67; publication remains maintainer-controlled  
-**Decision date:** 2026-09-10  
+**Status:** Implemented for issue #67; publication remains maintainer-controlled
+
+**Decision date:** 2026-09-10
+
 **Applies to:** The first separately published core and OpenAI Agents SDK adapter
 releases
 
