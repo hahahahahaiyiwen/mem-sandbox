@@ -51,3 +51,39 @@ uv build
 Keep each pull request focused on one issue or behavior seam. Explain the behavior change,
 important design decisions, and any deferred work. Link the issue and ensure all required
 checks pass before merge.
+
+## Publishing a release
+
+Publishing is maintainer-only and uses
+[PyPI Trusted Publishing](https://docs.pypi.org/trusted-publishers/) rather than a
+long-lived repository token. The PyPI publisher must match:
+
+| Setting | Value |
+|---|---|
+| Project | `mem-sandbox` |
+| Repository owner | `hahahahahaiyiwen` |
+| Repository | `mem-sandbox` |
+| Workflow | `publish.yml` |
+| GitHub environment | `pypi` |
+
+The protected `pypi` environment should require approval. Its publish job receives only
+`contents: read` and `id-token: write`; the separate build job cannot request an OIDC
+token.
+
+To publish:
+
+1. Merge the release changes and a unique semantic version in `pyproject.toml` to
+   `main`.
+2. Confirm the required `main` checks pass.
+3. Create and push an annotated `v<version>` tag at the intended `main` commit.
+4. Publish a GitHub release for that tag.
+5. Approve the `pypi` environment deployment after reviewing the workflow's built
+   distributions.
+6. Install the exact version from PyPI in a clean environment and verify its public
+   imports.
+
+The release workflow rejects a tag that does not exactly match
+`v<project.version>`, builds the wheel and source distribution once, validates their
+metadata, and publishes those same artifacts. PyPI versions and uploaded files are
+immutable; correct a failed release with a new version rather than attempting to replace
+an existing one.

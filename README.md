@@ -90,6 +90,9 @@ Live runs are billable and require network access. Credentials are read from the
 environment and are never placed in the sandbox. For provider requirements, see the
 [official OpenAI guide](./samples/openai_agents_sdk/providers/openai/README.md) or
 [Azure OpenAI guide](./samples/openai_agents_sdk/providers/azure_openai/README.md).
+To embed the integration in an application instead of running the repository scenario,
+follow the complete
+[`SandboxAgent` usage path](./src/mem_sandbox/integrations/openai_agents/README.md#use-with-sandboxagent).
 
 List the other available scenarios without credentials or a network request:
 
@@ -121,6 +124,15 @@ The model receives exactly four tools: `execute`, `read_file`, `write_file`, and
 `apply_patch`. It does not receive a sandbox handle, lifecycle controls, snapshot
 authority, secrets, mounts, ports, network access, a host shell, or arbitrary process
 execution.
+
+Choose the documentation path that matches the task:
+
+- **Run a maintained live example:** use the
+  [OpenAI Agents SDK samples](./samples/openai_agents_sdk/README.md).
+- **Embed the public interfaces:** use the
+  [reader-first OpenAI integration guide](./src/mem_sandbox/integrations/openai_agents/README.md#use-with-sandboxagent).
+- **Review adapter invariants:** use the integration guide's
+  [engineering reference](./src/mem_sandbox/integrations/openai_agents/README.md#engineering-reference).
 
 ## What MemSandbox provides
 
@@ -164,8 +176,8 @@ integrations remain non-gating follow-ups.
 - [Design and research index](./docs/README.md)
 - [High-level design](./docs/HIGH_LEVEL_DESIGN.md)
 - [Implementation plan](./docs/PLAN.md)
-- [Samples and provider guides](./samples/README.md)
-- [OpenAI Agents SDK integration](./src/mem_sandbox/integrations/openai_agents/README.md)
+- [Run samples and configure providers](./samples/README.md)
+- [Embed or maintain the OpenAI Agents SDK integration](./src/mem_sandbox/integrations/openai_agents/README.md)
 - [Workspace design](./docs/components/workspace/README.md)
 - [Command executor design](./docs/components/command-executor/README.md)
 - [Product validation and benchmarks](./docs/product-validation/README.md)
