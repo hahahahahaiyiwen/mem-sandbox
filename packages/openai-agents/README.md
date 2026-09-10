@@ -272,8 +272,13 @@ The application must then:
 6. call `client.resume(state)` while the referenced snapshot remains retained.
 
 The
+[independent-reviewers sample](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/samples/openai_agents_sdk/scenarios/independent_reviewers.py)
+persists one baseline, collects and verifies two independent resume branches, verifies
+the baseline again, and returns one explicitly host-selected result without merging.
+The smaller
 [snapshot-branching sample](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/samples/openai_agents_sdk/scenarios/snapshot_branching.py)
-and the canonical runner exercise persistence, independent resume branches, and cleanup.
+retains its existing alternative-selection behavior. Both use the canonical runner's
+persistence and cleanup path.
 Read [Snapshot store integration](#snapshot-store-integration) for schema, retention,
 failure, and integrity details.
 

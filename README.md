@@ -119,12 +119,16 @@ Choose the task closest to your use case:
 | Task | Scenario | Host-verified result |
 |---|---|---|
 | Review and revise a stale document | `document-review` | Corrected release notes and an evidence-linked review |
+| Compare independent review perspectives | `independent-reviewers` | Isolated risk and clarity reviews plus one host-selected result |
 | Check basic SDK and tool wiring | `workspace-edit` | One hash-guarded file edit |
 | Update related configuration safely | `config-migration` | Two migrated configs and a migration report |
 | Coordinate sequential agent roles | `multi-agent-handoff` | A plan, implemented change, and reviewer verdict |
 
 `document-review` is the primary showcase. `workspace-edit` remains the smallest
-diagnostic scenario and the command-line default.
+diagnostic scenario and the command-line default. `independent-reviewers` restores two
+workspaces from one immutable baseline; the host verifies both forks and selects one
+without merging them. By contrast, `multi-agent-handoff` keeps sequential roles in one
+shared session.
 
 Choose one inference provider to run the showcase.
 

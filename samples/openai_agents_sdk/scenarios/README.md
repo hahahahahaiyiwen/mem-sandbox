@@ -11,7 +11,7 @@ The shared runner owns:
 - one injected Agents SDK `Model`;
 - SDK session creation and capability binding;
 - bounded sequential agent stages;
-- snapshot-fork lifecycle for the branching scenario;
+- snapshot-fork lifecycle, complete branch collection, and host selection;
 - host-side artifact verification;
 - success/failure inspection callbacks;
 - cleanup of every SDK session and backend handle.
@@ -22,6 +22,7 @@ The shared runner owns:
 |---|---|---|
 | Minimal file-tool smoke test | `workspace-edit`, single stage | One guarded status-file edit |
 | Guarded document revision and review | `document-review`, editor then reviewer | Preserved inputs, corrected draft, and evidence report |
+| Independent review perspectives | `independent-reviewers`, baseline plus reviewer forks | Unchanged baseline, isolated review results, and one host-selected fork |
 | Search supplied logs | `incident-triage`, single stage | Incident report |
 | Atomic configuration migration | `config-migration`, single stage | Two configs and migration report |
 | Deterministic data transformation | `data-pipeline`, single stage | Event-count artifact |
@@ -61,6 +62,30 @@ review artifact must match the required evidence structure.
 Deterministic tests cover the successful two-stage workflow, a rejected protected write,
 a stale draft hash, reviewer dependency failure, and backend cleanup. Live provider runs
 are optional and separate from this network-free verification.
+
+## `independent-reviewers` contract
+
+The host creates one baseline containing a deployment proposal, review criteria, and an
+unreviewed status. After a coordinator reads those files, the runner persists the
+baseline once, deletes its live backend, and resumes the same saved state into separate
+risk and clarity reviewer sessions.
+
+Both reviewers update `/workspace/review/status.txt` and create
+`/workspace/review/findings.md`, but those paths belong to distinct workspace forks.
+The host verifies every branch's protected inputs, status, and findings; exposes every
+verified branch through `ScenarioResult.branch_results`; and uses the scenario's
+`selected_branch` as an explicit host decision. Only the selected branch populates
+`ScenarioResult.artifacts` and remains available to `--inspect`.
+
+When `baseline_expected_artifacts` is configured, the runner performs one final resume
+from the original saved state after all reviewers finish. Exact verification of its
+unchanged status proves branch mutations did not alter the persisted baseline. Distinct
+backend handles and exact sibling outputs prove branch isolation. No branch is merged,
+and no model conversation or final prose is used as cross-branch state.
+
+The existing `snapshot-branching` scenario remains the smaller generic alternative
+example. `multi-agent-handoff` is intentionally different: its planner, implementer, and
+reviewer run sequentially in one shared session.
 
 ## Maintenance
 

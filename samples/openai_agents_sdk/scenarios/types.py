@@ -75,6 +75,7 @@ class SnapshotBranchingScenario:
     checkpoint_artifacts: tuple[ArtifactExpectation, ...]
     branches: tuple[SnapshotBranch, ...]
     selected_branch: str
+    baseline_expected_artifacts: tuple[ArtifactExpectation, ...] = ()
     options_factory: Callable[[], InMemorySandboxClientOptions] = _default_options
     policy_engine_factory: Callable[[], SessionPolicyEngine] = _allow_all_policy
 

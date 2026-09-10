@@ -126,6 +126,8 @@ def _print_inspection_context(context: InspectionContext) -> None:
 def _print_result(result: ScenarioResult) -> None:
     for index, output in enumerate(result.stage_outputs, start=1):
         print(f"Stage {index}: {output}")
+    if result.branch_results:
+        print("Collected branches: " + ", ".join(branch.name for branch in result.branch_results))
     if result.selected_branch is not None:
         print(f"Selected branch: {result.selected_branch}")
     for artifact in result.artifacts:

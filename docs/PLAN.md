@@ -1220,7 +1220,7 @@ direction visible without claiming unimplemented capabilities.
   stale draft, and editing constraints; perform hash-guarded corrections; run a distinct
   reviewer stage; and verify corrected content, preserved inputs, and evidence artifacts
   in host code. State the output contract without supplying every answer in the prompt.
-- [ ] **7.1.2** Demonstrate independent reviewers using distinct workspace forks from
+- [x] **7.1.2** Demonstrate independent reviewers using distinct workspace forks from
   one baseline. Prove that one reviewer's edits cannot alter another fork or the
   baseline; the host explicitly collects/selects outputs. Do not imply automatic merging
   or confuse this with the existing shared-session handoff example.

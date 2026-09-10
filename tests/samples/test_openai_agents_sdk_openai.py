@@ -13,6 +13,7 @@ from samples.openai_agents_sdk.scenarios import list_scenarios
 _SCENARIO_NAMES = [
     "workspace-edit",
     "document-review",
+    "independent-reviewers",
     "incident-triage",
     "config-migration",
     "data-pipeline",

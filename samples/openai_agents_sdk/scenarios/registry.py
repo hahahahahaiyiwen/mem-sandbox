@@ -10,6 +10,9 @@ from samples.openai_agents_sdk.scenarios.document_review import (
 from samples.openai_agents_sdk.scenarios.incident_triage import (
     SCENARIO as INCIDENT_TRIAGE,
 )
+from samples.openai_agents_sdk.scenarios.independent_reviewers import (
+    SCENARIO as INDEPENDENT_REVIEWERS,
+)
 from samples.openai_agents_sdk.scenarios.multi_agent_handoff import (
     SCENARIO as MULTI_AGENT_HANDOFF,
 )
@@ -30,6 +33,7 @@ from samples.openai_agents_sdk.scenarios.workspace_edit import (
 _SCENARIOS = (
     WORKSPACE_EDIT,
     DOCUMENT_REVIEW,
+    INDEPENDENT_REVIEWERS,
     INCIDENT_TRIAGE,
     CONFIG_MIGRATION,
     DATA_PIPELINE,

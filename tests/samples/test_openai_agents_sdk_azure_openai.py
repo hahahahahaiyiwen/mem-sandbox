@@ -34,6 +34,7 @@ from samples.openai_agents_sdk.runner import (
     run_scenario,
 )
 from samples.openai_agents_sdk.scenarios import (
+    SnapshotBranchingScenario,
     StagedScenario,
     get_scenario,
     list_scenarios,
@@ -69,6 +70,19 @@ from samples.openai_agents_sdk.scenarios.incident_triage import (
 )
 from samples.openai_agents_sdk.scenarios.incident_triage import (
     REPORT_PATH as INCIDENT_REPORT_PATH,
+)
+from samples.openai_agents_sdk.scenarios.independent_reviewers import (
+    BASELINE_REVIEW_STATUS,
+    CLARITY_REVIEW_CONTENT,
+    CLARITY_REVIEW_STATUS,
+    REVIEW_CRITERIA_CONTENT,
+    REVIEW_CRITERIA_PATH,
+    REVIEW_FINDINGS_PATH,
+    REVIEW_SOURCE_CONTENT,
+    REVIEW_SOURCE_PATH,
+    REVIEW_STATUS_PATH,
+    RISK_REVIEW_CONTENT,
+    RISK_REVIEW_STATUS,
 )
 from samples.openai_agents_sdk.scenarios.multi_agent_handoff import (
     CONFIG_PATH,
@@ -117,6 +131,7 @@ _EXPECTED_TOOLS = ["execute", "read_file", "write_file", "apply_patch"]
 _SCENARIO_NAMES = [
     "workspace-edit",
     "document-review",
+    "independent-reviewers",
     "incident-triage",
     "config-migration",
     "data-pipeline",
@@ -333,6 +348,53 @@ def _scripted_output(
         if call == 5:
             return [_read("verify_document_review", DOCUMENT_REVIEW_PATH)]
         return [_message("Document review approved.")]
+
+    if stage == "independent-reviewers-baseline":
+        if call == 1:
+            return [_read("read_review_source", REVIEW_SOURCE_PATH)]
+        if call == 2:
+            return [_read("read_review_criteria", REVIEW_CRITERIA_PATH)]
+        if call == 3:
+            return [_read("read_review_status", REVIEW_STATUS_PATH)]
+        return [_message("Reviewer baseline prepared.")]
+
+    if stage in {"independent-reviewer-risk", "independent-reviewer-clarity"}:
+        perspective = stage.removeprefix("independent-reviewer-")
+        if call == 1:
+            return [_read(f"read_{perspective}_source", REVIEW_SOURCE_PATH)]
+        if call == 2:
+            return [_read(f"read_{perspective}_criteria", REVIEW_CRITERIA_PATH)]
+        if call == 3:
+            return [_read(f"read_{perspective}_status", REVIEW_STATUS_PATH)]
+        if perspective == "risk":
+            status = RISK_REVIEW_STATUS
+            content = RISK_REVIEW_CONTENT
+            completion = "Risk review complete."
+        else:
+            status = CLARITY_REVIEW_STATUS
+            content = CLARITY_REVIEW_CONTENT
+            completion = "Clarity review complete."
+        if call == 4:
+            return [
+                _patch(
+                    f"set_{perspective}_status",
+                    REVIEW_STATUS_PATH,
+                    BASELINE_REVIEW_STATUS.decode().strip(),
+                    status.decode().strip(),
+                    _latest_hash(input),
+                )
+            ]
+        if call == 5:
+            return [
+                _write(
+                    f"write_{perspective}_review",
+                    REVIEW_FINDINGS_PATH,
+                    content.decode(),
+                )
+            ]
+        if call == 6:
+            return [_read(f"verify_{perspective}_review", REVIEW_FINDINGS_PATH)]
+        return [_message(completion)]
 
     if stage == "incident-triage":
         if call == 1:
@@ -765,6 +827,29 @@ def test_document_review_contract_requires_discovery_and_independent_review() ->
     assert "3.12" not in prompts
 
 
+def test_independent_reviewers_contract_forks_one_verified_baseline() -> None:
+    scenario = get_scenario("independent-reviewers")
+
+    assert isinstance(scenario, SnapshotBranchingScenario)
+    assert scenario.baseline_stage.key == "independent-reviewers-baseline"
+    assert [branch.name for branch in scenario.branches] == ["risk", "clarity"]
+    assert [branch.stage.key for branch in scenario.branches] == [
+        "independent-reviewer-risk",
+        "independent-reviewer-clarity",
+    ]
+    assert scenario.selected_branch == "risk"
+    assert [artifact.path for artifact in scenario.baseline_expected_artifacts] == [
+        REVIEW_SOURCE_PATH,
+        REVIEW_CRITERIA_PATH,
+        REVIEW_STATUS_PATH,
+    ]
+    prompts = "\n".join(
+        [scenario.baseline_stage.prompt] + [branch.stage.prompt for branch in scenario.branches]
+    )
+    assert "needs safeguards" not in prompts
+    assert "revision requested" not in prompts
+
+
 @pytest.mark.asyncio
 async def test_list_scenarios_does_not_require_azure_configuration(
     capsys: pytest.CaptureFixture[str],
@@ -815,9 +900,11 @@ async def test_registered_scenario_runs_without_network_and_cleans_backends(
         assert result.scenario_name == scenario_name
         assert result.artifacts
         assert all(names == _EXPECTED_TOOLS for names in model.tool_names)
-        if scenario_name == "snapshot-branching":
-            assert result.selected_branch == "aggressive"
-            assert len(service.created_handles) == 3
+        if isinstance(scenario, SnapshotBranchingScenario):
+            assert result.selected_branch == scenario.selected_branch
+            assert len(result.branch_results) == len(scenario.branches)
+            expected_handles = 3 + bool(scenario.baseline_expected_artifacts)
+            assert len(service.created_handles) == expected_handles
         else:
             assert result.selected_branch is None
             assert len(service.created_handles) == 1
@@ -940,6 +1027,110 @@ async def test_document_review_reviewer_failure_preserves_editor_work_and_cleans
             "document-review-editor": 6,
             "document-review-reviewer": 1,
         }
+        await _assert_backends_deleted(service)
+    finally:
+        await service.close()
+
+
+@pytest.mark.asyncio
+async def test_independent_reviewers_preserve_baseline_and_isolate_sibling_results() -> None:
+    scenario = get_scenario("independent-reviewers")
+    bundle = create_sample_service_bundle(policy_engine=scenario.policy_engine_factory())
+    service = RecordingService(bundle.service)
+    model = DeterministicScenarioModel()
+    try:
+        result = await run_scenario(
+            model=model,
+            service=service,
+            scenario=scenario,
+            snapshot_store=bundle.snapshot_store,
+            clock=bundle.clock,
+        )
+
+        assert result.stage_outputs == (
+            "Reviewer baseline prepared.",
+            "Risk review complete.",
+            "Clarity review complete.",
+        )
+        assert result.selected_branch == "risk"
+        assert [(artifact.path, artifact.content) for artifact in result.baseline_artifacts] == [
+            (REVIEW_SOURCE_PATH, REVIEW_SOURCE_CONTENT),
+            (REVIEW_CRITERIA_PATH, REVIEW_CRITERIA_CONTENT),
+            (REVIEW_STATUS_PATH, BASELINE_REVIEW_STATUS),
+        ]
+        assert [branch.name for branch in result.branch_results] == ["risk", "clarity"]
+        assert [
+            (artifact.path, artifact.content) for artifact in result.branch_results[0].artifacts
+        ] == [
+            (REVIEW_SOURCE_PATH, REVIEW_SOURCE_CONTENT),
+            (REVIEW_CRITERIA_PATH, REVIEW_CRITERIA_CONTENT),
+            (REVIEW_STATUS_PATH, RISK_REVIEW_STATUS),
+            (REVIEW_FINDINGS_PATH, RISK_REVIEW_CONTENT),
+        ]
+        assert [
+            (artifact.path, artifact.content) for artifact in result.branch_results[1].artifacts
+        ] == [
+            (REVIEW_SOURCE_PATH, REVIEW_SOURCE_CONTENT),
+            (REVIEW_CRITERIA_PATH, REVIEW_CRITERIA_CONTENT),
+            (REVIEW_STATUS_PATH, CLARITY_REVIEW_STATUS),
+            (REVIEW_FINDINGS_PATH, CLARITY_REVIEW_CONTENT),
+        ]
+        assert result.artifacts == result.branch_results[0].artifacts
+        assert model.calls == {
+            "independent-reviewers-baseline": 4,
+            "independent-reviewer-risk": 7,
+            "independent-reviewer-clarity": 7,
+        }
+        assert len(service.created_handles) == 4
+        assert len({str(handle) for handle in service.created_handles}) == 4
+        await _assert_backends_deleted(service)
+    finally:
+        await service.close()
+
+
+@pytest.mark.asyncio
+async def test_independent_reviewer_failure_inspects_untouched_fork_and_cleans_up() -> None:
+    scenario = get_scenario("independent-reviewers")
+    bundle = create_sample_service_bundle(policy_engine=scenario.policy_engine_factory())
+    service = RecordingService(bundle.service)
+    model = DeterministicScenarioModel(
+        failure=RuntimeError("clarity reviewer unavailable"),
+        failure_stage="independent-reviewer-clarity",
+    )
+    inspected: dict[str, bytes] = {}
+
+    async def inspect(context: InspectionContext, session: SandboxSession) -> None:
+        assert isinstance(context.error, RuntimeError)
+        inspected["source"] = (
+            await session.read_bytes(ReadBytesRequest(path=REVIEW_SOURCE_PATH))
+        ).content
+        inspected["status"] = (
+            await session.read_bytes(ReadBytesRequest(path=REVIEW_STATUS_PATH))
+        ).content
+
+    try:
+        with pytest.raises(RuntimeError, match="clarity reviewer unavailable"):
+            await run_scenario(
+                model=model,
+                service=service,
+                scenario=scenario,
+                inspector=inspect,
+                inspect_on_failure=True,
+                snapshot_store=bundle.snapshot_store,
+                clock=bundle.clock,
+            )
+
+        assert inspected == {
+            "source": REVIEW_SOURCE_CONTENT,
+            "status": BASELINE_REVIEW_STATUS,
+        }
+        assert model.calls == {
+            "independent-reviewers-baseline": 4,
+            "independent-reviewer-risk": 7,
+            "independent-reviewer-clarity": 1,
+        }
+        assert len(service.created_handles) == 3
+        assert len({str(handle) for handle in service.created_handles}) == 3
         await _assert_backends_deleted(service)
     finally:
         await service.close()

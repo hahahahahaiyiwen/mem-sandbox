@@ -37,20 +37,31 @@ _OWNER_ID = "openai-agents-sample"
 
 @dataclass(frozen=True, slots=True)
 class VerifiedArtifact:
-    """One host-verified file from the selected scenario session."""
+    """One host-verified file from a scenario session."""
 
     path: str
     content: bytes
 
 
 @dataclass(frozen=True, slots=True)
+class VerifiedBranchResult:
+    """One independently verified result collected from a workspace fork."""
+
+    name: str
+    output: str
+    artifacts: tuple[VerifiedArtifact, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class ScenarioResult:
-    """Verified outputs from one completed scenario."""
+    """Verified outputs, collected branches, and host selection from one scenario."""
 
     scenario_name: str
     stage_outputs: tuple[str, ...]
     artifacts: tuple[VerifiedArtifact, ...]
     selected_branch: str | None = None
+    branch_results: tuple[VerifiedBranchResult, ...] = ()
+    baseline_artifacts: tuple[VerifiedArtifact, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,7 +121,7 @@ async def run_scenario(
         else:
             if snapshot_store is None or clock is None:
                 raise ValueError(
-                    "snapshot-branching requires snapshot_store and clock dependencies"
+                    "snapshot-backed scenarios require snapshot_store and clock dependencies"
                 )
             (
                 result,
@@ -228,16 +239,25 @@ async def _run_snapshot_scenario(
         raise
 
     branch_outputs: list[str] = [baseline_output]
+    branch_results: list[VerifiedBranchResult] = []
     selected_session: OpenAISandboxSession | None = None
     selected_artifacts: tuple[VerifiedArtifact, ...] | None = None
     for branch in scenario.branches:
         session = await client.resume(persisted_state)
         tracked_sessions.append(session)
         await session.start()
-        branch_outputs.append(await _run_stage(model, session, branch.stage))
+        branch_output = await _run_stage(model, session, branch.stage)
+        branch_outputs.append(branch_output)
         artifacts = await _verify_artifacts(
             await _core_session(service, session),
             branch.expected_artifacts,
+        )
+        branch_results.append(
+            VerifiedBranchResult(
+                name=branch.name,
+                output=branch_output,
+                artifacts=artifacts,
+            )
         )
         if branch.name == scenario.selected_branch:
             selected_session = session
@@ -246,6 +266,15 @@ async def _run_snapshot_scenario(
     if selected_session is None or selected_artifacts is None:
         raise ScenarioVerificationError(
             f"selected snapshot branch {scenario.selected_branch!r} was not produced"
+        )
+    baseline_artifacts: tuple[VerifiedArtifact, ...] = ()
+    if scenario.baseline_expected_artifacts:
+        baseline_session = await client.resume(persisted_state)
+        tracked_sessions.append(baseline_session)
+        await baseline_session.start()
+        baseline_artifacts = await _verify_artifacts(
+            await _core_session(service, baseline_session),
+            scenario.baseline_expected_artifacts,
         )
     handles = {_provider_state(session).sandbox_handle for session in tracked_sessions}
     if len(handles) != len(tracked_sessions):
@@ -256,6 +285,8 @@ async def _run_snapshot_scenario(
             stage_outputs=tuple(branch_outputs),
             artifacts=selected_artifacts,
             selected_branch=scenario.selected_branch,
+            branch_results=tuple(branch_results),
+            baseline_artifacts=baseline_artifacts,
         ),
         selected_session,
     )
