@@ -14,7 +14,7 @@ and cleanup behavior are shared with the Azure OpenAI sample.
 
 - An official OpenAI API key.
 - A model available to that account that supports Responses API function/tool calling.
-- The repository dependencies installed with `uv sync --all-groups`.
+- The repository dependencies installed with `uv sync --all-packages --all-groups`.
 
 The sample pins the official `https://api.openai.com/v1` endpoint. It does not honor an
 ambient `OPENAI_BASE_URL`; custom gateways and other OpenAI-compatible base URLs are not

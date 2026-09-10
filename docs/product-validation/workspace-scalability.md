@@ -99,7 +99,7 @@ latency.
 Run from a clean worktree with Python 3.12 and the locked environment:
 
 ```console
-uv sync --all-groups
+uv sync --all-packages --all-groups
 set MEM_SANDBOX_BENCHMARK_RUNNER=<runner-name>
 set MEM_SANDBOX_POWER_CONFIGURATION=<power-description>
 uv run python -m benchmarks.runner ^

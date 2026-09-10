@@ -1,0 +1,93 @@
+{
+  "expected": {
+    "content": "combined-0.1-compatible\n",
+    "path": "/workspace/review.txt"
+  },
+  "generated_by": "mem-sandbox==0.1.0 combined distribution",
+  "snapshot": {
+    "content_hash": "8cdd56b470c3e41cbe21dd3b846c68a40ec95bcc80474c1dc9cb04c743a773b1",
+    "created_at": "2026-09-10T12:00:00+00:00",
+    "created_by": "openai-agents",
+    "metadata": {
+      "format_name": "openai-portable-workspace",
+      "payload_bytes": 13814,
+      "process_local": true
+    },
+    "payload_gzip_base64": "H4sIAAAAAAACCu3bQWuDMBQH8O+S8w4maqJCD9ncBqMO2kNlvcgzxmq31qGig7HvPulkhZ16GGyH/w9CXnjkvfDueWfUmqoebJZTZ6XHImYOG0Hpxl0e116h/0isxyTW4jFe6eQrHhM979PS8TlO4uTH+ZR/m+/sEv0fXHPjriuzO70Jfmem+1zwmlL/ZXvjjMv9bf8kwt7c3zmUPnTbVYMRAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAwIUWC3b1/deqbNoD9dlg265ujizi51TbNH1WUVexiJH0bO4XKpCqcMmxQSAscUXSEdzLHcplyA0PlXUtV0FQhso3witJ+i5X0rhTx7Fpn7tXMlNhO9Rzt49PKoSLY/Y1AAA=",
+    "schema_version": 1,
+    "snapshot_id": "15351829-c849-48fa-8f9e-9a76f4d0d8d3",
+    "source_session_id": "00000000-0000-0000-0000-000000000002",
+    "workspace_revision": 1
+  },
+  "state": {
+    "approved_environment": [],
+    "core_session_id": "00000000-0000-0000-0000-000000000002",
+    "cwd": "/workspace",
+    "exposed_ports": [],
+    "lifecycle_limits": {
+      "terminal_event_reserve_seconds": 1.0,
+      "timeout_seconds": 30.0
+    },
+    "manifest": {
+      "entries": {},
+      "environment": {
+        "value": {}
+      },
+      "extra_path_grants": [],
+      "groups": [],
+      "remote_mount_command_allowlist": [
+        "ls",
+        "find",
+        "stat",
+        "cat",
+        "less",
+        "head",
+        "tail",
+        "du",
+        "grep",
+        "rg",
+        "wc",
+        "sort",
+        "cut",
+        "cp",
+        "tee",
+        "echo",
+        "mkdir",
+        "rm"
+      ],
+      "root": "/workspace",
+      "users": [],
+      "version": 1
+    },
+    "manifest_profile_version": 1,
+    "max_stream_bytes": 33554432,
+    "owner_id": "openai-agents",
+    "provider_state_version": 1,
+    "sandbox_handle": "00000000-0000-0000-0000-000000000001",
+    "session_id": "44444444-4444-4444-4444-444444444444",
+    "snapshot": {
+      "id": "15351829c84948fa8f9e9a76f4d0d8d3",
+      "owner_id": "openai-agents",
+      "store_dependency_key": "mem_sandbox.snapshot_store",
+      "type": "mem_sandbox_store"
+    },
+    "snapshot_fingerprint": null,
+    "snapshot_fingerprint_version": null,
+    "type": "mem_sandbox",
+    "workspace_archive_format_version": 1,
+    "workspace_archive_revision": 1,
+    "workspace_archive_root_hash": "a64eb5d7867d3a0e882ea17a60214b0ab691c197e3e1788f975c24fa653176c3",
+    "workspace_limits": {
+      "max_file_bytes": 4194304,
+      "max_nodes": 10000,
+      "max_patch_bytes": 1048576,
+      "max_path_bytes": 4096,
+      "max_read_bytes": 262144,
+      "max_read_lines": 2000,
+      "max_segment_bytes": 255,
+      "max_snapshot_bytes": 33554432,
+      "max_total_bytes": 16777216
+    },
+    "workspace_root_ready": true
+  }
+}

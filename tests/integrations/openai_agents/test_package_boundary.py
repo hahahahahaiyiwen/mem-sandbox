@@ -11,8 +11,11 @@ import pytest
 from packaging.requirements import Requirement
 from packaging.specifiers import SpecifierSet
 
-OPENAI_EXTRA = "openai-agents"
+CORE_DISTRIBUTION = "mem-sandbox"
+OPENAI_ADAPTER_DISTRIBUTION = "mem-sandbox-openai-agents"
+SUPPORTED_CORE_RANGE = SpecifierSet(">=0.2.0,<0.3")
 SUPPORTED_OPENAI_AGENTS_RANGE = SpecifierSet(">=0.22,<0.23")
+SUPPORTED_PYDANTIC_RANGE = SpecifierSet(">=2.12.2,<3")
 PUBLIC_CORE_MODULES = frozenset(
     {
         "mem_sandbox",
@@ -27,7 +30,7 @@ PUBLIC_CORE_MODULES = frozenset(
         "mem_sandbox.workspace",
     }
 )
-OPENAI_INTEGRATION_MODULE = "mem_sandbox.integrations.openai_agents"
+OPENAI_INTEGRATION_MODULE = "mem_sandbox_openai_agents"
 FORBIDDEN_PUBLIC_CORE_IMPORTS = frozenset(
     {
         ("mem_sandbox.workspace", "JsonWorkspaceSnapshotCodec"),
@@ -44,6 +47,10 @@ def _public_exports(module_name: str) -> frozenset[str]:
 
     module = importlib.import_module(module_name)
     return frozenset(cast(list[str], module.__dict__["__all__"]))
+
+
+def _is_core_module(module_name: str) -> bool:
+    return module_name == "mem_sandbox" or module_name.startswith("mem_sandbox.")
 
 
 def _qualified_name(node: ast.AST) -> str | None:
@@ -65,11 +72,7 @@ def _private_core_imports(path: Path, *, package_name: str) -> set[str]:
             for alias in node.names:
                 if alias.asname is not None and alias.name in PUBLIC_CORE_MODULES:
                     module_aliases[alias.asname] = alias.name
-                if (
-                    alias.name.startswith("mem_sandbox")
-                    and not alias.name.startswith(OPENAI_INTEGRATION_MODULE)
-                    and alias.name not in PUBLIC_CORE_MODULES
-                ):
+                if _is_core_module(alias.name) and alias.name not in PUBLIC_CORE_MODULES:
                     violations.add(alias.name)
         elif isinstance(node, ast.ImportFrom):
             if node.level > 0:
@@ -78,9 +81,7 @@ def _private_core_imports(path: Path, *, package_name: str) -> set[str]:
             else:
                 module_name = node.module
 
-            if module_name is None or not module_name.startswith("mem_sandbox"):
-                continue
-            if module_name.startswith(OPENAI_INTEGRATION_MODULE):
+            if module_name is None or not _is_core_module(module_name):
                 continue
             if module_name not in PUBLIC_CORE_MODULES:
                 violations.add(module_name)
@@ -129,20 +130,18 @@ def _package_name(path: Path, integration_root: Path) -> str:
     return OPENAI_INTEGRATION_MODULE if not suffix else f"{OPENAI_INTEGRATION_MODULE}.{suffix}"
 
 
-def test_openai_agents_extra_uses_the_supported_sdk_range() -> None:
+def test_adapter_distribution_declares_supported_runtime_ranges() -> None:
     requirements = [
-        Requirement(requirement) for requirement in importlib.metadata.requires("mem-sandbox") or ()
+        Requirement(requirement)
+        for requirement in importlib.metadata.requires(OPENAI_ADAPTER_DISTRIBUTION) or ()
     ]
-    openai_requirements = [
-        requirement for requirement in requirements if requirement.name == "openai-agents"
-    ]
+    by_name = {requirement.name: requirement for requirement in requirements}
 
-    assert len(openai_requirements) == 1
-    requirement = openai_requirements[0]
-    assert requirement.specifier == SUPPORTED_OPENAI_AGENTS_RANGE
-    assert requirement.marker is not None
-    assert requirement.marker.evaluate({"extra": OPENAI_EXTRA})
-    assert not requirement.marker.evaluate({"extra": ""})
+    assert set(by_name) == {CORE_DISTRIBUTION, "openai-agents", "pydantic"}
+    assert by_name[CORE_DISTRIBUTION].specifier == SUPPORTED_CORE_RANGE
+    assert by_name["openai-agents"].specifier == SUPPORTED_OPENAI_AGENTS_RANGE
+    assert by_name["pydantic"].specifier == SUPPORTED_PYDANTIC_RANGE
+    assert all(requirement.marker is None for requirement in requirements)
 
 
 def test_openai_agents_integration_package_exists() -> None:
@@ -155,7 +154,7 @@ def test_openai_agents_integration_package_exists() -> None:
     ("source", "expected_violation"),
     [
         (
-            "from ...session.session import SandboxSession\n",
+            "from mem_sandbox.session.session import SandboxSession\n",
             "mem_sandbox.session.session",
         ),
         (
@@ -190,9 +189,12 @@ def test_public_core_import_guard_rejects_private_imports(
     ) == {expected_violation}
 
 
-def test_public_core_import_guard_accepts_public_relative_import(tmp_path: Path) -> None:
+def test_public_core_import_guard_accepts_adapter_relative_import(tmp_path: Path) -> None:
     module = tmp_path / "adapter.py"
-    module.write_text("from ...session import SandboxSession\n", encoding="utf-8")
+    module.write_text(
+        "from .snapshot import InMemorySandboxSnapshot\n",
+        encoding="utf-8",
+    )
 
     assert (
         _private_core_imports(
@@ -229,7 +231,9 @@ def test_public_core_import_guard_rejects_concrete_archive_boundaries(
 
 def test_openai_adapter_uses_only_public_core_module_exports() -> None:
     repository_root = Path(__file__).parents[3]
-    integration_root = repository_root / "src" / "mem_sandbox" / "integrations" / "openai_agents"
+    integration_root = (
+        repository_root / "packages" / "openai-agents" / "src" / "mem_sandbox_openai_agents"
+    )
     violations: dict[str, list[str]] = {}
 
     for path in integration_root.rglob("*.py"):

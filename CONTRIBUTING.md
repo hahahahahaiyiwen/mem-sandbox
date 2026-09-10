@@ -21,7 +21,7 @@ checkout.
 Install Python 3.12 or later and [uv](https://docs.astral.sh/uv/), then run:
 
 ```console
-uv sync --all-groups
+uv sync --all-packages --all-groups
 ```
 
 ## Implementation expectations
@@ -40,10 +40,10 @@ Run the same checks used by CI:
 
 ```console
 uv run pytest
-uv run ruff format --check src tests
-uv run ruff check src tests
-uv run pyright src tests
-uv build
+uv run ruff format --check packages src tests
+uv run ruff check packages src tests
+uv run pyright packages/openai-agents/src src tests
+uv build --all-packages
 ```
 
 ## Pull requests
@@ -56,34 +56,33 @@ checks pass before merge.
 
 Publishing is maintainer-only and uses
 [PyPI Trusted Publishing](https://docs.pypi.org/trusted-publishers/) rather than a
-long-lived repository token. The PyPI publisher must match:
+long-lived repository token. Each PyPI project has an isolated publisher boundary:
 
-| Setting | Value |
-|---|---|
-| Project | `mem-sandbox` |
-| Repository owner | `hahahahahaiyiwen` |
-| Repository | `mem-sandbox` |
-| Workflow | `publish.yml` |
-| GitHub environment | `pypi` |
+| Project | Version source | Release tag | GitHub environment |
+|---|---|---|---|
+| `mem-sandbox` | `pyproject.toml` | `mem-sandbox-v<version>` | `pypi` |
+| `mem-sandbox-openai-agents` | `packages/openai-agents/pyproject.toml` | `mem-sandbox-openai-agents-v<version>` | `pypi-openai-agents` |
 
-The protected `pypi` environment should require approval. Its publish job receives only
-`contents: read` and `id-token: write`; the separate build job cannot request an OIDC
-token.
+Both Trusted Publishers use repository `hahahahahaiyiwen/mem-sandbox` and workflow
+`publish.yml`. Each protected environment should require approval. The publish job
+receives only `contents: read` and `id-token: write`; the separate build job cannot
+request an OIDC token. A pending adapter publisher must be configured and the canonical
+PyPI name rechecked before its first release.
 
 To publish:
 
-1. Merge the release changes and a unique semantic version in `pyproject.toml` to
-   `main`.
+1. Merge the release changes and a unique semantic version in the selected package's
+   `pyproject.toml` to `main`.
 2. Confirm the required `main` checks pass.
-3. Create and push an annotated `v<version>` tag at the intended `main` commit.
+3. Create and push the selected distribution-qualified tag at the intended `main`
+   commit.
 4. Publish a GitHub release for that tag.
-5. Approve the `pypi` environment deployment after reviewing the workflow's built
-   distributions.
+5. Approve the selected environment deployment after reviewing its isolated artifacts.
 6. Install the exact version from PyPI in a clean environment and verify its public
    imports.
 
-The release workflow rejects a tag that does not exactly match
-`v<project.version>`, builds the wheel and source distribution once, validates their
-metadata, and publishes those same artifacts. PyPI versions and uploaded files are
-immutable; correct a failed release with a new version rather than attempting to replace
-an existing one.
+The release workflow rejects a tag that does not exactly match the selected package
+version and publishes only that package's wheel and source distribution. When both
+packages change incompatibly, publish and verify core first. PyPI publication is not
+atomic: keep a successful package release, correct only the failed package, and publish
+a new version without moving tags or replacing uploaded files.

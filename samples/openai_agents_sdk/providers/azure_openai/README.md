@@ -36,13 +36,13 @@ claimed as supported by this sample. They require their own endpoint/client vali
 From the repository root:
 
 ```console
-uv sync --all-groups
+uv sync --all-packages --all-groups
 ```
 
-The runtime integration remains optional for package users:
+Package users install the adapter distribution:
 
 ```console
-pip install -e ".[openai-agents]"
+pip install mem-sandbox-openai-agents
 ```
 
 ## Configuration
@@ -196,5 +196,5 @@ use a deterministic model double and perform no Azure/OpenAI request.
 
 Keep Azure configuration and model construction in this package, SDK-specific sample
 behavior in `samples.openai_agents_sdk`, reusable sample utilities in `samples.shared`,
-OpenAI SDK translation in `mem_sandbox.integrations.openai_agents`, and sandbox behavior
+OpenAI SDK translation in `mem_sandbox_openai_agents`, and sandbox behavior
 in core modules.

@@ -20,10 +20,11 @@ filesystem or shell.
 Python 3.12 or later:
 
 ```console
-python -m pip install "mem-sandbox[openai-agents]"
+python -m pip install mem-sandbox-openai-agents
 ```
 
-For the framework-neutral core only: `python -m pip install mem-sandbox`.
+This installs the compatible framework-neutral `mem-sandbox` core. Install only
+`mem-sandbox` when no OpenAI Agents SDK integration is needed.
 
 ### Exercise the installed package
 
@@ -34,7 +35,7 @@ from agents import RunConfig, Runner
 from agents.models.interface import Model
 from agents.sandbox import SandboxAgent, SandboxRunConfig
 
-from mem_sandbox.integrations.openai_agents import (
+from mem_sandbox_openai_agents import (
     InMemorySandboxCapability,
     InMemorySandboxClient,
 )
@@ -71,7 +72,7 @@ async def run_sandbox_agent(
 ```
 
 See the
-[complete service composition, provider setup, and lifecycle guide](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/src/mem_sandbox/integrations/openai_agents/README.md#use-with-sandboxagent).
+[complete service composition, provider setup, and lifecycle guide](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/packages/openai-agents/README.md#use-with-sandboxagent).
 This intentionally small example shows the installed public API. The repository's
 [`document-review` showcase](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/samples/openai_agents_sdk/README.md#run-the-document-review-showcase)
 demonstrates a complete guarded edit, independent review, and host verification.
@@ -83,7 +84,7 @@ Restore the locked development environment with [uv](https://docs.astral.sh/uv/)
 ```console
 git clone https://github.com/hahahahahaiyiwen/mem-sandbox.git
 cd mem-sandbox
-uv sync --all-groups --frozen
+uv sync --all-packages --all-groups --frozen
 ```
 
 #### Explore the constrained workspace
@@ -176,7 +177,7 @@ or
 [Azure OpenAI guide](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/samples/openai_agents_sdk/providers/azure_openai/README.md).
 To embed the integration in an application instead of running the repository scenario,
 follow the complete
-[`SandboxAgent` usage path](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/src/mem_sandbox/integrations/openai_agents/README.md#use-with-sandboxagent).
+[`SandboxAgent` usage path](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/packages/openai-agents/README.md#use-with-sandboxagent).
 
 ## Current profile and direction
 
@@ -222,9 +223,9 @@ Choose the documentation path that matches the task:
 - **Run a maintained live example:** use the
   [OpenAI Agents SDK samples](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/samples/openai_agents_sdk/README.md).
 - **Embed the public interfaces:** use the
-  [reader-first OpenAI integration guide](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/src/mem_sandbox/integrations/openai_agents/README.md#use-with-sandboxagent).
+  [reader-first OpenAI integration guide](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/packages/openai-agents/README.md#use-with-sandboxagent).
 - **Review adapter invariants:** use the integration guide's
-  [engineering reference](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/src/mem_sandbox/integrations/openai_agents/README.md#engineering-reference).
+  [engineering reference](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/packages/openai-agents/README.md#engineering-reference).
 
 ## What MemSandbox provides
 
@@ -258,18 +259,18 @@ compatibility are not part of the current profile.
 Read the
 [high-level design](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/docs/HIGH_LEVEL_DESIGN.md)
 and
-[OpenAI integration boundary](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/src/mem_sandbox/integrations/openai_agents/README.md)
+[OpenAI integration boundary](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/packages/openai-agents/README.md)
 before embedding MemSandbox in a security-sensitive application.
 
 ## Development
 
 ```console
-uv sync --all-groups
+uv sync --all-packages --all-groups
 uv run pytest
-uv run ruff format --check benchmarks evaluations samples src tests
-uv run ruff check benchmarks evaluations samples src tests
-uv run pyright benchmarks evaluations samples src tests
-uv build
+uv run ruff format --check benchmarks evaluations packages samples src tests
+uv run ruff check benchmarks evaluations packages samples src tests
+uv run pyright benchmarks evaluations packages/openai-agents/src samples src tests
+uv build --all-packages
 ```
 
 Development uses short-lived issue branches in separate Git worktrees. The main checkout

@@ -33,13 +33,6 @@ from mem_sandbox.core import (
     Revision,
     SessionId,
 )
-from mem_sandbox.integrations.openai_agents import (
-    InMemorySandboxCapability,
-    InMemorySandboxClient,
-    InMemorySandboxClientOptions,
-    InMemorySandboxSession,
-    InMemorySandboxSessionState,
-)
 from mem_sandbox.service import SandboxService
 from mem_sandbox.session import (
     ApplyPatchRequest,
@@ -64,6 +57,13 @@ from mem_sandbox.workspace import (
     PathMustNotExist,
     PathNotFoundError,
     SandboxPath,
+)
+from mem_sandbox_openai_agents import (
+    InMemorySandboxCapability,
+    InMemorySandboxClient,
+    InMemorySandboxClientOptions,
+    InMemorySandboxSession,
+    InMemorySandboxSessionState,
 )
 
 from .support import create_service_bundle

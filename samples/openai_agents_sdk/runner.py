@@ -15,14 +15,14 @@ from agents.sandbox import SandboxAgent, SandboxRunConfig
 from agents.sandbox.session import SandboxSession as OpenAISandboxSession
 
 from mem_sandbox.core import Clock
-from mem_sandbox.integrations.openai_agents import (
+from mem_sandbox.service import FactorySnapshotStore, SandboxHandle, SandboxService
+from mem_sandbox.session import ReadBytesRequest, SandboxSession
+from mem_sandbox_openai_agents import (
     InMemorySandboxCapability,
     InMemorySandboxClient,
     InMemorySandboxSessionState,
     InMemorySandboxSnapshotSpec,
 )
-from mem_sandbox.service import FactorySnapshotStore, SandboxHandle, SandboxService
-from mem_sandbox.session import ReadBytesRequest, SandboxSession
 from samples.openai_agents_sdk.scenarios import (
     AgentStage,
     ArtifactExpectation,

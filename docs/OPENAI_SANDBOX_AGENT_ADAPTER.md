@@ -9,16 +9,20 @@ the remaining live Azure OpenAI sample gate. Sandbox Agents are beta.
 
 ## Package boundary
 
-Install the integration dependency with:
+Install the separately versioned adapter distribution with:
 
 ```text
-pip install "mem-sandbox[openai-agents]"
+pip install mem-sandbox-openai-agents
 ```
 
-The production namespace is `mem_sandbox.integrations.openai_agents`. Core packages must
-remain importable without the optional SDK dependency. The integration package may import
-OpenAI SDK types and public MemSandbox contracts, but it must not import concrete
-workspace implementations.
+Its production namespace is `mem_sandbox_openai_agents`. The dependency-free core
+remains importable without the SDK or adapter. The adapter may import OpenAI SDK types
+and public MemSandbox contracts, but it must not import concrete workspace
+implementations.
+
+See the [package split decision](./OPENAI_AGENTS_PACKAGE_SPLIT.md) for dependency bounds,
+independent release tags, built-artifact validation, and the no-shim migration from the
+combined `0.1.x` package.
 
 ## Direct answer
 
@@ -647,20 +651,23 @@ finally:
     await client.delete(sandbox)
 ```
 
-## 8. Recommended adapter boundary
+## 8. Approved adapter boundary
 
-Keep this adapter outside the framework-neutral core:
+Move the adapter into a separate distribution in the same repository:
 
 ```text
-src/mem_sandbox/
-  integrations/
-    openai_agents/
-      __init__.py
-      client.py
-      session.py
-      state.py
-      capabilities.py
-      snapshots.py
+packages/
+  openai-agents/
+    pyproject.toml
+    README.md
+    LICENSE
+    src/
+      mem_sandbox_openai_agents/
+        __init__.py
+        adapter.py
+        capability.py
+        snapshot.py
+        py.typed
 
 tests/
   integrations/
@@ -671,10 +678,14 @@ tests/
       test_capabilities.py
 ```
 
-Expose the adapter through an optional integration extra supporting
-`openai-agents>=0.22,<0.23`, and run contract tests against exactly `0.22.0`. The Sandbox
-Agents API is explicitly beta, and methods that are concrete today may become abstract or
-change semantics before general availability.
+The adapter depends on `mem-sandbox>=0.2,<0.3`,
+`openai-agents>=0.22,<0.23`, and `pydantic>=2.12.2,<3`; contract tests retain exactly
+`openai-agents==0.22.0`. The core has no runtime dependencies and owns no adapter files.
+The Sandbox Agents API is explicitly beta, and methods that are concrete today may
+become abstract or change semantics before general availability.
+
+The detailed artifact, version, release, migration, and serialized-state requirements
+are authoritative in the [package split decision](./OPENAI_AGENTS_PACKAGE_SPLIT.md).
 
 ## Official references
 

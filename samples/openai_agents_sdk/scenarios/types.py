@@ -7,9 +7,9 @@ from dataclasses import dataclass
 
 from agents.sandbox import Manifest
 
-from mem_sandbox.integrations.openai_agents import InMemorySandboxClientOptions
 from mem_sandbox.policy import AllowAllPolicyEngine
 from mem_sandbox.session import SessionPolicyEngine
+from mem_sandbox_openai_agents import InMemorySandboxClientOptions
 
 
 def _default_options() -> InMemorySandboxClientOptions:

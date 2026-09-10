@@ -3,8 +3,8 @@
 from agents.sandbox import Manifest
 from agents.sandbox.entries import Dir, File
 
-from mem_sandbox.integrations.openai_agents import InMemorySandboxClientOptions
 from mem_sandbox.workspace import WorkspaceLimits
+from mem_sandbox_openai_agents import InMemorySandboxClientOptions
 from samples.openai_agents_sdk.scenarios.types import (
     AgentStage,
     ArtifactExpectation,

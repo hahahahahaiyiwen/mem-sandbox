@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mem-sandbox"
-version = "0.1.0"
+version = "0.2.0"
 description = "A deterministic in-memory workspace and command sandbox for AI agents"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -29,11 +29,6 @@ classifiers = [
   "Typing :: Typed",
 ]
 dependencies = []
-
-[project.optional-dependencies]
-openai-agents = [
-  "openai-agents>=0.22,<0.23",
-]
 
 [project.urls]
 Documentation = "https://github.com/hahahahahaiyiwen/mem-sandbox/tree/main/docs"
@@ -80,7 +75,14 @@ markers = [
 testpaths = ["tests"]
 
 [tool.pyright]
-include = ["benchmarks", "evaluations", "samples", "src", "tests"]
+include = [
+  "benchmarks",
+  "evaluations",
+  "packages/openai-agents/src",
+  "samples",
+  "src",
+  "tests",
+]
 pythonPlatform = "All"
 pythonVersion = "3.12"
 typeCheckingMode = "strict"
@@ -89,7 +91,14 @@ venvPath = "."
 
 [tool.ruff]
 line-length = 100
-src = ["benchmarks", "evaluations", "samples", "src", "tests"]
+src = [
+  "benchmarks",
+  "evaluations",
+  "packages/openai-agents/src",
+  "samples",
+  "src",
+  "tests",
+]
 target-version = "py312"
 
 [tool.ruff.format]
@@ -110,3 +119,6 @@ select = [
 
 [tool.uv]
 default-groups = ["dev"]
+
+[tool.uv.workspace]
+members = ["packages/openai-agents"]

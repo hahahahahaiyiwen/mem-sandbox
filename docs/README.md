@@ -28,6 +28,7 @@ successor to the original .NET Agent Sandbox.
 
 - [High-Level Design](./HIGH_LEVEL_DESIGN.md)
 - [Implementation Plan](./PLAN.md)
+- [Core and OpenAI Agents package split](./OPENAI_AGENTS_PACKAGE_SPLIT.md)
 - [Core component index](./components/README.md)
 - [Tool/capability integration](./integrations/tool-capability/README.md)
 - [Workspace/backend integration](./integrations/workspace-backend/README.md)
@@ -68,6 +69,12 @@ for the evidence, tradeoffs, proposed interfaces, roadmap, and learning exercise
 See [OpenAI `SandboxAgent` Backend Contract](./OPENAI_SANDBOX_AGENT_ADAPTER.md) for the
 exact client, session, state, snapshot, and runtime wiring APIs required by an in-memory
 OpenAI Agents SDK adapter.
+
+See [Core and OpenAI Agents Package Split](./OPENAI_AGENTS_PACKAGE_SPLIT.md) for the
+approved distribution names, dependency bounds, independent release tags, and pre-1.0
+import migration. Issue #67 implements that boundary under
+`packages/openai-agents`, with clean-install, built-artifact, and legacy-state
+compatibility coverage.
 
 See [OSS POSIX and Bash Parser Evaluation](./Python/POSIX_PARSER_EVALUATION.md) for the
 comparison of the MemSandbox parser with `shlex`, Parsify, `bashlex`, and

@@ -15,6 +15,11 @@ jobs:
   build:
     name: Build distributions
     runs-on: ubuntu-latest
+    outputs:
+      artifact_name: ${{ steps.route.outputs.artifact_name }}
+      environment: ${{ steps.route.outputs.environment }}
+      package: ${{ steps.route.outputs.package }}
+      project_url: ${{ steps.route.outputs.project_url }}
     permissions:
       contents: read
 
@@ -30,15 +35,38 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Verify release tag matches package version
+      - name: Select package and verify release tag
+        id: route
         shell: bash
         run: |
-          package_version="$(uv version --short)"
-          expected_tag="v${package_version}"
+          case "${GITHUB_REF_NAME}" in
+            mem-sandbox-v*)
+              package="mem-sandbox"
+              environment="pypi"
+              project_url="https://pypi.org/p/mem-sandbox"
+              ;;
+            mem-sandbox-openai-agents-v*)
+              package="mem-sandbox-openai-agents"
+              environment="pypi-openai-agents"
+              project_url="https://pypi.org/p/mem-sandbox-openai-agents"
+              ;;
+            *)
+              echo "Unsupported release tag ${GITHUB_REF_NAME}." >&2
+              exit 1
+              ;;
+          esac
+          package_version="$(uv version --package "${package}" --short)"
+          expected_tag="${package}-v${package_version}"
           if [[ "${GITHUB_REF_NAME}" != "${expected_tag}" ]]; then
             echo "Release tag ${GITHUB_REF_NAME} does not match ${expected_tag}." >&2
             exit 1
           fi
+          {
+            echo "artifact_name=${package}-distributions"
+            echo "environment=${environment}"
+            echo "package=${package}"
+            echo "project_url=${project_url}"
+          } >> "${GITHUB_OUTPUT}"
 
       - name: Verify release commit belongs to main
         shell: bash
@@ -49,12 +77,12 @@ jobs:
           fi
 
       - name: Build distributions
-        run: uv build
+        run: uv build --package "${{ steps.route.outputs.package }}" --out-dir dist --no-sources
 
       - name: Upload distributions
         uses: actions/upload-artifact@v7.0.1
         with:
-          name: python-package-distributions
+          name: ${{ steps.route.outputs.artifact_name }}
           path: dist/
           if-no-files-found: error
           retention-days: 1
@@ -65,8 +93,8 @@ jobs:
       - build
     runs-on: ubuntu-latest
     environment:
-      name: pypi
-      url: https://pypi.org/p/mem-sandbox
+      name: ${{ needs.build.outputs.environment }}
+      url: ${{ needs.build.outputs.project_url }}
     permissions:
       contents: read
       id-token: write
@@ -75,7 +103,7 @@ jobs:
       - name: Download distributions
         uses: actions/download-artifact@v8.0.1
         with:
-          name: python-package-distributions
+          name: ${{ needs.build.outputs.artifact_name }}
           path: dist/
 
       - name: Publish distributions to PyPI

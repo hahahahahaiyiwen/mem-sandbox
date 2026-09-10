@@ -17,10 +17,6 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, ValidationError,
 
 from mem_sandbox.command_executor import CommandLimits
 from mem_sandbox.core import ErrorCategory, OperationLimits, OperationResultMetadata, SandboxError
-from mem_sandbox.integrations.openai_agents.adapter import (
-    InMemorySandboxSession,
-    resolve_in_memory_sandbox_session,
-)
 from mem_sandbox.session import (
     ApplyPatchRequest,
     FileMutationResult,
@@ -39,6 +35,10 @@ from mem_sandbox.workspace import (
     ContentHashMustEqual,
     PathMustNotExist,
     SandboxPath,
+)
+from mem_sandbox_openai_agents.adapter import (
+    InMemorySandboxSession,
+    resolve_in_memory_sandbox_session,
 )
 
 _PROVIDER_TYPE = "mem_sandbox"
