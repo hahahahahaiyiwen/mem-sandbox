@@ -12,12 +12,85 @@ giving the model direct access to the host filesystem or shell.
 
 ## Quick start
 
-Prerequisites:
+### Install from PyPI
 
-- Python 3.12 or later (3.12 and 3.14 are tested in CI)
-- [uv](https://docs.astral.sh/uv/)
+MemSandbox requires Python 3.12 or later. Install the framework-neutral core:
 
-Clone the repository and install its optional integration dependencies:
+```console
+python -m pip install mem-sandbox
+```
+
+Install the OpenAI Agents SDK adapter and its supported SDK version:
+
+```console
+python -m pip install "mem-sandbox[openai-agents]"
+```
+
+Verify the installed distribution:
+
+```console
+python -c "from importlib.metadata import version; print(version('mem-sandbox'))"
+```
+
+The core package has no runtime dependencies. The `openai-agents` extra currently
+selects `openai-agents>=0.22,<0.23`.
+
+### Exercise the installed package
+
+Save this as `quickstart.py`:
+
+```python
+import asyncio
+
+from mem_sandbox.workspace import (
+    MemoryWorkspace,
+    PathMustNotExist,
+    WorkspaceWriteRequest,
+)
+
+
+async def main() -> None:
+    workspace = MemoryWorkspace()
+    path = workspace.resolve_path("/workspace/demo/message.txt")
+    await workspace.write(
+        WorkspaceWriteRequest(
+            path=path,
+            content=b"hello from MemSandbox\n",
+            precondition=PathMustNotExist(),
+            create_parents=True,
+        )
+    )
+    result = await workspace.read_text(path)
+    print(result.content, end="")
+
+
+asyncio.run(main())
+```
+
+Run it:
+
+```console
+python quickstart.py
+```
+
+```text
+hello from MemSandbox
+```
+
+The example uses only public types from the installed wheel and never touches the host
+filesystem. Low-level `MemoryWorkspace` paths are absolute and rooted at `/workspace`;
+sessions add their own working-directory behavior.
+
+To give an OpenAI Agents SDK `SandboxAgent` the four model-facing tools, follow the
+complete
+[`SandboxAgent` package usage path](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/src/mem_sandbox/integrations/openai_agents/README.md#use-with-sandboxagent).
+
+### Run the repository samples
+
+The maintained command-line and live-model samples are repository source examples; they
+are not installed by the wheel. To run them, install
+[Git](https://git-scm.com/) and [uv](https://docs.astral.sh/uv/), then clone the
+repository and install its optional integration dependencies:
 
 ```console
 git clone https://github.com/hahahahahaiyiwen/mem-sandbox.git
@@ -25,7 +98,7 @@ cd mem-sandbox
 uv sync --all-groups
 ```
 
-### 1. Explore MemSandbox without a model
+#### 1. Explore MemSandbox without a model
 
 ```console
 uv run python -m samples.shared
@@ -47,7 +120,7 @@ mem-sandbox:/workspace> exit
 Commands run in MemSandbox's constrained virtual command language, not a host shell.
 The in-memory session is deleted when the CLI exits.
 
-### 2. Run the `workspace-edit` agent scenario
+#### 2. Run the `workspace-edit` agent scenario
 
 Choose one inference provider.
 
@@ -88,11 +161,12 @@ mem-sandbox:/workspace> exit
 
 Live runs are billable and require network access. Credentials are read from the process
 environment and are never placed in the sandbox. For provider requirements, see the
-[official OpenAI guide](./samples/openai_agents_sdk/providers/openai/README.md) or
-[Azure OpenAI guide](./samples/openai_agents_sdk/providers/azure_openai/README.md).
+[official OpenAI guide](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/samples/openai_agents_sdk/providers/openai/README.md)
+or
+[Azure OpenAI guide](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/samples/openai_agents_sdk/providers/azure_openai/README.md).
 To embed the integration in an application instead of running the repository scenario,
 follow the complete
-[`SandboxAgent` usage path](./src/mem_sandbox/integrations/openai_agents/README.md#use-with-sandboxagent).
+[`SandboxAgent` usage path](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/src/mem_sandbox/integrations/openai_agents/README.md#use-with-sandboxagent).
 
 List the other available scenarios without credentials or a network request:
 
@@ -128,11 +202,11 @@ execution.
 Choose the documentation path that matches the task:
 
 - **Run a maintained live example:** use the
-  [OpenAI Agents SDK samples](./samples/openai_agents_sdk/README.md).
+  [OpenAI Agents SDK samples](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/samples/openai_agents_sdk/README.md).
 - **Embed the public interfaces:** use the
-  [reader-first OpenAI integration guide](./src/mem_sandbox/integrations/openai_agents/README.md#use-with-sandboxagent).
+  [reader-first OpenAI integration guide](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/src/mem_sandbox/integrations/openai_agents/README.md#use-with-sandboxagent).
 - **Review adapter invariants:** use the integration guide's
-  [engineering reference](./src/mem_sandbox/integrations/openai_agents/README.md#engineering-reference).
+  [engineering reference](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/src/mem_sandbox/integrations/openai_agents/README.md#engineering-reference).
 
 ## What MemSandbox provides
 
@@ -163,8 +237,10 @@ Use a process, container, VM, microVM, or WASM boundary when executing untrusted
 arbitrary code. Network access, host subprocesses, mounts, PTYs, and full POSIX shell
 compatibility are not part of the current profile.
 
-Read the [high-level design](./docs/HIGH_LEVEL_DESIGN.md) and
-[OpenAI integration boundary](./src/mem_sandbox/integrations/openai_agents/README.md)
+Read the
+[high-level design](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/docs/HIGH_LEVEL_DESIGN.md)
+and
+[OpenAI integration boundary](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/src/mem_sandbox/integrations/openai_agents/README.md)
 before embedding MemSandbox in a security-sensitive application.
 
 ## Project status and documentation
@@ -173,14 +249,14 @@ Milestone 5 delivered the first native integration through
 `openai-agents>=0.22,<0.23`, tested exactly with `0.22.0`. Other framework and transport
 integrations remain non-gating follow-ups.
 
-- [Design and research index](./docs/README.md)
-- [High-level design](./docs/HIGH_LEVEL_DESIGN.md)
-- [Implementation plan](./docs/PLAN.md)
-- [Run samples and configure providers](./samples/README.md)
-- [Embed or maintain the OpenAI Agents SDK integration](./src/mem_sandbox/integrations/openai_agents/README.md)
-- [Workspace design](./docs/components/workspace/README.md)
-- [Command executor design](./docs/components/command-executor/README.md)
-- [Product validation and benchmarks](./docs/product-validation/README.md)
+- [Design and research index](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/docs/README.md)
+- [High-level design](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/docs/HIGH_LEVEL_DESIGN.md)
+- [Implementation plan](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/docs/PLAN.md)
+- [Run samples and configure providers](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/samples/README.md)
+- [Embed or maintain the OpenAI Agents SDK integration](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/src/mem_sandbox/integrations/openai_agents/README.md)
+- [Workspace design](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/docs/components/workspace/README.md)
+- [Command executor design](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/docs/components/command-executor/README.md)
+- [Product validation and benchmarks](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/docs/product-validation/README.md)
 
 ## Development
 
@@ -198,7 +274,11 @@ stays on `main`, and changes reach it through pull requests.
 
 ## Contributing, security, and license
 
-See [CONTRIBUTING.md](./CONTRIBUTING.md) before starting a change. Report security issues
-using the private process in [SECURITY.md](./SECURITY.md), not a public issue.
+See
+[CONTRIBUTING.md](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/CONTRIBUTING.md)
+before starting a change. Report security issues using the private process in
+[SECURITY.md](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/SECURITY.md),
+not a public issue.
 
-MemSandbox is licensed under the [MIT License](./LICENSE).
+MemSandbox is licensed under the
+[MIT License](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/LICENSE).
