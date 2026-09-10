@@ -47,11 +47,9 @@ async def run_sandbox_agent(
     sandbox_session = await client.create()
     try:
         agent = SandboxAgent(
-            name="workspace-agent",
+            name="sandbox-agent",
             model=model,
-            capabilities=[
-                InMemorySandboxCapability(),  # Runner binds a clone to sandbox_session.
-            ],
+            capabilities=[InMemorySandboxCapability()],
         )
         result = await Runner.run(
             agent,
@@ -69,10 +67,8 @@ async def run_sandbox_agent(
             await client.delete(sandbox_session)
 ```
 
-Capabilities belong to `SandboxAgent`, not to a session. `Runner` clones and binds the
-declared capability to `sandbox_session` for this run.
-
-[Complete service composition, provider setup, and lifecycle guide](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/src/mem_sandbox/integrations/openai_agents/README.md#use-with-sandboxagent)
+See the
+[complete service composition, provider setup, and lifecycle guide](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/src/mem_sandbox/integrations/openai_agents/README.md#use-with-sandboxagent).
 
 ### Develop and run the repository samples
 
@@ -84,21 +80,78 @@ cd mem-sandbox
 uv sync --all-groups --frozen
 ```
 
+#### Explore the constrained workspace
+
 ```console
-# Explore the constrained workspace without a model or credentials.
 uv run python -m samples.shared
-
-# List maintained agent scenarios without credentials.
-uv run python -m samples.openai_agents_sdk.providers.openai --list-scenarios
-
-# Run the workspace-edit scenario after configuring an inference provider.
-uv run python -m samples.openai_agents_sdk.providers.openai --scenario workspace-edit --inspect
-uv run python -m samples.openai_agents_sdk.providers.azure_openai --scenario workspace-edit --inspect
 ```
 
-Provider configuration:
-[official OpenAI](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/samples/openai_agents_sdk/providers/openai/README.md) |
-[Azure OpenAI](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/samples/openai_agents_sdk/providers/azure_openai/README.md)
+```text
+mem-sandbox:/workspace> pwd
+/workspace
+mem-sandbox:/workspace> mkdir demo
+mem-sandbox:/workspace> echo hello > demo/message.txt
+mem-sandbox:/workspace> cat demo/message.txt
+hello
+mem-sandbox:/workspace> exit
+```
+
+Commands run in MemSandbox's constrained virtual command language, not a host shell.
+The in-memory session is deleted when the CLI exits.
+
+#### Run an agent scenario
+
+List the maintained scenarios without credentials or a network request:
+
+```console
+uv run python -m samples.openai_agents_sdk.providers.openai --list-scenarios
+```
+
+Choose one inference provider.
+
+**OpenAI**
+
+```sh
+export OPENAI_API_KEY="<api-key>"
+export OPENAI_MODEL="<model>"
+
+uv run python -m samples.openai_agents_sdk.providers.openai \
+  --scenario workspace-edit \
+  --inspect
+```
+
+**Azure OpenAI**
+
+```sh
+export AZURE_OPENAI_ENDPOINT="https://<resource>.openai.azure.com"
+export AZURE_OPENAI_API_KEY="<api-key>"
+export AZURE_OPENAI_API_VERSION="<api-version>"
+export AZURE_OPENAI_DEPLOYMENT="<deployment-name>"
+
+uv run python -m samples.openai_agents_sdk.providers.azure_openai \
+  --scenario workspace-edit \
+  --inspect
+```
+
+The scenario asks the agent to create a file, read its content hash, apply a guarded
+patch from `status=pending` to `status=complete`, and read the result. Host code verifies
+the exact final bytes before `--inspect` attaches the constrained CLI to the same live
+session:
+
+```text
+mem-sandbox:/workspace> cat /workspace/demo/report.txt
+status=complete
+mem-sandbox:/workspace> exit
+```
+
+Live runs are billable and require network access. Credentials are read from the process
+environment and are never placed in the sandbox. For provider requirements, see the
+[OpenAI guide](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/samples/openai_agents_sdk/providers/openai/README.md)
+or
+[Azure OpenAI guide](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/samples/openai_agents_sdk/providers/azure_openai/README.md).
+To embed the integration in an application instead of running the repository scenario,
+follow the complete
+[`SandboxAgent` usage path](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/src/mem_sandbox/integrations/openai_agents/README.md#use-with-sandboxagent).
 
 ## How the agent integration works
 
@@ -168,21 +221,6 @@ Read the
 and
 [OpenAI integration boundary](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/src/mem_sandbox/integrations/openai_agents/README.md)
 before embedding MemSandbox in a security-sensitive application.
-
-## Project status and documentation
-
-Milestone 5 delivered the first native integration through
-`openai-agents>=0.22,<0.23`, tested exactly with `0.22.0`. Other framework and transport
-integrations remain non-gating follow-ups.
-
-- [Design and research index](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/docs/README.md)
-- [High-level design](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/docs/HIGH_LEVEL_DESIGN.md)
-- [Implementation plan](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/docs/PLAN.md)
-- [Run samples and configure providers](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/samples/README.md)
-- [Embed or maintain the OpenAI Agents SDK integration](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/src/mem_sandbox/integrations/openai_agents/README.md)
-- [Workspace design](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/docs/components/workspace/README.md)
-- [Command executor design](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/docs/components/command-executor/README.md)
-- [Product validation and benchmarks](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/docs/product-validation/README.md)
 
 ## Development
 
