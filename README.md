@@ -34,41 +34,43 @@ from agents.sandbox import SandboxAgent, SandboxRunConfig
 from mem_sandbox.integrations.openai_agents import (
     InMemorySandboxCapability,
     InMemorySandboxClient,
-    InMemorySandboxClientOptions,
 )
 from mem_sandbox.service import SandboxService
 
 
-async def run_workspace_agent(
+async def run_sandbox_agent(
     *,
     model: Model,
     service: SandboxService,
 ) -> object:
     client = InMemorySandboxClient(service)
-    sdk_session = await client.create(
-        options=InMemorySandboxClientOptions(owner_id="my-application"),
-    )
+    sandbox_session = await client.create()
     try:
         agent = SandboxAgent(
             name="workspace-agent",
             model=model,
-            capabilities=[InMemorySandboxCapability()],
+            capabilities=[
+                InMemorySandboxCapability(),  # Runner binds a clone to sandbox_session.
+            ],
         )
         result = await Runner.run(
             agent,
             "Create /workspace/result.txt containing status=ready, then read it back.",
             run_config=RunConfig(
                 tracing_disabled=True,
-                sandbox=SandboxRunConfig(session=sdk_session),
+                sandbox=SandboxRunConfig(session=sandbox_session),
             ),
         )
         return result.final_output
     finally:
         try:
-            await sdk_session.aclose()
+            await sandbox_session.aclose()
         finally:
-            await client.delete(sdk_session)
+            await client.delete(sandbox_session)
 ```
+
+Capabilities belong to `SandboxAgent`, not to a session. `Runner` clones and binds the
+declared capability to `sandbox_session` for this run.
 
 [Complete service composition, provider setup, and lifecycle guide](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/src/mem_sandbox/integrations/openai_agents/README.md#use-with-sandboxagent)
 

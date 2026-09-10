@@ -137,7 +137,7 @@ async def run_sandbox_agent(
     service: SandboxService,
 ) -> object:
     client = InMemorySandboxClient(service)
-    sdk_session = await client.create(
+    sandbox_session = await client.create(
         options=InMemorySandboxClientOptions(owner_id="my-application"),
     )
     try:
@@ -151,15 +151,15 @@ async def run_sandbox_agent(
             "Create /workspace/result.txt containing a short status update.",
             run_config=RunConfig(
                 tracing_disabled=True,
-                sandbox=SandboxRunConfig(session=sdk_session),
+                sandbox=SandboxRunConfig(session=sandbox_session),
             ),
         )
         return result.final_output
     finally:
         try:
-            await sdk_session.aclose()
+            await sandbox_session.aclose()
         finally:
-            await client.delete(sdk_session)
+            await client.delete(sandbox_session)
 ```
 
 `Runner.run` owns SDK start/binding behavior for the supplied session. The application
@@ -221,12 +221,12 @@ Profile 1 has these important application-visible constraints:
 | Inference `Model` and provider client | Application | Application; close the provider client according to its SDK |
 | `SandboxService` | Application composition root | Application; call `service.close()` after all work |
 | `InMemorySandboxClient` | Application | Application; it borrows the service and has no service-close responsibility |
-| SDK sandbox session | `client.create()` or `client.resume()` | Application; call `sdk_session.aclose()`, then `client.delete(sdk_session)` |
+| SDK sandbox session | `client.create()` or `client.resume()` | Application; call `sandbox_session.aclose()`, then `client.delete(sandbox_session)` |
 | Backend handle and core session | Client through the injected service | Service; `client.delete()` is the normal release and `service.close()` is the final fallback |
 | `InMemorySandboxCapability` | Application on `SandboxAgent` | SDK clones and binds it per run; the original stays unbound |
 | Snapshot store and clock, when enabled | Application | Application; keep them available for the required resume lifetime |
 
-`sdk_session.aclose()` and `client.delete()` are intentionally different operations.
+`sandbox_session.aclose()` and `client.delete()` are intentionally different operations.
 The first performs SDK stop/shutdown and dependency cleanup and may persist configured
 snapshot state. The second releases the MemSandbox backend. Calling only one is not the
 complete normal lifecycle.

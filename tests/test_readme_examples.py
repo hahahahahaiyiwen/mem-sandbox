@@ -52,15 +52,15 @@ def test_root_readme_installed_package_quickstart() -> None:
     assert len(blocks) == 1
     exec(compile(blocks[0], "README.md", "exec"), namespace)
     namespace["Runner"] = _ReadmeRunner
-    run_workspace_agent = cast(
+    run_sandbox_agent = cast(
         Callable[..., Awaitable[object]],
-        namespace["run_workspace_agent"],
+        namespace["run_sandbox_agent"],
     )
 
     async def exercise() -> None:
         service = create_sample_service()
         try:
-            result = await run_workspace_agent(
+            result = await run_sandbox_agent(
                 model=cast(Model, "unused-model"),
                 service=service,
             )
