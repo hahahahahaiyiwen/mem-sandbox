@@ -1,0 +1,53 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mem-sandbox-openai-agents"
+version = "0.1.0"
+description = "OpenAI Agents SDK adapter for MemSandbox"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+license-files = ["LICENSE"]
+keywords = [
+  "agents",
+  "ai",
+  "openai",
+  "sandbox",
+  "workspace",
+]
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "Intended Audience :: Developers",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Typing :: Typed",
+]
+dependencies = [
+  "mem-sandbox>=0.2.0,<0.3",
+  "openai-agents>=0.22.0,<0.23",
+  "pydantic>=2.12.2,<3",
+]
+
+[project.urls]
+Documentation = "https://github.com/hahahahahaiyiwen/mem-sandbox/tree/main/packages/openai-agents"
+Issues = "https://github.com/hahahahahaiyiwen/mem-sandbox/issues"
+Repository = "https://github.com/hahahahahaiyiwen/mem-sandbox"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mem_sandbox_openai_agents"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/LICENSE",
+  "/README.md",
+  "/src",
+]
+
+[tool.uv.sources]
+mem-sandbox = { workspace = true }

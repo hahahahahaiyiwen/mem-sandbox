@@ -15,21 +15,25 @@ shell.
 
 ## Install
 
-Install MemSandbox with its OpenAI Agents SDK dependency:
+Install the adapter. Its compatible MemSandbox core is installed automatically:
 
 ```console
-python -m pip install "mem-sandbox[openai-agents]"
+python -m pip install mem-sandbox-openai-agents
 ```
 
 Confirm which package version the application resolved:
 
 ```console
-python -c "from importlib.metadata import version; print(version('mem-sandbox'))"
+python -c "from importlib.metadata import version; print(version('mem-sandbox-openai-agents'))"
 ```
 
-The supported SDK range is `openai-agents>=0.22,<0.23`; contract tests run against
-exactly `0.22.0`. The application configures and owns its inference model separately.
-See the
+Adapter `0.1.x` supports `mem-sandbox>=0.2.0,<0.3`,
+`openai-agents>=0.22.0,<0.23`, and `pydantic>=2.12.2,<3`; contract tests retain exact
+SDK `0.22.0` and the Pydantic lower bound. Applications migrating from the combined
+`mem-sandbox==0.1.x` package must replace both the old `openai-agents` extra and the
+`mem_sandbox.integrations.openai_agents` import; no forwarding shim is installed.
+
+The application configures and owns its inference model separately. See the
 [official OpenAI](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/samples/openai_agents_sdk/providers/openai/README.md)
 or
 [Azure OpenAI](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/samples/openai_agents_sdk/providers/azure_openai/README.md)
@@ -123,7 +127,7 @@ from agents import RunConfig, Runner
 from agents.models.interface import Model
 from agents.sandbox import SandboxAgent, SandboxRunConfig
 
-from mem_sandbox.integrations.openai_agents import (
+from mem_sandbox_openai_agents import (
     InMemorySandboxCapability,
     InMemorySandboxClient,
     InMemorySandboxClientOptions,
@@ -238,8 +242,7 @@ complete normal lifecycle.
 
 ## Public API map
 
-All supported adapter types are exported from
-`mem_sandbox.integrations.openai_agents`:
+All supported adapter types are exported from `mem_sandbox_openai_agents`:
 
 | Type | Role | Typical use |
 |---|---|---|

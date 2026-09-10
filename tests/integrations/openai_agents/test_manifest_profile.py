@@ -23,11 +23,6 @@ from agents.sandbox.session import SandboxSession as OpenAISandboxSession
 from agents.sandbox.types import FileMode, Group, Permissions, User
 from agents.sandbox.workspace_paths import SandboxPathGrant
 
-from mem_sandbox.integrations.openai_agents import (
-    InMemorySandboxClient,
-    InMemorySandboxClientOptions,
-    InMemorySandboxSession,
-)
 from mem_sandbox.service import (
     CreateSandboxRequest,
     ResumeSandboxRequest,
@@ -44,6 +39,11 @@ from mem_sandbox.workspace import (
     NodeLimitExceededError,
     WorkspaceLimits,
     WorkspaceSizeLimitExceededError,
+)
+from mem_sandbox_openai_agents import (
+    InMemorySandboxClient,
+    InMemorySandboxClientOptions,
+    InMemorySandboxSession,
 )
 
 from .support import RecordingService, create_service_bundle

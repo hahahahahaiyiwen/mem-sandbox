@@ -28,16 +28,16 @@ from benchmarks.validation import (
     normalized_state_hash,
 )
 from mem_sandbox.core import SnapshotId
-from mem_sandbox.integrations.openai_agents import (
+from mem_sandbox.service import SandboxNotFound
+from mem_sandbox.snapshots import SnapshotRef
+from mem_sandbox_openai_agents import (
     InMemorySandboxCapability,
     InMemorySandboxClient,
     InMemorySandboxClientOptions,
     InMemorySandboxSessionState,
     InMemorySandboxSnapshotSpec,
 )
-from mem_sandbox.integrations.openai_agents.adapter import resolve_in_memory_sandbox_session
-from mem_sandbox.service import SandboxNotFound
-from mem_sandbox.snapshots import SnapshotRef
+from mem_sandbox_openai_agents.adapter import resolve_in_memory_sandbox_session
 
 
 class _OpenAIValidationDriver:

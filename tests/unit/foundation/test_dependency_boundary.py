@@ -104,13 +104,9 @@ def test_import_guard_detects_any_third_party_package(tmp_path: Path) -> None:
 def test_core_modules_import_only_stdlib_and_mem_sandbox() -> None:
     repository_root = Path(__file__).parents[3]
     package_root = repository_root / "src" / "mem_sandbox"
-    integrations_root = package_root / "integrations"
-    source_files = [
-        path for path in package_root.rglob("*.py") if not path.is_relative_to(integrations_root)
-    ]
 
     violations: dict[str, list[str]] = {}
-    for path in source_files:
+    for path in package_root.rglob("*.py"):
         unexpected = _unexpected_core_import_roots(path)
         if unexpected:
             violations[str(path.relative_to(repository_root))] = sorted(unexpected)

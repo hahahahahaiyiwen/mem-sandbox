@@ -24,14 +24,6 @@ from agents.sandbox.snapshot import NoopSnapshot, SnapshotBase
 from pydantic import ValidationError
 
 from mem_sandbox.core import OperationLimits, Revision, SnapshotId, SystemClock
-from mem_sandbox.integrations.openai_agents import (
-    InMemorySandboxClient,
-    InMemorySandboxClientOptions,
-    InMemorySandboxSession,
-    InMemorySandboxSessionState,
-    InMemorySandboxSnapshot,
-    InMemorySandboxSnapshotSpec,
-)
 from mem_sandbox.service import SandboxHandle, SandboxNotFound
 from mem_sandbox.session import (
     ReadBytesRequest,
@@ -47,6 +39,14 @@ from mem_sandbox.workspace import (
     SnapshotCorruptError,
     WorkspaceArchiveData,
     WorkspaceLimits,
+)
+from mem_sandbox_openai_agents import (
+    InMemorySandboxClient,
+    InMemorySandboxClientOptions,
+    InMemorySandboxSession,
+    InMemorySandboxSessionState,
+    InMemorySandboxSnapshot,
+    InMemorySandboxSnapshotSpec,
 )
 
 from .support import RecordingService, create_service_bundle

@@ -16,6 +16,8 @@ scalability outcome is recorded in the
 Approved future directions are detailed in
 [Controlled Network Egress](./components/network-egress/README.md) and
 [External Execution and Python Runtime](./components/external-execution/README.md).
+The approved core/adapter distribution boundary is recorded in
+[Core and OpenAI Agents Package Split](./OPENAI_AGENTS_PACKAGE_SPLIT.md).
 
 ## 1. Recommendation
 
@@ -974,11 +976,13 @@ abstraction. No second SDK is selected by Milestone 5.
 - [x] **5.5.2** No deferred integration is added. Each future integration requires a new
   approved design decision and support matrix before implementation.
 
-The production package has no imports, dependencies, providers, clients, or transport
-abstractions for those deferred integrations. `openai-agents` remains the only optional
-framework dependency, isolated to `mem_sandbox.integrations.openai_agents`. Future
-integration work must start from a concrete SDK contract and its own issue rather than
-generalizing the OpenAI adapter speculatively.
+The combined `0.1.x` production distribution has no imports, dependencies, providers,
+clients, or transport abstractions for those deferred integrations. `openai-agents`
+remains its only optional framework dependency, isolated to
+`mem_sandbox.integrations.openai_agents`. Issue #67 moved that dependency and namespace
+into the separate `mem-sandbox-openai-agents` distribution without selecting another SDK.
+Future integration work must start from a concrete SDK contract and its own issue rather
+than generalizing the OpenAI adapter speculatively.
 
 #### 5.6 Product validation and benchmark baseline
 
@@ -1244,6 +1248,11 @@ direction visible without claiming unimplemented capabilities.
 - [ ] **7.2.4** Record concrete integration blockers and assess a second SDK under
   `12.1` only when user/collaborator evidence supports it. No networking or execution
   milestone is a prerequisite for a workspace-only adapter.
+- [x] **7.2.5** Implement issue #67's
+  [approved package split](./OPENAI_AGENTS_PACKAGE_SPLIT.md): publish the dependency-free
+  core and OpenAI Agents adapter as independently versioned distributions, migrate the
+  pre-1.0 import explicitly, preserve serialized identities, and validate both packages
+  from built artifacts before release.
 
 #### 7.3 Behavior evidence and workflow evaluation
 
@@ -1979,6 +1988,7 @@ their referenced checklist task begins.
 | Service lifecycle events | Keep `sandbox.created`/`sandbox.deleted` producer-less until shared sequencing or separate service identity is approved | `4.7` | Deferred |
 | Product validation | Stateful cross-adapter conformance plus a non-gating reference measurement; controlled evidence is required before regression gates and comparative evidence before a scoped "fastest" claim | `5.6` | Resolved |
 | First framework adapter | OpenAI Agents SDK custom capability plus sandbox client/session | `5.2` / `5.3` | Resolved |
+| Core/adapter distribution split | `mem-sandbox` / `mem_sandbox` and `mem-sandbox-openai-agents` / `mem_sandbox_openai_agents`; independent versions and qualified tags; explicit pre-1.0 migration without a shim | `7.2.5` / `#67` | Resolved |
 | First live agent sample | Official OpenAI and Azure OpenAI models through the OpenAI Agents SDK and host-bound MemSandbox capability; live calls remain opt-in | `5.8` / `#7` / `#45` | Resolved |
 | Workspace mutation scaling | Prioritize phase instrumentation, single-pass seeding, and an immutable path-copying tree with cached subtree summaries in separately approved work | `6.2` / `6.9` | Resolved |
 | Workspace content offload | Deferred after Milestone 6; reconsider only on a measured capacity trigger with host budgets and provider lifecycle requirements | `6.3` / `6.9` | Deferred |

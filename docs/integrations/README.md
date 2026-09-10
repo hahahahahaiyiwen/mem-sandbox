@@ -17,9 +17,12 @@ Milestone 5 proves both levels first through the OpenAI Agents SDK:
 - an OpenAI sandbox client/session implements the native workspace and lifecycle
   contract.
 
-The optional production namespace is `mem_sandbox.integrations.openai_agents`, installed
-with `mem-sandbox[openai-agents]`. Its supported SDK range and maintenance policy live in
-the module-level README alongside the adapter boundary.
+Core `0.2.x` and later keep framework dependencies outside `mem-sandbox`. Install the
+OpenAI adapter as `mem-sandbox-openai-agents` and import it through
+`mem_sandbox_openai_agents`. The
+[package split decision](../OPENAI_AGENTS_PACKAGE_SPLIT.md) owns distribution names,
+dependency bounds, release tags, and the explicit migration from the combined `0.1.x`
+package.
 
 PydanticAI, LangChain Deep Agents, and other SDKs are evidence-driven follow-ups, not
 Milestone 5 completion requirements. Shared production helpers are extracted only after

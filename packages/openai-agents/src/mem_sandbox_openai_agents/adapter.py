@@ -43,11 +43,6 @@ from pydantic import ConfigDict, Field, field_validator, model_validator
 
 from mem_sandbox.command_executor import CommandEnvironment, CommandLimits, EnvironmentValue
 from mem_sandbox.core import Clock, OperationLimits, Revision, SessionId
-from mem_sandbox.integrations.openai_agents.snapshot import (
-    InMemorySandboxSnapshot,
-    WorkspaceArchiveStream,
-    configure_snapshot_dependencies,
-)
 from mem_sandbox.service import (
     CreateSandboxRequest,
     FactorySnapshotStore,
@@ -81,6 +76,11 @@ from mem_sandbox.workspace import (
     WorkspaceArchiveData,
     WorkspaceLimits,
     WorkspaceSizeLimitExceededError,
+)
+from mem_sandbox_openai_agents.snapshot import (
+    InMemorySandboxSnapshot,
+    WorkspaceArchiveStream,
+    configure_snapshot_dependencies,
 )
 
 _PROVIDER_TYPE = "mem_sandbox"

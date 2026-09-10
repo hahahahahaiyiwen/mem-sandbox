@@ -17,7 +17,7 @@ _MARKDOWN_LINK = re.compile(r"\]\(([^)]+)\)")
 _REPOSITORY_BLOB = "https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/"
 _DISTRIBUTED_READMES = (
     _ROOT / "README.md",
-    _ROOT / "src/mem_sandbox/integrations/openai_agents/README.md",
+    _ROOT / "packages/openai-agents/README.md",
 )
 
 
@@ -73,7 +73,7 @@ def test_root_readme_installed_package_quickstart() -> None:
 
 def test_openai_readme_public_composition_constructs_and_closes() -> None:
     section = _section(
-        _ROOT / "src/mem_sandbox/integrations/openai_agents/README.md",
+        _ROOT / "packages/openai-agents/README.md",
         "## Use with `SandboxAgent`",
         "### Model-facing tools and common limits",
     )
@@ -83,7 +83,7 @@ def test_openai_readme_public_composition_constructs_and_closes() -> None:
     assert len(blocks) == 3
     for block in blocks:
         exec(
-            compile(block, "src/mem_sandbox/integrations/openai_agents/README.md", "exec"),
+            compile(block, "packages/openai-agents/README.md", "exec"),
             namespace,
         )
 
@@ -107,3 +107,8 @@ def test_distributed_readme_links_are_portable_and_resolve_in_repository() -> No
                 continue
             repository_path = target.removeprefix(_REPOSITORY_BLOB).split("#", 1)[0]
             assert (_ROOT / repository_path).is_file(), target
+
+
+def test_sample_readmes_do_not_install_removed_openai_extra() -> None:
+    for readme in (_ROOT / "samples/openai_agents_sdk").rglob("README.md"):
+        assert ".[openai-agents]" not in readme.read_text(encoding="utf-8"), readme
