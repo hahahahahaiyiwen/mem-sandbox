@@ -65,7 +65,9 @@ uv run python -m samples.openai_agents_sdk.providers.openai --list-scenarios
 with a hash-guarded patch, a separate reviewer writes
 `/workspace/review/findings.md`, and host code verifies both output and preserved source
 material. `workspace-edit` remains the default when `--scenario` is omitted and is the
-smallest tool-wiring check.
+smallest tool-wiring check. `independent-reviewers` creates risk and clarity reviewers
+from one saved baseline, verifies both isolated forks and the unchanged baseline, then
+returns the branch selected by host configuration without merging results.
 
 Use `--inspect` after successful verification or `--inspect-on-failure` before failed
 state is cleaned up. The inspection CLI executes only the constrained MemSandbox

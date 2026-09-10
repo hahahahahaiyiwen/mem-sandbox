@@ -52,6 +52,31 @@ mem-sandbox:/workspace> cat /workspace/review/findings.md
 The workspace task itself needs no network or arbitrary execution. A live model run
 still sends billable requests to the configured inference provider.
 
+## Run independent reviewer forks
+
+Use either provider entry point with the `independent-reviewers` scenario:
+
+```console
+uv run python -m samples.openai_agents_sdk.providers.openai \
+  --scenario independent-reviewers \
+  --inspect
+```
+
+The host seeds one deployment proposal, review criteria, and an unreviewed status. A
+coordinator verifies that baseline, then the host persists it once and creates separate
+risk and clarity reviewer workspaces from the same saved state. Each reviewer changes
+the same status path and writes the same findings path inside its own fork.
+
+Host code verifies both complete branch results, restores the saved baseline again to
+prove it remains unchanged, and explicitly selects the risk review for returned artifact
+inspection. The forks are not merged. They also do not share model conversation state.
+This differs from `multi-agent-handoff`, whose sequential roles intentionally share one
+live workspace.
+
+`--inspect` opens the host-selected fork after all branch and baseline checks succeed.
+The in-memory snapshot store supports this same-process workflow only. A live run still
+requires provider network access and may be billable.
+
 ## Choose a scenario
 
 `workspace-edit` remains the command-line default and smallest integration smoke test.
@@ -60,6 +85,7 @@ Use `document-review` for the representative end-to-end workflow.
 | Task | Scenario | Verified artifact or state |
 |---|---|---|
 | Review and correct a document | `document-review` | Corrected draft plus path-linked findings |
+| Compare independent reviewers | `independent-reviewers` | Verified risk and clarity forks plus one host-selected result |
 | Check basic file-tool wiring | `workspace-edit` | One guarded status-file edit |
 | Search supplied operational evidence | `incident-triage` | Incident report derived from seeded logs |
 | Migrate related configuration | `config-migration` | Two updated configs plus migration report |
@@ -80,7 +106,7 @@ The package owns:
 - scenario manifests, prompts, stages, policies, limits, and expected artifacts;
 - `SandboxAgent` construction and `InMemorySandboxCapability` binding;
 - SDK session and provider-client lifecycle;
-- snapshot branching and host-side verification;
+- snapshot branching, complete branch collection, host selection, and verification;
 - shared provider command-line arguments;
 - provider-client cleanup coordination.
 
@@ -123,6 +149,9 @@ credentials or network access.
 - Host verification, rather than the model's final prose, determines success.
 - The `document-review` editor and reviewer share workspace state, not model
   conversation state or unverified approval prose.
+- `independent-reviewers` gives each reviewer a distinct snapshot-backed workspace,
+  verifies every result and the unchanged baseline, and returns only the branch selected
+  by host configuration; it performs no automatic merge.
 - Every SDK session and backend handle is cleaned up on success, failure, or
   cancellation.
 - SDK-independent inspection uses the same live MemSandbox session and never invokes a

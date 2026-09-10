@@ -10,6 +10,7 @@ from samples.openai_agents_sdk.runner import (
     InspectionContext,
     ScenarioResult,
     VerifiedArtifact,
+    VerifiedBranchResult,
     run_sample,
     run_scenario,
 )
@@ -27,6 +28,7 @@ __all__ = [
     "SampleServiceBundle",
     "ScenarioResult",
     "VerifiedArtifact",
+    "VerifiedBranchResult",
     "build_sample_parser",
     "create_sample_service",
     "create_sample_service_bundle",

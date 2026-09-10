@@ -87,6 +87,7 @@ initial files, bounded agent stages, and host-side verification.
 | Scenario | Demonstrated behavior |
 |---|---|
 | `document-review` | Correct a stale draft with a guarded patch, then produce an evidence-linked review |
+| `independent-reviewers` | Verify isolated risk and clarity forks, then inspect one host-selected result |
 | `workspace-edit` | Create, read, hash-guarded patch, and exact verification |
 | `incident-triage` | Search seeded logs and produce a verified incident report |
 | `config-migration` | Atomically migrate multiple configuration files |
