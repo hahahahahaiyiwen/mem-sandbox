@@ -10,6 +10,7 @@ shell.
 |---|---|
 | Run the document-review showcase | Follow the repository [quick start](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/README.md#quick-start) and the [provider sample guide](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/samples/openai_agents_sdk/README.md#run-the-document-review-showcase). |
 | Embed MemSandbox in a `SandboxAgent` application | Install the optional dependency, then follow [Use with `SandboxAgent`](#use-with-sandboxagent). |
+| Combine the workspace with an application tool | Start with [Compose with a host-owned function tool](#compose-with-a-host-owned-function-tool). |
 | Add snapshot-backed SDK resume | Read [Optional snapshot and resume support](#optional-snapshot-and-resume-support) after the basic lifecycle works. |
 | Maintain or extend the adapter | Start at [Engineering reference](#engineering-reference). |
 
@@ -173,6 +174,7 @@ async def run_sandbox_agent(
             run_config=RunConfig(
                 tracing_disabled=True,
                 sandbox=SandboxRunConfig(session=sandbox_session),
+                tool_name_collision_policy="error",
             ),
         )
         return result.final_output
@@ -256,6 +258,145 @@ Profile 1 has these important application-visible constraints:
 The first performs SDK stop/shutdown and dependency cleanup and may persist configured
 snapshot state. The second releases the MemSandbox backend. Calling only one is not the
 complete normal lifecycle.
+
+## Compose with a host-owned function tool
+
+An ordinary SDK `FunctionTool` remains application-owned and belongs in
+`SandboxAgent.tools`. The workspace belongs in the separate `capabilities` list. This
+installed-package example uses only public imports and keeps the host lookup behind a
+narrow application-owned interface:
+
+```python
+from pathlib import Path
+from typing import Literal, Protocol
+
+from agents import RunConfig, Runner, function_tool
+from agents.models.interface import Model
+from agents.sandbox import SandboxAgent, SandboxRunConfig
+from agents.tool import FunctionTool
+from pydantic import BaseModel, ConfigDict, Field
+
+from mem_sandbox.service import SandboxService
+from mem_sandbox_openai_agents import (
+    InMemorySandboxCapability,
+    InMemorySandboxClient,
+    InMemorySandboxClientOptions,
+)
+
+
+class ReleaseStatusRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    release_id: str = Field(min_length=1)
+
+
+class ReleaseStatusResult(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    release_id: str
+    status: Literal["approved", "blocked"]
+
+
+class ReleaseStatusGateway(Protocol):
+    async def lookup(
+        self,
+        request: ReleaseStatusRequest,
+    ) -> ReleaseStatusResult: ...
+
+
+def create_release_status_tool(
+    gateway: ReleaseStatusGateway,
+) -> FunctionTool:
+    @function_tool(
+        name_override="lookup_release_status",
+        failure_error_function=None,
+    )
+    async def lookup_release_status(
+        request: ReleaseStatusRequest,
+    ) -> ReleaseStatusResult:
+        """Look up release status through the host-owned gateway.
+
+        Args:
+            request: Narrow release identity owned by the host application.
+        """
+        return await gateway.lookup(request)
+
+    return lookup_release_status
+
+
+async def run_composed_agent(
+    *,
+    model: Model,
+    service: SandboxService,
+    status_gateway: ReleaseStatusGateway,
+    release_id: str,
+) -> ReleaseStatusResult:
+    client = InMemorySandboxClient(service)
+    sandbox_session = await client.create(
+        options=InMemorySandboxClientOptions(owner_id="my-application"),
+    )
+    lookup_release_status = create_release_status_tool(status_gateway)
+    try:
+        agent = SandboxAgent(
+            name="release-workspace-agent",
+            model=model,
+            tools=[lookup_release_status],
+            capabilities=[InMemorySandboxCapability()],
+        )
+        await Runner.run(
+            agent,
+            (
+                f"Look up release {release_id!r}, then write the returned JSON to "
+                "/workspace/release-status.json and read it back."
+            ),
+            run_config=RunConfig(
+                tracing_disabled=True,
+                sandbox=SandboxRunConfig(session=sandbox_session),
+                tool_name_collision_policy="error",
+            ),
+        )
+        artifact_stream = await sandbox_session.read(Path("/workspace/release-status.json"))
+        artifact = artifact_stream.read()
+        if not isinstance(artifact, bytes):
+            raise TypeError("release status artifact was not binary data")
+        verified = ReleaseStatusResult.model_validate_json(artifact)
+        if verified.release_id != release_id:
+            raise ValueError("release status artifact has the wrong release_id")
+        return verified
+    finally:
+        try:
+            await sandbox_session.aclose()
+        finally:
+            await client.delete(sandbox_session)
+```
+
+The `ReleaseStatusGateway` implementation owns its network authority, authorization,
+credentials, retries, and lifetime. The tool receives only `ReleaseStatusRequest`; it
+cannot select a MemSandbox handle, resolve a session, widen workspace policy, or access
+the service unless the application deliberately gives it those dependencies. The
+application still owns and closes `service` after all composed runs finish.
+
+`failure_error_function=None` keeps a host lookup failure fatal. The SDK raises an error
+that names `lookup_release_status` and preserves the host exception as its cause.
+MemSandbox's expected domain failures continue to use the separate structured sandbox
+tool result contract. Applications may choose another host-tool error policy, but should
+not relabel host failures as sandbox failures.
+
+Always set `tool_name_collision_policy="error"` on a composed run. The SDK otherwise
+defaults to warning and selecting one colliding tool, which can hide whether the
+application tool or workspace tool owns a call. The explicit
+`capabilities=[InMemorySandboxCapability()]` list also replaces the SDK's default
+filesystem, shell, and compaction capabilities; do not append those defaults as a
+fallback. Evaluate any additional SDK capability independently against the MemSandbox
+session semantics and authority model.
+
+The injected `Model` must support ordinary function calling for the five exposed tools:
+`lookup_release_status`, `execute`, `read_file`, `write_file`, and `apply_patch`.
+Deterministic model doubles need no provider credentials or network. Live runs require
+the separately configured inference provider described above, while any credentials
+needed by the host-owned gateway remain isolated in that gateway. Conversation
+compaction, when an application chooses it, remains SDK/application configuration and is
+not added to the framework-neutral MemSandbox core.
 
 ## Public API map
 

@@ -396,6 +396,27 @@ def test_adapter_guide_distinguishes_declared_and_exercised_sdk_support() -> Non
         assert unsupported in guide
 
 
+def test_adapter_guide_documents_public_host_tool_composition() -> None:
+    guide = (ADAPTER_PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
+    assert "## Compose with a host-owned function tool" in guide
+    composition_guide = guide.split(
+        "## Compose with a host-owned function tool",
+        maxsplit=1,
+    )[1].split("## Public API map", maxsplit=1)[0]
+
+    assert "from agents import RunConfig, Runner, function_tool" in composition_guide
+    assert "from mem_sandbox_openai_agents import (" in composition_guide
+    assert "ReleaseStatusRequest" in composition_guide
+    assert "tools=[lookup_release_status]" in composition_guide
+    assert "capabilities=[InMemorySandboxCapability()]" in composition_guide
+    assert 'tool_name_collision_policy="error"' in composition_guide
+    assert "failure_error_function=None" in composition_guide
+    assert "function calling" in composition_guide
+    assert "host-owned gateway" in composition_guide
+    assert "from samples" not in composition_guide
+    assert "from tests" not in composition_guide
+
+
 def test_release_guide_requires_recurring_installed_package_compatibility_review() -> None:
     guide = (REPOSITORY_ROOT / "CONTRIBUTING.md").read_text(encoding="utf-8")
 

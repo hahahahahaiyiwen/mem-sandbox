@@ -689,38 +689,45 @@ async def test_runner_clones_binds_and_uses_only_mem_sandbox_tools_without_netwo
         capabilities=[capability],
     )
 
-    result = await Runner.run(
-        agent,
-        "write the file",
-        run_config=RunConfig(
-            tracing_disabled=True,
-            sandbox=SandboxRunConfig(session=sdk_session),
-        ),
-    )
+    try:
+        result = await Runner.run(
+            agent,
+            "write the file",
+            run_config=RunConfig(
+                tracing_disabled=True,
+                sandbox=SandboxRunConfig(session=sdk_session),
+                tool_name_collision_policy="error",
+            ),
+        )
 
-    assert result.final_output == "done"
-    assert capability.session is None
-    assert model.tool_names == [
-        ["execute", "read_file", "write_file", "apply_patch"],
-        ["execute", "read_file", "write_file", "apply_patch"],
-    ]
-    second_input = model.inputs[1]
-    assert isinstance(second_input, list)
-    tool_outputs: list[dict[str, Any]] = [
-        cast(dict[str, Any], item)
-        for item in second_input
-        if item.get("type") == "function_call_output"
-    ]
-    assert len(tool_outputs) == 1
-    parsed_output = json.loads(cast(str, tool_outputs[0]["output"]))
-    assert parsed_output["ok"] is True
+        assert result.final_output == "done"
+        assert capability.session is None
+        assert model.tool_names == [
+            ["execute", "read_file", "write_file", "apply_patch"],
+            ["execute", "read_file", "write_file", "apply_patch"],
+        ]
+        second_input = model.inputs[1]
+        assert isinstance(second_input, list)
+        tool_outputs: list[dict[str, Any]] = [
+            cast(dict[str, Any], item)
+            for item in second_input
+            if item.get("type") == "function_call_output"
+        ]
+        assert len(tool_outputs) == 1
+        parsed_output = json.loads(cast(str, tool_outputs[0]["output"]))
+        assert parsed_output["ok"] is True
 
-    provider = cast(InMemorySandboxSession, cast(Any, sdk_session)._inner)
-    created = await provider.core_session.read_file(
-        ReadFileRequest(path="/workspace/from-runner.txt")
-    )
-    assert created.content == "runner"
-    assert provider.core_session.state is SandboxSessionState.RUNNING
-
-    await client.delete(sdk_session)
-    await bundle.service.close()
+        provider = cast(InMemorySandboxSession, cast(Any, sdk_session)._inner)
+        created = await provider.core_session.read_file(
+            ReadFileRequest(path="/workspace/from-runner.txt")
+        )
+        assert created.content == "runner"
+        assert provider.core_session.state is SandboxSessionState.RUNNING
+    finally:
+        try:
+            await sdk_session.aclose()
+        finally:
+            try:
+                await client.delete(sdk_session)
+            finally:
+                await bundle.service.close()

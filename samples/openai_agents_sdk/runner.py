@@ -459,6 +459,7 @@ async def _run_stage(
         run_config=RunConfig(
             tracing_disabled=True,
             sandbox=SandboxRunConfig(session=session),
+            tool_name_collision_policy="error",
         ),
     )
     if not isinstance(result.final_output, str):
