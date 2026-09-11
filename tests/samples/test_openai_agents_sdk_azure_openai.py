@@ -16,6 +16,7 @@ from agents.items import TResponseInputItem, TResponseStreamEvent
 from agents.model_settings import ModelSettings
 from agents.models.interface import Model, ModelTracing
 from agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
+from agents.sandbox.errors import SnapshotNotRestorableError
 from agents.tool import Tool
 from openai import AsyncAzureOpenAI
 from openai.types.responses import (
@@ -34,6 +35,7 @@ from samples.openai_agents_sdk.runner import (
     run_scenario,
 )
 from samples.openai_agents_sdk.scenarios import (
+    PauseContinueScenario,
     SnapshotBranchingScenario,
     StagedScenario,
     get_scenario,
@@ -91,6 +93,17 @@ from samples.openai_agents_sdk.scenarios.multi_agent_handoff import (
     REVIEW_CONTENT,
     REVIEW_PATH,
 )
+from samples.openai_agents_sdk.scenarios.pause_continue import (
+    CHECKPOINT_CONTENT,
+    CHECKPOINT_PATH,
+    COMPLETED_STATUS,
+    CONTINUATION_CONTENT,
+    CONTINUATION_PATH,
+    PAUSED_STATUS,
+    REQUEST_CONTENT,
+    REQUEST_PATH,
+    STATUS_PATH,
+)
 from samples.openai_agents_sdk.scenarios.policy_recovery import (
     REPORT_CONTENT as POLICY_REPORT,
 )
@@ -120,18 +133,27 @@ from samples.shared.service import (
 
 from mem_sandbox.service import (
     CreateSandboxRequest,
+    FactorySnapshotStore,
     InMemorySandboxService,
     ResumeSandboxRequest,
     SandboxHandle,
     SandboxNotFound,
 )
 from mem_sandbox.session import ReadBytesRequest, SandboxSession
+from mem_sandbox.snapshots import (
+    SandboxSnapshot,
+    SandboxSnapshotDraft,
+    SnapshotNotFound,
+    SnapshotRef,
+)
 
 _EXPECTED_TOOLS = ["execute", "read_file", "write_file", "apply_patch"]
+_INVALID_CHECKPOINT_CONTENT = b"# Invalid checkpoint\n"
 _SCENARIO_NAMES = [
     "workspace-edit",
     "document-review",
     "independent-reviewers",
+    "pause-continue",
     "incident-triage",
     "config-migration",
     "data-pipeline",
@@ -177,6 +199,31 @@ class RecordingService:
         await self.delegate.close()
 
 
+class RecordingSnapshotStore:
+    def __init__(self, delegate: FactorySnapshotStore) -> None:
+        self.delegate = delegate
+        self.save_calls = 0
+        self.load_calls = 0
+
+    @property
+    def process_local(self) -> bool:
+        return self.delegate.process_local
+
+    async def save(self, draft: SandboxSnapshotDraft) -> SnapshotRef:
+        self.save_calls += 1
+        return await self.delegate.save(draft)
+
+    async def load(self, snapshot_ref: SnapshotRef) -> SandboxSnapshot:
+        self.load_calls += 1
+        return await self.delegate.load(snapshot_ref)
+
+
+class MissingSnapshotStore(RecordingSnapshotStore):
+    async def load(self, snapshot_ref: SnapshotRef) -> SandboxSnapshot:
+        self.load_calls += 1
+        raise SnapshotNotFound(f"snapshot {snapshot_ref.snapshot_id} is unavailable")
+
+
 class RecordingModelClient:
     def __init__(self) -> None:
         self.closed = False
@@ -192,14 +239,17 @@ class DeterministicScenarioModel(Model):
         failure: BaseException | None = None,
         failure_stage: str | None = None,
         document_review_boundary: Literal["protected-write", "stale-hash"] | None = None,
+        pause_continue_boundary: Literal["invalid-checkpoint"] | None = None,
     ) -> None:
         self.failure = failure
         self.failure_stage = failure_stage
         self.document_review_boundary: Literal["protected-write", "stale-hash"] | None = (
             document_review_boundary
         )
+        self.pause_continue_boundary: Literal["invalid-checkpoint"] | None = pause_continue_boundary
         self.boundary_output: dict[str, Any] | None = None
         self.calls: dict[str, int] = {}
+        self.initial_inputs: dict[str, str | list[TResponseInputItem]] = {}
         self.tool_names: list[list[str]] = []
 
     async def get_response(
@@ -228,6 +278,8 @@ class DeterministicScenarioModel(Model):
         stage_key = _stage_key(system_instructions)
         call = self.calls.get(stage_key, 0) + 1
         self.calls[stage_key] = call
+        if call == 1:
+            self.initial_inputs[stage_key] = input
         if self.failure is not None and (
             self.failure_stage is None or self.failure_stage == stage_key
         ):
@@ -243,6 +295,7 @@ class DeterministicScenarioModel(Model):
             call,
             input,
             document_review_boundary=self.document_review_boundary,
+            pause_continue_boundary=self.pause_continue_boundary,
         )
         return ModelResponse(
             output=cast(Any, output),
@@ -286,6 +339,7 @@ def _scripted_output(
     input: str | list[TResponseInputItem],
     *,
     document_review_boundary: Literal["protected-write", "stale-hash"] | None,
+    pause_continue_boundary: Literal["invalid-checkpoint"] | None,
 ) -> list[ResponseFunctionToolCall | ResponseOutputMessage]:
     if stage == "workspace-edit":
         if call == 1:
@@ -395,6 +449,65 @@ def _scripted_output(
         if call == 6:
             return [_read(f"verify_{perspective}_review", REVIEW_FINDINGS_PATH)]
         return [_message(completion)]
+
+    if stage == "pause-continue-initial":
+        if call == 1:
+            return [_read("read_pause_request", REQUEST_PATH)]
+        if call == 2:
+            return [_read("read_pause_status", STATUS_PATH)]
+        if call == 3:
+            return [
+                _patch(
+                    "pause_work",
+                    STATUS_PATH,
+                    "state=ready",
+                    "state=paused",
+                    _latest_hash(input),
+                )
+            ]
+        if call == 4:
+            content = (
+                _INVALID_CHECKPOINT_CONTENT
+                if pause_continue_boundary == "invalid-checkpoint"
+                else CHECKPOINT_CONTENT
+            )
+            return [
+                _write(
+                    "write_pause_checkpoint",
+                    CHECKPOINT_PATH,
+                    content.decode(),
+                )
+            ]
+        if call == 5:
+            return [_read("verify_pause_checkpoint", CHECKPOINT_PATH)]
+        return [_message("Checkpoint saved.")]
+
+    if stage == "pause-continue-resumed":
+        if call == 1:
+            return [_read("read_saved_checkpoint", CHECKPOINT_PATH)]
+        if call == 2:
+            return [_read("read_resumed_status", STATUS_PATH)]
+        if call == 3:
+            return [
+                _patch(
+                    "complete_resumed_work",
+                    STATUS_PATH,
+                    "state=paused",
+                    "state=completed",
+                    _latest_hash(input),
+                )
+            ]
+        if call == 4:
+            return [
+                _write(
+                    "write_continuation_result",
+                    CONTINUATION_PATH,
+                    CONTINUATION_CONTENT.decode(),
+                )
+            ]
+        if call == 5:
+            return [_read("verify_continuation_result", CONTINUATION_PATH)]
+        return [_message("Continuation complete.")]
 
     if stage == "incident-triage":
         if call == 1:
@@ -850,6 +963,29 @@ def test_independent_reviewers_contract_forks_one_verified_baseline() -> None:
     assert "revision requested" not in prompts
 
 
+def test_pause_continue_contract_requires_workspace_discovery_across_fresh_runs() -> None:
+    scenario = get_scenario("pause-continue")
+
+    assert isinstance(scenario, PauseContinueScenario)
+    assert scenario.initial_stage.key == "pause-continue-initial"
+    assert scenario.continuation_stage.key == "pause-continue-resumed"
+    assert [artifact.path for artifact in scenario.checkpoint_artifacts] == [
+        REQUEST_PATH,
+        STATUS_PATH,
+        CHECKPOINT_PATH,
+    ]
+    assert [artifact.path for artifact in scenario.expected_artifacts] == [
+        REQUEST_PATH,
+        STATUS_PATH,
+        CHECKPOINT_PATH,
+        CONTINUATION_PATH,
+    ]
+    prompts = f"{scenario.initial_stage.prompt}\n{scenario.continuation_stage.prompt}"
+    assert "orion-api" not in prompts
+    assert "02:00 UTC" not in prompts
+    assert "Checkpoint saved." not in scenario.continuation_stage.prompt
+
+
 @pytest.mark.asyncio
 async def test_list_scenarios_does_not_require_azure_configuration(
     capsys: pytest.CaptureFixture[str],
@@ -879,6 +1015,28 @@ async def test_provider_application_runs_without_network_and_closes_client(
     assert "Verified /workspace/demo/report.txt:" in capsys.readouterr().out
 
 
+@pytest.mark.asyncio
+async def test_provider_application_reports_pause_continue_lifecycle(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    client = RecordingModelClient()
+    model = DeterministicScenarioModel()
+
+    await run_provider_sample(
+        argv=["--scenario", "pause-continue"],
+        parser=build_sample_parser(description="Test provider"),
+        model_factory=lambda: (client, model),
+        client_name="test client",
+    )
+
+    output = capsys.readouterr().out
+    assert client.closed is True
+    assert "Saved state: JSON-safe" in output
+    assert "Live reattachment: reused source backend" in output
+    assert "Replacement resume: restored into a distinct backend" in output
+    assert f"Verified {CONTINUATION_PATH}:" in output
+
+
 @pytest.mark.parametrize("scenario_name", _SCENARIO_NAMES)
 @pytest.mark.asyncio
 async def test_registered_scenario_runs_without_network_and_cleans_backends(
@@ -905,6 +1063,9 @@ async def test_registered_scenario_runs_without_network_and_cleans_backends(
             assert len(result.branch_results) == len(scenario.branches)
             expected_handles = 3 + bool(scenario.baseline_expected_artifacts)
             assert len(service.created_handles) == expected_handles
+        elif isinstance(scenario, PauseContinueScenario):
+            assert result.resume_evidence is not None
+            assert len(service.created_handles) == 2
         else:
             assert result.selected_branch is None
             assert len(service.created_handles) == 1
@@ -1131,6 +1292,173 @@ async def test_independent_reviewer_failure_inspects_untouched_fork_and_cleans_u
         }
         assert len(service.created_handles) == 3
         assert len({str(handle) for handle in service.created_handles}) == 3
+        await _assert_backends_deleted(service)
+    finally:
+        await service.close()
+
+
+@pytest.mark.asyncio
+async def test_pause_continue_serializes_state_and_restores_into_a_fresh_run() -> None:
+    scenario = get_scenario("pause-continue")
+    assert isinstance(scenario, PauseContinueScenario)
+    bundle = create_sample_service_bundle(policy_engine=scenario.policy_engine_factory())
+    service = RecordingService(bundle.service)
+    model = DeterministicScenarioModel()
+    try:
+        result = await run_scenario(
+            model=model,
+            service=service,
+            scenario=scenario,
+            snapshot_store=bundle.snapshot_store,
+            clock=bundle.clock,
+        )
+
+        assert result.stage_outputs == (
+            "Checkpoint saved.",
+            "Continuation complete.",
+        )
+        assert [(artifact.path, artifact.content) for artifact in result.artifacts] == [
+            (REQUEST_PATH, REQUEST_CONTENT),
+            (STATUS_PATH, COMPLETED_STATUS),
+            (CHECKPOINT_PATH, CHECKPOINT_CONTENT),
+            (CONTINUATION_PATH, CONTINUATION_CONTENT),
+        ]
+        assert result.resume_evidence is not None
+        serialized_state = json.loads(result.resume_evidence.saved_state_json)
+        assert serialized_state["type"] == "mem_sandbox"
+        assert serialized_state["provider_state_version"] == 1
+        assert serialized_state["sandbox_handle"] == result.resume_evidence.source_handle
+        assert serialized_state["workspace_archive_format_version"] is not None
+        assert serialized_state["workspace_archive_revision"] is not None
+        assert serialized_state["workspace_archive_root_hash"] is not None
+        assert "service" not in serialized_state
+        assert "session" not in serialized_state
+        assert result.resume_evidence.live_reattached_handle == result.resume_evidence.source_handle
+        assert result.resume_evidence.replacement_handle != result.resume_evidence.source_handle
+        continuation_input = model.initial_inputs["pause-continue-resumed"]
+        assert isinstance(continuation_input, list)
+        assert len(continuation_input) == 1
+        initial_item = cast(dict[str, Any], continuation_input[0])
+        assert initial_item == {
+            "content": scenario.continuation_stage.prompt,
+            "role": "user",
+        }
+        assert "orion-api" not in scenario.continuation_stage.prompt
+        assert "Checkpoint saved." not in scenario.continuation_stage.prompt
+        assert model.calls == {
+            "pause-continue-initial": 6,
+            "pause-continue-resumed": 6,
+        }
+        assert len(service.created_handles) == 2
+        assert len({str(handle) for handle in service.created_handles}) == 2
+        await _assert_backends_deleted(service)
+    finally:
+        await service.close()
+
+
+@pytest.mark.asyncio
+async def test_pause_continue_rejects_invalid_checkpoint_before_persistence() -> None:
+    scenario = get_scenario("pause-continue")
+    assert isinstance(scenario, PauseContinueScenario)
+    bundle = create_sample_service_bundle(policy_engine=scenario.policy_engine_factory())
+    service = RecordingService(bundle.service)
+    snapshot_store = RecordingSnapshotStore(bundle.snapshot_store)
+    model = DeterministicScenarioModel(pause_continue_boundary="invalid-checkpoint")
+    inspected_checkpoint: bytes | None = None
+
+    async def inspect(context: InspectionContext, session: SandboxSession) -> None:
+        nonlocal inspected_checkpoint
+        assert isinstance(context.error, ScenarioVerificationError)
+        inspected_checkpoint = (
+            await session.read_bytes(ReadBytesRequest(path=CHECKPOINT_PATH))
+        ).content
+
+    try:
+        with pytest.raises(ScenarioVerificationError, match=CHECKPOINT_PATH):
+            await run_scenario(
+                model=model,
+                service=service,
+                scenario=scenario,
+                inspector=inspect,
+                inspect_on_failure=True,
+                snapshot_store=snapshot_store,
+                clock=bundle.clock,
+            )
+
+        assert inspected_checkpoint == _INVALID_CHECKPOINT_CONTENT
+        assert snapshot_store.save_calls == 0
+        assert len(service.created_handles) == 1
+        await _assert_backends_deleted(service)
+    finally:
+        await service.close()
+
+
+@pytest.mark.asyncio
+async def test_pause_continue_failure_inspects_restored_checkpoint_and_cleans_up() -> None:
+    scenario = get_scenario("pause-continue")
+    assert isinstance(scenario, PauseContinueScenario)
+    bundle = create_sample_service_bundle(policy_engine=scenario.policy_engine_factory())
+    service = RecordingService(bundle.service)
+    model = DeterministicScenarioModel(
+        failure=RuntimeError("continuation dependency failed"),
+        failure_stage="pause-continue-resumed",
+    )
+    inspected: dict[str, bytes] = {}
+
+    async def inspect(context: InspectionContext, session: SandboxSession) -> None:
+        assert isinstance(context.error, RuntimeError)
+        inspected["checkpoint"] = (
+            await session.read_bytes(ReadBytesRequest(path=CHECKPOINT_PATH))
+        ).content
+        inspected["status"] = (await session.read_bytes(ReadBytesRequest(path=STATUS_PATH))).content
+
+    try:
+        with pytest.raises(RuntimeError, match="continuation dependency failed"):
+            await run_scenario(
+                model=model,
+                service=service,
+                scenario=scenario,
+                inspector=inspect,
+                inspect_on_failure=True,
+                snapshot_store=bundle.snapshot_store,
+                clock=bundle.clock,
+            )
+
+        assert inspected == {
+            "checkpoint": CHECKPOINT_CONTENT,
+            "status": PAUSED_STATUS,
+        }
+        assert model.calls == {
+            "pause-continue-initial": 6,
+            "pause-continue-resumed": 1,
+        }
+        assert len(service.created_handles) == 2
+        await _assert_backends_deleted(service)
+    finally:
+        await service.close()
+
+
+@pytest.mark.asyncio
+async def test_pause_continue_missing_saved_state_fails_before_replacement_allocation() -> None:
+    scenario = get_scenario("pause-continue")
+    assert isinstance(scenario, PauseContinueScenario)
+    bundle = create_sample_service_bundle(policy_engine=scenario.policy_engine_factory())
+    service = RecordingService(bundle.service)
+    snapshot_store = MissingSnapshotStore(bundle.snapshot_store)
+    model = DeterministicScenarioModel()
+    try:
+        with pytest.raises(SnapshotNotRestorableError):
+            await run_scenario(
+                model=model,
+                service=service,
+                scenario=scenario,
+                snapshot_store=snapshot_store,
+                clock=bundle.clock,
+            )
+
+        assert model.calls == {"pause-continue-initial": 6}
+        assert snapshot_store.load_calls >= 1
+        assert len(service.created_handles) == 1
         await _assert_backends_deleted(service)
     finally:
         await service.close()

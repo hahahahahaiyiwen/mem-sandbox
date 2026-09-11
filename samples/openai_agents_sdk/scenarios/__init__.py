@@ -7,6 +7,7 @@ from samples.openai_agents_sdk.scenarios.registry import (
 from samples.openai_agents_sdk.scenarios.types import (
     AgentStage,
     ArtifactExpectation,
+    PauseContinueScenario,
     ScenarioDefinition,
     SnapshotBranch,
     SnapshotBranchingScenario,
@@ -16,6 +17,7 @@ from samples.openai_agents_sdk.scenarios.types import (
 __all__ = [
     "AgentStage",
     "ArtifactExpectation",
+    "PauseContinueScenario",
     "ScenarioDefinition",
     "SnapshotBranch",
     "SnapshotBranchingScenario",

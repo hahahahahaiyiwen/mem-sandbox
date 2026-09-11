@@ -56,6 +56,21 @@ class StagedScenario:
 
 
 @dataclass(frozen=True, slots=True)
+class PauseContinueScenario:
+    """Two fresh agent runs connected only by persisted workspace state."""
+
+    name: str
+    description: str
+    manifest_factory: Callable[[], Manifest]
+    initial_stage: AgentStage
+    continuation_stage: AgentStage
+    checkpoint_artifacts: tuple[ArtifactExpectation, ...]
+    expected_artifacts: tuple[ArtifactExpectation, ...]
+    options_factory: Callable[[], InMemorySandboxClientOptions] = _default_options
+    policy_engine_factory: Callable[[], SessionPolicyEngine] = _allow_all_policy
+
+
+@dataclass(frozen=True, slots=True)
 class SnapshotBranch:
     """One isolated agent alternative resumed from a shared persisted state."""
 
@@ -80,4 +95,4 @@ class SnapshotBranchingScenario:
     policy_engine_factory: Callable[[], SessionPolicyEngine] = _allow_all_policy
 
 
-type ScenarioDefinition = StagedScenario | SnapshotBranchingScenario
+type ScenarioDefinition = StagedScenario | PauseContinueScenario | SnapshotBranchingScenario

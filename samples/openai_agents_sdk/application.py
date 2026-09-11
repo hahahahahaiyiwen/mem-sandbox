@@ -128,6 +128,10 @@ def _print_result(result: ScenarioResult) -> None:
         print(f"Stage {index}: {output}")
     if result.branch_results:
         print("Collected branches: " + ", ".join(branch.name for branch in result.branch_results))
+    if result.resume_evidence is not None:
+        print("Saved state: JSON-safe")
+        print("Live reattachment: reused source backend")
+        print("Replacement resume: restored into a distinct backend")
     if result.selected_branch is not None:
         print(f"Selected branch: {result.selected_branch}")
     for artifact in result.artifacts:

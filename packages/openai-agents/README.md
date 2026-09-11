@@ -272,6 +272,15 @@ The application must then:
 6. call `client.resume(state)` while the referenced snapshot remains retained.
 
 The
+[pause-continue sample](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/samples/openai_agents_sdk/scenarios/pause_continue.py)
+shows the complete host-owned lifecycle: verify a checkpoint, demonstrate live
+reattachment, stop successfully, serialize and deserialize JSON-safe state, delete the
+source backend, then restore a distinct replacement for a fresh agent run. The in-memory
+store retains snapshots only within the current process; applications that need recovery
+after process loss must supply durable implementations for the existing snapshot-store
+and state-custody boundaries.
+
+The
 [independent-reviewers sample](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/samples/openai_agents_sdk/scenarios/independent_reviewers.py)
 persists one baseline, collects and verifies two independent resume branches, verifies
 the baseline again, and returns one explicitly host-selected result without merging.
@@ -343,6 +352,13 @@ there is no matching provider state carrying the archive metadata. The client ch
 rejects that case before core allocation. SDK-managed resume state is serialized after
 cleanup calls `stop()`, so successful provider persistence updates the metadata before the
 state is saved.
+
+The `pause-continue` sample supplies an already-live session directly to two independent
+`Runner.run` calls. It does not use SDK `RunState` or transfer conversation history.
+`InMemorySandboxClient.resume()` first demonstrates a same-handle live alias; after the
+host deletes that backend, the same serialized state takes the replacement path and
+hydrates a new handle. Missing, corrupt, incompatible, expired, or owner-mismatched
+snapshots surface as explicit resume failures rather than empty workspaces.
 
 The public core audit confirmed these reusable contracts:
 

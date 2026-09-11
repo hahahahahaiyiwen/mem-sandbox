@@ -120,6 +120,7 @@ Choose the task closest to your use case:
 |---|---|---|
 | Review and revise a stale document | `document-review` | Corrected release notes and an evidence-linked review |
 | Compare independent review perspectives | `independent-reviewers` | Isolated risk and clarity reviews plus one host-selected result |
+| Pause and continue work later | `pause-continue` | JSON-safe saved state and a verified replacement workspace |
 | Check basic SDK and tool wiring | `workspace-edit` | One hash-guarded file edit |
 | Update related configuration safely | `config-migration` | Two migrated configs and a migration report |
 | Coordinate sequential agent roles | `multi-agent-handoff` | A plan, implemented change, and reviewer verdict |
@@ -128,7 +129,9 @@ Choose the task closest to your use case:
 diagnostic scenario and the command-line default. `independent-reviewers` restores two
 workspaces from one immutable baseline; the host verifies both forks and selects one
 without merging them. By contrast, `multi-agent-handoff` keeps sequential roles in one
-shared session.
+shared session. `pause-continue` hands verified workspace artifacts—not model
+conversation history—to a fresh agent run after deleting and replacing the original
+backend.
 
 Choose one inference provider to run the showcase.
 
