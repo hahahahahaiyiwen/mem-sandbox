@@ -27,11 +27,28 @@ Confirm which package version the application resolved:
 python -c "from importlib.metadata import version; print(version('mem-sandbox-openai-agents'))"
 ```
 
-Adapter `0.1.x` supports `mem-sandbox>=0.2.0,<0.3`,
-`openai-agents>=0.22.0,<0.23`, and `pydantic>=2.12.2,<3`; contract tests retain exact
-SDK `0.22.0` and the Pydantic lower bound. Applications migrating from the combined
-`mem-sandbox==0.1.x` package must replace both the old `openai-agents` extra and the
-`mem_sandbox.integrations.openai_agents` import; no forwarding shim is installed.
+Adapter `0.1.x` declares `mem-sandbox>=0.2.0,<0.3`,
+`openai-agents>=0.22.0,<0.23`, and `pydantic>=2.12.2,<3`. Declared support and exact
+installed-package evidence are different:
+
+| OpenAI Agents SDK | Status | Installed-package evidence |
+|---|---|---|
+| `0.22.0` | Supported lower bound | Default CI matrix with the Pydantic `2.12.2` floor |
+| `0.22.2` | Supported exercised patch | Default CI matrix selected as the current patch for issue #73 |
+| Other `>=0.22.0,<0.23` versions | Declared but not individually exercised | Allowed by package metadata; add a probe result before describing one as tested |
+| `<0.22.0` or `>=0.23` | Unsupported | Installation is outside adapter `0.1.x` bounds |
+
+Each exercised row installs wheels rebuilt from the core and adapter sdists with exact
+`pydantic==2.12.2` into a clean environment, verifies exact distribution versions and
+`pip check`, then runs a copied script with Python isolated mode. The script imports no
+repository samples and exercises public imports, client/session lifecycle, the four-tool
+SDK `Runner` loop, JSON-safe snapshot state, replacement resume, the complete
+deterministic document-review editor/reviewer workflow, and cleanup without model-network
+calls.
+
+Applications migrating from the combined `mem-sandbox==0.1.x` package must replace both
+the old `openai-agents` extra and the `mem_sandbox.integrations.openai_agents` import; no
+forwarding shim is installed.
 
 The application configures and owns its inference model separately. See the
 [official OpenAI](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/samples/openai_agents_sdk/providers/openai/README.md)
@@ -614,9 +631,30 @@ signatures, state or run-configuration fields, lifecycle ordering, serialization
 capability cloning/binding, or snapshot protocol must fail contract tests and receive an
 explicit compatibility review.
 
-Support is limited to the documented `>=0.22,<0.23` range. Expanding that range requires
-running the contract and conformance suites against the proposed versions and updating
-this README and the integration design documents.
+Support is limited to the documented `>=0.22.0,<0.23` range. The locked development
+environment remains at the exact lower bound; the built-artifact test separately runs
+the exercised-version matrix above. CI fixes that matrix explicitly with
+`MEM_SANDBOX_OPENAI_AGENTS_TEST_VERSIONS`. A maintainer can set the same variable to a
+comma-separated candidate matrix when a new SDK patch appears, but an ad hoc successful
+run is not persistent support evidence until the default matrix and table are updated.
+
+Every new SDK patch considered tested must pass
+`tests/integrations/openai_agents/test_distribution_artifacts.py` from rebuilt wheels.
+The copied `installed_package_probe.py` uses `-I`, so neither editable installs nor the
+checkout can satisfy imports accidentally. A failure names the changed SDK contract
+surface, original exception type, and affected adapter behavior. Package-CDN transport
+errors are recorded as retrieval failures rather than adapter incompatibility.
+
+Before widening `<0.23`, review SDK release and contract changes, update the dependency
+bound on a branch, run the installed-package matrix plus contract and conformance suites,
+and update this matrix. A successful patch inside the current range does not by itself
+justify a wider minor-version bound.
+
+The supported profile remains only the four constrained capability tools: `execute`,
+`read_file`, `write_file`, and `apply_patch`. It does not expose the host filesystem,
+an unrestricted shell, mount support, PTY behavior, port forwarding, network access, or
+conversation compaction. Unsupported SDK defaults and features must continue to fail
+explicitly rather than falling back to host behavior.
 
 ### Milestone 5 trust-boundary review
 

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import ast
+import importlib.metadata
+import json
 import os
 import shutil
 import subprocess
@@ -11,7 +14,7 @@ from dataclasses import dataclass
 from email.message import Message
 from email.parser import BytesParser
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from packaging.requirements import Requirement
@@ -32,6 +35,10 @@ LEGACY_STATE_FIXTURE = (
     / "fixtures"
     / "combined_0_1_saved_state.json"
 )
+INSTALLED_PACKAGE_PROBE = (
+    REPOSITORY_ROOT / "tests" / "integrations" / "openai_agents" / "installed_package_probe.py"
+)
+DEFAULT_OPENAI_AGENTS_TEST_VERSIONS = ("0.22.0", "0.22.2")
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,9 +55,9 @@ class BuiltArtifacts:
 
 
 @dataclass(frozen=True, slots=True)
-class CleanEnvironments:
-    core_python: Path
-    adapter_python: Path
+class AdapterEnvironment:
+    python: Path
+    sdk_version: str
 
 
 def _load_pyproject(project_root: Path) -> dict[str, Any]:
@@ -207,10 +214,10 @@ def _test_package_source_arguments() -> list[str]:
 
 
 @pytest.fixture(scope="module")
-def clean_environments(
+def core_python(
     tmp_path_factory: pytest.TempPathFactory,
     built_artifacts: BuiltArtifacts,
-) -> CleanEnvironments:
+) -> Path:
     uv = shutil.which("uv")
     assert uv is not None, "uv is required for clean-install validation"
     root = tmp_path_factory.mktemp("clean-installs")
@@ -229,8 +236,36 @@ def clean_environments(
         cwd=root,
     )
     _require_success(core_install)
+    return core_python
 
-    adapter_python = _create_environment(uv, root / "adapter")
+
+def _requested_sdk_versions() -> tuple[str, ...]:
+    configured = os.environ.get("MEM_SANDBOX_OPENAI_AGENTS_TEST_VERSIONS")
+    if configured is None:
+        return DEFAULT_OPENAI_AGENTS_TEST_VERSIONS
+    versions = tuple(
+        dict.fromkeys(value.strip() for value in configured.split(",") if value.strip())
+    )
+    if not versions:
+        raise ValueError("MEM_SANDBOX_OPENAI_AGENTS_TEST_VERSIONS must name at least one version")
+    return versions
+
+
+@pytest.fixture(
+    scope="module",
+    params=_requested_sdk_versions(),
+    ids=lambda version: f"openai-agents-{version}",
+)
+def adapter_environment(
+    request: pytest.FixtureRequest,
+    tmp_path_factory: pytest.TempPathFactory,
+    built_artifacts: BuiltArtifacts,
+) -> AdapterEnvironment:
+    uv = shutil.which("uv")
+    assert uv is not None, "uv is required for clean-install validation"
+    sdk_version = cast(str, request.param)
+    root = tmp_path_factory.mktemp(f"adapter-{sdk_version.replace('.', '-')}")
+    adapter_python = _create_environment(uv, root / "environment")
     adapter_install = _run(
         [
             uv,
@@ -239,7 +274,7 @@ def clean_environments(
             "--python",
             str(adapter_python),
             *_test_package_source_arguments(),
-            "openai-agents==0.22.0",
+            f"openai-agents=={sdk_version}",
             "pydantic==2.12.2",
             str(built_artifacts.core.wheel_from_sdist),
             str(built_artifacts.adapter.wheel_from_sdist),
@@ -253,10 +288,7 @@ def clean_environments(
     )
     _require_success(pip_check)
 
-    return CleanEnvironments(
-        core_python=core_python,
-        adapter_python=adapter_python,
-    )
+    return AdapterEnvironment(python=adapter_python, sdk_version=sdk_version)
 
 
 def test_uv_workspace_declares_the_adapter_member() -> None:
@@ -341,6 +373,84 @@ def test_quality_workflow_syncs_and_builds_all_workspace_packages() -> None:
     assert "uv sync --locked --all-packages --all-groups" in workflow
     assert "uv build --all-packages --no-sources" in workflow
     assert "packages/openai-agents/src" in workflow
+    assert 'MEM_SANDBOX_OPENAI_AGENTS_TEST_VERSIONS: "0.22.0,0.22.2"' in workflow
+
+
+def test_adapter_guide_distinguishes_declared_and_exercised_sdk_support() -> None:
+    guide = (ADAPTER_PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert "`openai-agents>=0.22.0,<0.23`" in guide
+    assert "| `0.22.0` | Supported lower bound |" in guide
+    assert "| `0.22.2` | Supported exercised patch |" in guide
+    assert "| Other `>=0.22.0,<0.23` versions | Declared but not individually exercised |" in guide
+    assert "MEM_SANDBOX_OPENAI_AGENTS_TEST_VERSIONS" in guide
+    for unsupported in (
+        "host filesystem",
+        "shell",
+        "mount",
+        "PTY",
+        "port",
+        "network",
+        "compaction",
+    ):
+        assert unsupported in guide
+
+
+def test_release_guide_requires_recurring_installed_package_compatibility_review() -> None:
+    guide = (REPOSITORY_ROOT / "CONTRIBUTING.md").read_text(encoding="utf-8")
+
+    assert "MEM_SANDBOX_OPENAI_AGENTS_TEST_VERSIONS" in guide
+    assert "tests/integrations/openai_agents/installed_package_probe.py" in guide
+    assert "python -I" in guide
+    assert "pip check" in guide
+    assert "before widening the SDK upper bound" in guide
+
+
+def test_default_installed_package_matrix_covers_lower_and_current_sdk_patch() -> None:
+    assert DEFAULT_OPENAI_AGENTS_TEST_VERSIONS == ("0.22.0", "0.22.2")
+
+
+def test_installed_package_probe_has_no_repository_only_imports() -> None:
+    module = ast.parse(INSTALLED_PACKAGE_PROBE.read_text(encoding="utf-8"))
+    imported_modules = {
+        alias.name
+        for node in ast.walk(module)
+        if isinstance(node, ast.Import)
+        for alias in node.names
+    }
+    imported_modules.update(
+        node.module
+        for node in ast.walk(module)
+        if isinstance(node, ast.ImportFrom) and node.module is not None
+    )
+
+    assert not any(name == "samples" or name.startswith("samples.") for name in imported_modules)
+    assert not any(name.startswith("tests.") for name in imported_modules)
+
+
+def test_installed_package_probe_names_the_failing_sdk_contract_surface(tmp_path: Path) -> None:
+    probe = tmp_path / "installed_package_probe.py"
+    shutil.copyfile(INSTALLED_PACKAGE_PROBE, probe)
+
+    completed = _run(
+        [
+            sys.executable,
+            "-I",
+            str(probe),
+            "--expected-core-version",
+            importlib.metadata.version("mem-sandbox"),
+            "--expected-adapter-version",
+            importlib.metadata.version("mem-sandbox-openai-agents"),
+            "--expected-sdk-version",
+            "0.0.0",
+        ],
+        cwd=tmp_path,
+    )
+
+    assert completed.returncode != 0
+    assert (
+        "OpenAI Agents SDK compatibility surface 'distribution versions' failed with AssertionError"
+    ) in completed.stderr
 
 
 def test_wheels_have_disjoint_namespace_ownership(built_artifacts: BuiltArtifacts) -> None:
@@ -406,7 +516,7 @@ def test_built_metadata_matches_each_distribution_contract(
 
 
 def test_core_sdist_wheel_installs_without_the_adapter_or_sdk(
-    clean_environments: CleanEnvironments,
+    core_python: Path,
     tmp_path: Path,
 ) -> None:
     script = """
@@ -429,43 +539,71 @@ assert importlib.util.find_spec("mem_sandbox_openai_agents") is None
 asyncio.run(exercise())
 """
     completed = _run(
-        [str(clean_environments.core_python), "-I", "-c", script],
+        [str(core_python), "-I", "-c", script],
         cwd=tmp_path,
     )
 
     _require_success(completed)
 
 
-def test_adapter_sdist_wheel_installs_at_its_lower_bounds(
-    clean_environments: CleanEnvironments,
+def test_adapter_sdist_wheel_passes_the_isolated_installed_package_probe(
+    adapter_environment: AdapterEnvironment,
     tmp_path: Path,
 ) -> None:
-    script = """
-import importlib.metadata
-
-import mem_sandbox_openai_agents as adapter
-
-assert adapter.InMemorySandboxClient.__module__.startswith("mem_sandbox_openai_agents.")
-assert importlib.metadata.version("mem-sandbox") == "0.2.0"
-assert importlib.metadata.version("mem-sandbox-openai-agents") == "0.1.0"
-
-try:
-    import mem_sandbox.integrations.openai_agents
-except ModuleNotFoundError:
-    pass
-else:
-    raise AssertionError("the removed combined-package namespace is still importable")
-"""
+    probe = tmp_path / "installed_package_probe.py"
+    shutil.copyfile(INSTALLED_PACKAGE_PROBE, probe)
     completed = _run(
-        [str(clean_environments.adapter_python), "-I", "-c", script],
+        [
+            str(adapter_environment.python),
+            "-I",
+            str(probe),
+            "--expected-core-version",
+            "0.2.0",
+            "--expected-adapter-version",
+            "0.1.0",
+            "--expected-sdk-version",
+            adapter_environment.sdk_version,
+        ],
         cwd=tmp_path,
     )
 
     _require_success(completed)
+    assert json.loads(completed.stdout) == {
+        "distributions": {
+            "mem-sandbox": "0.2.0",
+            "mem-sandbox-openai-agents": "0.1.0",
+            "openai-agents": adapter_environment.sdk_version,
+        },
+        "isolated": True,
+        "namespaces": {
+            "adapter": "mem_sandbox_openai_agents.adapter",
+            "legacy_namespace_available": False,
+            "repository_samples_available": False,
+        },
+        "sdk_contract": {
+            "document_review_outputs": [
+                "Release draft corrected.",
+                "Document review approved.",
+            ],
+            "replacement_resume": True,
+            "runner_output": "Runner tool loop complete.",
+            "state_type": "mem_sandbox",
+            "tools": ["execute", "read_file", "write_file", "apply_patch"],
+        },
+        "surfaces": [
+            "distribution versions",
+            "public imports and namespace ownership",
+            "client and session lifecycle",
+            "capability binding and Runner tool loop",
+            "snapshot state serialization and replacement resume",
+            "document-review editor and reviewer workflow",
+            "SDK session, backend, and service cleanup",
+        ],
+    }
 
 
 def test_combined_0_1_saved_state_resumes_in_a_clean_adapter_install(
-    clean_environments: CleanEnvironments,
+    adapter_environment: AdapterEnvironment,
     tmp_path: Path,
 ) -> None:
     script = """
@@ -580,7 +718,7 @@ asyncio.run(exercise(sys.argv[1]))
 """
     completed = _run(
         [
-            str(clean_environments.adapter_python),
+            str(adapter_environment.python),
             "-I",
             "-c",
             script,

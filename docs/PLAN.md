@@ -1235,14 +1235,14 @@ direction visible without claiming unimplemented capabilities.
 
 #### 7.2 SDK compatibility and integration usability
 
-- [ ] **7.2.1** Reconcile the declared OpenAI SDK support range with exercised versions
+- [x] **7.2.1** Reconcile the declared OpenAI SDK support range with exercised versions
   and contract checks; document tested versions and explicit unsupported behavior.
   Treat compatibility maintenance as recurring release work, not a one-time milestone.
 - [ ] **7.2.2** Demonstrate composition of the workspace capability with an ordinary
   host-owned tool and evaluate any additional SDK capability separately. Do not enable
   default shell/filesystem tools implicitly; document permissions, conflicts, and
   provider requirements. Keep conversation compaction outside the framework-neutral core.
-- [ ] **7.2.3** Verify the installed-package usage path outside the repository checkout.
+- [x] **7.2.3** Verify the installed-package usage path outside the repository checkout.
   Keep repository-only sample imports out of public API examples and make service
   construction, provider injection, artifact access, and cleanup discoverable.
 - [ ] **7.2.4** Record concrete integration blockers and assess a second SDK under
