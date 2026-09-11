@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import AsyncIterator, Mapping
+from dataclasses import dataclass
 from io import StringIO
 from typing import Any, Literal, cast
 
@@ -16,6 +17,7 @@ from agents.items import TResponseInputItem, TResponseStreamEvent
 from agents.model_settings import ModelSettings
 from agents.models.interface import Model, ModelTracing
 from agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
+from agents.sandbox.entries import File
 from agents.sandbox.errors import SnapshotNotRestorableError
 from agents.tool import Tool
 from openai import AsyncAzureOpenAI
@@ -43,6 +45,7 @@ from samples.openai_agents_sdk.scenarios import (
 )
 from samples.openai_agents_sdk.scenarios.config_migration import (
     API_PATH,
+    MIGRATED_CONFIG,
     WORKER_PATH,
 )
 from samples.openai_agents_sdk.scenarios.config_migration import (
@@ -51,7 +54,12 @@ from samples.openai_agents_sdk.scenarios.config_migration import (
 from samples.openai_agents_sdk.scenarios.config_migration import (
     REPORT_PATH as MIGRATION_REPORT_PATH,
 )
-from samples.openai_agents_sdk.scenarios.data_pipeline import OUTPUT_PATH as PIPELINE_PATH
+from samples.openai_agents_sdk.scenarios.data_pipeline import (
+    OUTPUT_CONTENT as PIPELINE_CONTENT,
+)
+from samples.openai_agents_sdk.scenarios.data_pipeline import (
+    OUTPUT_PATH as PIPELINE_PATH,
+)
 from samples.openai_agents_sdk.scenarios.document_review import (
     BRIEF_CONTENT,
     BRIEF_PATH,
@@ -87,6 +95,7 @@ from samples.openai_agents_sdk.scenarios.independent_reviewers import (
     RISK_REVIEW_STATUS,
 )
 from samples.openai_agents_sdk.scenarios.multi_agent_handoff import (
+    CONFIG_CONTENT,
     CONFIG_PATH,
     PLAN_CONTENT,
     PLAN_PATH,
@@ -105,6 +114,10 @@ from samples.openai_agents_sdk.scenarios.pause_continue import (
     STATUS_PATH,
 )
 from samples.openai_agents_sdk.scenarios.policy_recovery import (
+    EVIDENCE_CONTENT,
+    EVIDENCE_PATH,
+)
+from samples.openai_agents_sdk.scenarios.policy_recovery import (
     REPORT_CONTENT as POLICY_REPORT,
 )
 from samples.openai_agents_sdk.scenarios.policy_recovery import (
@@ -117,10 +130,24 @@ from samples.openai_agents_sdk.scenarios.quota_recovery import (
     OUTPUT_PATH as QUOTA_PATH,
 )
 from samples.openai_agents_sdk.scenarios.snapshot_branching import (
+    AGGRESSIVE_CONTENT,
     CHOICE_PATH,
+    CONSERVATIVE_CONTENT,
+)
+from samples.openai_agents_sdk.scenarios.snapshot_branching import (
+    CHECKPOINT_CONTENT as BRANCH_CHECKPOINT_CONTENT,
+)
+from samples.openai_agents_sdk.scenarios.snapshot_branching import (
+    CHECKPOINT_PATH as BRANCH_CHECKPOINT_PATH,
+)
+from samples.openai_agents_sdk.scenarios.snapshot_branching import (
+    PLAN_CONTENT as BRANCH_PLAN_CONTENT,
 )
 from samples.openai_agents_sdk.scenarios.snapshot_branching import (
     PLAN_PATH as BRANCH_PLAN_PATH,
+)
+from samples.openai_agents_sdk.scenarios.workspace_edit import (
+    EXPECTED_CONTENT as WORKSPACE_CONTENT,
 )
 from samples.openai_agents_sdk.scenarios.workspace_edit import (
     SAMPLE_PATH,
@@ -162,6 +189,167 @@ _SCENARIO_NAMES = [
     "multi-agent-handoff",
     "snapshot-branching",
 ]
+
+
+type ArtifactEvidence = tuple[str, bytes]
+
+
+@dataclass(frozen=True, slots=True)
+class ExpectedBranchEvidence:
+    name: str
+    artifacts: tuple[ArtifactEvidence, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ExpectedScenarioEvidence:
+    selected_artifacts: tuple[ArtifactEvidence, ...]
+    stage_order: tuple[str, ...]
+    branches: tuple[ExpectedBranchEvidence, ...] = ()
+    baseline_artifacts: tuple[ArtifactEvidence, ...] = ()
+    selected_branch: str | None = None
+
+
+_EXPECTED_SCENARIO_EVIDENCE: dict[str, ExpectedScenarioEvidence] = {
+    "workspace-edit": ExpectedScenarioEvidence(
+        selected_artifacts=((SAMPLE_PATH, WORKSPACE_CONTENT),),
+        stage_order=("workspace-edit",),
+    ),
+    "document-review": ExpectedScenarioEvidence(
+        selected_artifacts=(
+            (BRIEF_PATH, BRIEF_CONTENT),
+            (INSTRUCTIONS_PATH, INSTRUCTIONS_CONTENT),
+            (DRAFT_PATH, EXPECTED_DRAFT_CONTENT),
+            (DOCUMENT_REVIEW_PATH, DOCUMENT_REVIEW_CONTENT),
+        ),
+        stage_order=("document-review-editor", "document-review-reviewer"),
+    ),
+    "independent-reviewers": ExpectedScenarioEvidence(
+        selected_artifacts=(
+            (REVIEW_SOURCE_PATH, REVIEW_SOURCE_CONTENT),
+            (REVIEW_CRITERIA_PATH, REVIEW_CRITERIA_CONTENT),
+            (REVIEW_STATUS_PATH, RISK_REVIEW_STATUS),
+            (REVIEW_FINDINGS_PATH, RISK_REVIEW_CONTENT),
+        ),
+        stage_order=(
+            "independent-reviewers-baseline",
+            "independent-reviewer-risk",
+            "independent-reviewer-clarity",
+        ),
+        branches=(
+            ExpectedBranchEvidence(
+                name="risk",
+                artifacts=(
+                    (REVIEW_SOURCE_PATH, REVIEW_SOURCE_CONTENT),
+                    (REVIEW_CRITERIA_PATH, REVIEW_CRITERIA_CONTENT),
+                    (REVIEW_STATUS_PATH, RISK_REVIEW_STATUS),
+                    (REVIEW_FINDINGS_PATH, RISK_REVIEW_CONTENT),
+                ),
+            ),
+            ExpectedBranchEvidence(
+                name="clarity",
+                artifacts=(
+                    (REVIEW_SOURCE_PATH, REVIEW_SOURCE_CONTENT),
+                    (REVIEW_CRITERIA_PATH, REVIEW_CRITERIA_CONTENT),
+                    (REVIEW_STATUS_PATH, CLARITY_REVIEW_STATUS),
+                    (REVIEW_FINDINGS_PATH, CLARITY_REVIEW_CONTENT),
+                ),
+            ),
+        ),
+        baseline_artifacts=(
+            (REVIEW_SOURCE_PATH, REVIEW_SOURCE_CONTENT),
+            (REVIEW_CRITERIA_PATH, REVIEW_CRITERIA_CONTENT),
+            (REVIEW_STATUS_PATH, BASELINE_REVIEW_STATUS),
+        ),
+        selected_branch="risk",
+    ),
+    "pause-continue": ExpectedScenarioEvidence(
+        selected_artifacts=(
+            (REQUEST_PATH, REQUEST_CONTENT),
+            (STATUS_PATH, COMPLETED_STATUS),
+            (CHECKPOINT_PATH, CHECKPOINT_CONTENT),
+            (CONTINUATION_PATH, CONTINUATION_CONTENT),
+        ),
+        stage_order=("pause-continue-initial", "pause-continue-resumed"),
+    ),
+    "incident-triage": ExpectedScenarioEvidence(
+        selected_artifacts=((INCIDENT_REPORT_PATH, INCIDENT_REPORT),),
+        stage_order=("incident-triage",),
+    ),
+    "config-migration": ExpectedScenarioEvidence(
+        selected_artifacts=(
+            (API_PATH, MIGRATED_CONFIG),
+            (WORKER_PATH, MIGRATED_CONFIG),
+            (MIGRATION_REPORT_PATH, MIGRATION_REPORT),
+        ),
+        stage_order=("config-migration",),
+    ),
+    "data-pipeline": ExpectedScenarioEvidence(
+        selected_artifacts=((PIPELINE_PATH, PIPELINE_CONTENT),),
+        stage_order=("data-pipeline",),
+    ),
+    "policy-recovery": ExpectedScenarioEvidence(
+        selected_artifacts=(
+            (EVIDENCE_PATH, EVIDENCE_CONTENT),
+            (POLICY_REPORT_PATH, POLICY_REPORT),
+        ),
+        stage_order=("policy-recovery",),
+    ),
+    "quota-recovery": ExpectedScenarioEvidence(
+        selected_artifacts=((QUOTA_PATH, QUOTA_CONTENT),),
+        stage_order=("quota-recovery",),
+    ),
+    "multi-agent-handoff": ExpectedScenarioEvidence(
+        selected_artifacts=(
+            (CONFIG_PATH, CONFIG_CONTENT),
+            (PLAN_PATH, PLAN_CONTENT),
+            (REVIEW_PATH, REVIEW_CONTENT),
+        ),
+        stage_order=(
+            "multi-agent-plan",
+            "multi-agent-implement",
+            "multi-agent-review",
+        ),
+    ),
+    "snapshot-branching": ExpectedScenarioEvidence(
+        selected_artifacts=(
+            (CHOICE_PATH, AGGRESSIVE_CONTENT),
+            (BRANCH_PLAN_PATH, BRANCH_PLAN_CONTENT),
+            (BRANCH_CHECKPOINT_PATH, BRANCH_CHECKPOINT_CONTENT),
+        ),
+        stage_order=(
+            "snapshot-baseline",
+            "snapshot-conservative",
+            "snapshot-aggressive",
+        ),
+        branches=(
+            ExpectedBranchEvidence(
+                name="conservative",
+                artifacts=(
+                    (CHOICE_PATH, CONSERVATIVE_CONTENT),
+                    (BRANCH_PLAN_PATH, BRANCH_PLAN_CONTENT),
+                    (BRANCH_CHECKPOINT_PATH, BRANCH_CHECKPOINT_CONTENT),
+                ),
+            ),
+            ExpectedBranchEvidence(
+                name="aggressive",
+                artifacts=(
+                    (CHOICE_PATH, AGGRESSIVE_CONTENT),
+                    (BRANCH_PLAN_PATH, BRANCH_PLAN_CONTENT),
+                    (BRANCH_CHECKPOINT_PATH, BRANCH_CHECKPOINT_CONTENT),
+                ),
+            ),
+        ),
+        baseline_artifacts=(),
+        selected_branch="aggressive",
+    ),
+}
+
+
+@dataclass(frozen=True, slots=True)
+class ReplacementResumeCancellationState:
+    created_handles: tuple[SandboxHandle, ...]
+    deleted_handles: tuple[SandboxHandle, ...]
+    source_backend_missing: bool
 
 
 class RecordingService:
@@ -224,6 +412,34 @@ class MissingSnapshotStore(RecordingSnapshotStore):
         raise SnapshotNotFound(f"snapshot {snapshot_ref.snapshot_id} is unavailable")
 
 
+class CancelOnReplacementResumeLoadSnapshotStore(RecordingSnapshotStore):
+    def __init__(
+        self,
+        delegate: FactorySnapshotStore,
+        service: RecordingService,
+    ) -> None:
+        super().__init__(delegate)
+        self.service = service
+        self.state_at_cancellation: ReplacementResumeCancellationState | None = None
+
+    async def load(self, snapshot_ref: SnapshotRef) -> SandboxSnapshot:
+        self.load_calls += 1
+        created_handles = tuple(self.service.created_handles)
+        deleted_handles = tuple(self.service.deleted_handles)
+        if len(created_handles) == 1 and created_handles[0] in deleted_handles:
+            source_handle = created_handles[0]
+            try:
+                await self.service.delegate.get_session(source_handle)
+            except SandboxNotFound:
+                self.state_at_cancellation = ReplacementResumeCancellationState(
+                    created_handles=created_handles,
+                    deleted_handles=deleted_handles,
+                    source_backend_missing=True,
+                )
+                raise asyncio.CancelledError() from None
+        return await self.delegate.load(snapshot_ref)
+
+
 class RecordingModelClient:
     def __init__(self) -> None:
         self.closed = False
@@ -248,8 +464,10 @@ class DeterministicScenarioModel(Model):
         )
         self.pause_continue_boundary: Literal["invalid-checkpoint"] | None = pause_continue_boundary
         self.boundary_output: dict[str, Any] | None = None
+        self.failed_tool_outputs: dict[str, dict[str, Any]] = {}
         self.calls: dict[str, int] = {}
         self.initial_inputs: dict[str, str | list[TResponseInputItem]] = {}
+        self.stage_order: list[str] = []
         self.tool_names: list[list[str]] = []
 
     async def get_response(
@@ -280,6 +498,7 @@ class DeterministicScenarioModel(Model):
         self.calls[stage_key] = call
         if call == 1:
             self.initial_inputs[stage_key] = input
+            self.stage_order.append(stage_key)
         if self.failure is not None and (
             self.failure_stage is None or self.failure_stage == stage_key
         ):
@@ -289,6 +508,8 @@ class DeterministicScenarioModel(Model):
             or (self.document_review_boundary == "stale-hash" and call == 5)
         ):
             self.boundary_output = _latest_tool_output(input)
+        if stage_key in {"policy-recovery", "quota-recovery"} and call == 2:
+            self.failed_tool_outputs[stage_key] = _latest_tool_output(input)
         self.tool_names.append([tool.name for tool in tools])
         output = _scripted_output(
             stage_key,
@@ -594,7 +815,7 @@ def _scripted_output(
             return [_execute("denied_cat", "cat /workspace/evidence/audit.log")]
         if call == 2:
             assert _latest_tool_output(input)["ok"] is False
-            return [_read("read_evidence", "/workspace/evidence/audit.log")]
+            return [_read("read_evidence", EVIDENCE_PATH)]
         if call == 3:
             return [
                 _write(
@@ -906,6 +1127,7 @@ async def test_azure_model_composition_requires_no_network() -> None:
 
 def test_registry_and_parser_expose_all_scenarios() -> None:
     assert [scenario.name for scenario in list_scenarios()] == _SCENARIO_NAMES
+    assert list(_EXPECTED_SCENARIO_EVIDENCE) == _SCENARIO_NAMES
     assert build_parser().parse_args([]).scenario == "workspace-edit"
     args = build_parser().parse_args(
         [
@@ -1043,6 +1265,7 @@ async def test_registered_scenario_runs_without_network_and_cleans_backends(
     scenario_name: str,
 ) -> None:
     scenario = get_scenario(scenario_name)
+    expected = _EXPECTED_SCENARIO_EVIDENCE[scenario_name]
     bundle = create_sample_service_bundle(policy_engine=scenario.policy_engine_factory())
     service = RecordingService(bundle.service)
     model = DeterministicScenarioModel()
@@ -1057,18 +1280,56 @@ async def test_registered_scenario_runs_without_network_and_cleans_backends(
 
         assert result.scenario_name == scenario_name
         assert result.artifacts
+        assert (
+            tuple((artifact.path, artifact.content) for artifact in result.artifacts)
+            == expected.selected_artifacts
+        )
         assert all(names == _EXPECTED_TOOLS for names in model.tool_names)
-        if isinstance(scenario, SnapshotBranchingScenario):
-            assert result.selected_branch == scenario.selected_branch
-            assert len(result.branch_results) == len(scenario.branches)
-            expected_handles = 3 + bool(scenario.baseline_expected_artifacts)
+        if expected.branches:
+            assert isinstance(scenario, SnapshotBranchingScenario)
+            assert expected.selected_branch is not None
+            assert result.selected_branch == expected.selected_branch
+            assert (
+                tuple(
+                    ExpectedBranchEvidence(
+                        name=branch_result.name,
+                        artifacts=tuple(
+                            (artifact.path, artifact.content)
+                            for artifact in branch_result.artifacts
+                        ),
+                    )
+                    for branch_result in result.branch_results
+                )
+                == expected.branches
+            )
+            assert (
+                tuple(branch_result.output for branch_result in result.branch_results)
+                == (result.stage_outputs[1:])
+            )
+            assert (
+                tuple((artifact.path, artifact.content) for artifact in result.baseline_artifacts)
+                == expected.baseline_artifacts
+            )
+            selected_index = next(
+                index
+                for index, branch_result in enumerate(result.branch_results)
+                if branch_result.name == expected.selected_branch
+            )
+            selected_result = result.branch_results[selected_index]
+            assert result.artifacts == selected_result.artifacts
+            assert selected_result.output == result.stage_outputs[selected_index + 1]
+            expected_handles = 1 + len(expected.branches) + bool(expected.baseline_artifacts)
             assert len(service.created_handles) == expected_handles
         elif isinstance(scenario, PauseContinueScenario):
+            assert expected.selected_branch is None
             assert result.resume_evidence is not None
             assert len(service.created_handles) == 2
         else:
+            assert isinstance(scenario, StagedScenario)
+            assert expected.selected_branch is None
             assert result.selected_branch is None
             assert len(service.created_handles) == 1
+        assert tuple(model.stage_order) == expected.stage_order
         await _assert_backends_deleted(service)
     finally:
         await service.close()
@@ -1188,6 +1449,51 @@ async def test_document_review_reviewer_failure_preserves_editor_work_and_cleans
             "document-review-editor": 6,
             "document-review-reviewer": 1,
         }
+        await _assert_backends_deleted(service)
+    finally:
+        await service.close()
+
+
+@pytest.mark.asyncio
+async def test_multi_agent_handoff_failure_preserves_plan_and_skips_reviewer() -> None:
+    scenario = get_scenario("multi-agent-handoff")
+    assert isinstance(scenario, StagedScenario)
+    config_entry = scenario.manifest_factory().entries["app.conf"]
+    assert isinstance(config_entry, File)
+    bundle = create_sample_service_bundle(policy_engine=scenario.policy_engine_factory())
+    service = RecordingService(bundle.service)
+    model = DeterministicScenarioModel(
+        failure=RuntimeError("implementation dependency failed"),
+        failure_stage="multi-agent-implement",
+    )
+    inspected: dict[str, bytes] = {}
+
+    async def inspect(context: InspectionContext, session: SandboxSession) -> None:
+        assert isinstance(context.error, RuntimeError)
+        inspected["plan"] = (await session.read_bytes(ReadBytesRequest(path=PLAN_PATH))).content
+        inspected["config"] = (await session.read_bytes(ReadBytesRequest(path=CONFIG_PATH))).content
+
+    try:
+        with pytest.raises(RuntimeError, match="implementation dependency failed"):
+            await run_scenario(
+                model=model,
+                service=service,
+                scenario=scenario,
+                inspector=inspect,
+                inspect_on_failure=True,
+            )
+
+        assert inspected == {
+            "plan": PLAN_CONTENT,
+            "config": config_entry.content,
+        }
+        assert model.stage_order == ["multi-agent-plan", "multi-agent-implement"]
+        assert model.calls == {
+            "multi-agent-plan": 2,
+            "multi-agent-implement": 1,
+        }
+        assert "multi-agent-review" not in model.calls
+        assert len(service.created_handles) == 1
         await _assert_backends_deleted(service)
     finally:
         await service.close()
@@ -1465,6 +1771,42 @@ async def test_pause_continue_missing_saved_state_fails_before_replacement_alloc
 
 
 @pytest.mark.asyncio
+async def test_pause_continue_cancellation_during_replacement_resume_load_cleans_source() -> None:
+    scenario = get_scenario("pause-continue")
+    assert isinstance(scenario, PauseContinueScenario)
+    bundle = create_sample_service_bundle(policy_engine=scenario.policy_engine_factory())
+    service = RecordingService(bundle.service)
+    snapshot_store = CancelOnReplacementResumeLoadSnapshotStore(
+        bundle.snapshot_store,
+        service,
+    )
+    model = DeterministicScenarioModel()
+    try:
+        with pytest.raises(asyncio.CancelledError):
+            await run_scenario(
+                model=model,
+                service=service,
+                scenario=scenario,
+                snapshot_store=snapshot_store,
+                clock=bundle.clock,
+            )
+
+        assert model.stage_order == ["pause-continue-initial"]
+        assert model.calls == {"pause-continue-initial": 6}
+        state = snapshot_store.state_at_cancellation
+        assert state is not None
+        assert len(state.created_handles) == 1
+        source_handle = state.created_handles[0]
+        assert set(state.deleted_handles) == {source_handle}
+        assert state.source_backend_missing is True
+        assert service.created_handles == [source_handle]
+        assert set(service.deleted_handles) == {source_handle}
+        await _assert_backends_deleted(service)
+    finally:
+        await service.close()
+
+
+@pytest.mark.asyncio
 async def test_inspect_runs_on_success_against_same_session() -> None:
     scenario = get_scenario("workspace-edit")
     delegate = create_sample_service()
@@ -1577,6 +1919,123 @@ async def test_snapshot_failure_inspects_baseline_before_cleanup() -> None:
 
 
 @pytest.mark.asyncio
+async def test_snapshot_branching_fork_failure_preserves_completed_sibling_and_cleans_up() -> None:
+    scenario = get_scenario("snapshot-branching")
+    assert isinstance(scenario, SnapshotBranchingScenario)
+    manifest = scenario.manifest_factory()
+    choice_entry = manifest.entries["choice.txt"]
+    plan_entry = manifest.entries["branch-plan.txt"]
+    assert isinstance(choice_entry, File)
+    assert isinstance(plan_entry, File)
+    branches = {branch.name: branch for branch in scenario.branches}
+    conservative_expected = {
+        artifact.path: artifact.content for artifact in branches["conservative"].expected_artifacts
+    }
+    failing_expected = {
+        CHOICE_PATH: choice_entry.content,
+        BRANCH_PLAN_PATH: plan_entry.content,
+        **{artifact.path: artifact.content for artifact in scenario.checkpoint_artifacts},
+    }
+    bundle = create_sample_service_bundle(policy_engine=scenario.policy_engine_factory())
+    service = RecordingService(bundle.service)
+    model = DeterministicScenarioModel(
+        failure=RuntimeError("aggressive branch dependency failed"),
+        failure_stage="snapshot-aggressive",
+    )
+    inspected: dict[str, dict[str, bytes]] = {}
+    inspected_handles: list[SandboxHandle] = []
+
+    async def inspect(context: InspectionContext, session: SandboxSession) -> None:
+        assert isinstance(context.error, RuntimeError)
+        assert len(service.created_handles) == 3
+        source_handle, conservative_handle, aggressive_handle = service.created_handles
+        with pytest.raises(SandboxNotFound):
+            await service.delegate.get_session(source_handle)
+        conservative_session = await service.delegate.get_session(conservative_handle)
+        aggressive_session = await service.delegate.get_session(aggressive_handle)
+        assert session.session_id == aggressive_session.session_id
+        assert session.session_id != conservative_session.session_id
+        inspected_handles.extend((conservative_handle, aggressive_handle))
+        inspected["completed"] = {
+            path: (await conservative_session.read_bytes(ReadBytesRequest(path=path))).content
+            for path in conservative_expected
+        }
+        inspected["failing"] = {
+            path: (await session.read_bytes(ReadBytesRequest(path=path))).content
+            for path in failing_expected
+        }
+
+    try:
+        with pytest.raises(RuntimeError, match="aggressive branch dependency failed"):
+            await run_scenario(
+                model=model,
+                service=service,
+                scenario=scenario,
+                inspector=inspect,
+                inspect_on_failure=True,
+                snapshot_store=bundle.snapshot_store,
+                clock=bundle.clock,
+            )
+
+        assert inspected == {
+            "completed": conservative_expected,
+            "failing": failing_expected,
+        }
+        assert inspected_handles == service.created_handles[1:]
+        assert model.stage_order == [
+            "snapshot-baseline",
+            "snapshot-conservative",
+            "snapshot-aggressive",
+        ]
+        assert model.calls == {
+            "snapshot-baseline": 2,
+            "snapshot-conservative": 3,
+            "snapshot-aggressive": 1,
+        }
+        assert len({str(handle) for handle in service.created_handles}) == 3
+        await _assert_backends_deleted(service)
+    finally:
+        await service.close()
+
+
+@pytest.mark.asyncio
+async def test_snapshot_branching_cancellation_at_aggressive_branch_cleans_all_backends() -> None:
+    scenario = get_scenario("snapshot-branching")
+    assert isinstance(scenario, SnapshotBranchingScenario)
+    bundle = create_sample_service_bundle(policy_engine=scenario.policy_engine_factory())
+    service = RecordingService(bundle.service)
+    model = DeterministicScenarioModel(
+        failure=asyncio.CancelledError(),
+        failure_stage="snapshot-aggressive",
+    )
+    try:
+        with pytest.raises(asyncio.CancelledError):
+            await run_scenario(
+                model=model,
+                service=service,
+                scenario=scenario,
+                snapshot_store=bundle.snapshot_store,
+                clock=bundle.clock,
+            )
+
+        assert model.stage_order == [
+            "snapshot-baseline",
+            "snapshot-conservative",
+            "snapshot-aggressive",
+        ]
+        assert model.calls == {
+            "snapshot-baseline": 2,
+            "snapshot-conservative": 3,
+            "snapshot-aggressive": 1,
+        }
+        assert len(service.created_handles) == 3
+        assert len({str(handle) for handle in service.created_handles}) == 3
+        await _assert_backends_deleted(service)
+    finally:
+        await service.close()
+
+
+@pytest.mark.asyncio
 async def test_snapshot_success_inspects_selected_branch() -> None:
     scenario = get_scenario("snapshot-branching")
     bundle = create_sample_service_bundle()
@@ -1612,8 +2071,9 @@ async def test_snapshot_success_inspects_selected_branch() -> None:
 
 
 @pytest.mark.asyncio
-async def test_policy_recovery_allows_post_run_inspection_commands() -> None:
+async def test_policy_recovery_retains_structured_denial_and_exact_recovery() -> None:
     scenario = get_scenario("policy-recovery")
+    assert isinstance(scenario, StagedScenario)
     bundle = create_sample_service_bundle(policy_engine=scenario.policy_engine_factory())
     service = RecordingService(bundle.service)
     model = DeterministicScenarioModel()
@@ -1629,7 +2089,7 @@ async def test_policy_recovery_allows_post_run_inspection_commands() -> None:
         )
 
     try:
-        await run_scenario(
+        result = await run_scenario(
             model=model,
             service=service,
             scenario=scenario,
@@ -1639,7 +2099,74 @@ async def test_policy_recovery_allows_post_run_inspection_commands() -> None:
             clock=bundle.clock,
         )
 
-        assert "event=credential-probe\nstatus=contained\n" in cli_output.getvalue()
+        failed_output = model.failed_tool_outputs["policy-recovery"]
+        assert failed_output["ok"] is False
+        error = failed_output["error"]
+        assert isinstance(error, dict)
+        assert {
+            "category": error["category"],
+            "code": error["code"],
+            "correctable": error["correctable"],
+            "message": error["message"],
+            "retryable": error["retryable"],
+        } == {
+            "category": "policy_denied",
+            "code": "session_policy_denied",
+            "correctable": False,
+            "message": "policy denied execute: sample_execute_denied",
+            "retryable": False,
+        }
+        assert [(artifact.path, artifact.content) for artifact in result.artifacts] == [
+            (artifact.path, artifact.content) for artifact in scenario.expected_artifacts
+        ]
+        artifacts = {artifact.path: artifact.content for artifact in result.artifacts}
+        assert artifacts[EVIDENCE_PATH] == EVIDENCE_CONTENT
+        assert artifacts[POLICY_REPORT_PATH] == POLICY_REPORT
+        assert EVIDENCE_CONTENT.decode() in cli_output.getvalue()
+        await _assert_backends_deleted(service)
+    finally:
+        await service.close()
+
+
+@pytest.mark.asyncio
+async def test_quota_recovery_retains_structured_bound_and_exact_compact_retry() -> None:
+    scenario = get_scenario("quota-recovery")
+    assert isinstance(scenario, StagedScenario)
+    bundle = create_sample_service_bundle(policy_engine=scenario.policy_engine_factory())
+    service = RecordingService(bundle.service)
+    model = DeterministicScenarioModel()
+    try:
+        result = await run_scenario(
+            model=model,
+            service=service,
+            scenario=scenario,
+            snapshot_store=bundle.snapshot_store,
+            clock=bundle.clock,
+        )
+
+        failed_output = model.failed_tool_outputs["quota-recovery"]
+        assert failed_output["ok"] is False
+        error = failed_output["error"]
+        assert isinstance(error, dict)
+        assert {
+            "category": error["category"],
+            "code": error["code"],
+            "correctable": error["correctable"],
+            "message": error["message"],
+            "retryable": error["retryable"],
+        } == {
+            "category": "quota_exceeded",
+            "code": "file_size_limit_exceeded",
+            "correctable": True,
+            "message": "file contains 100 bytes; limit is 64 bytes",
+            "retryable": False,
+        }
+        assert scenario.options_factory().workspace_limits.max_file_bytes == 64
+        assert [(artifact.path, artifact.content) for artifact in result.artifacts] == [
+            (artifact.path, artifact.content) for artifact in scenario.expected_artifacts
+        ]
+        artifacts = {artifact.path: artifact.content for artifact in result.artifacts}
+        assert artifacts[QUOTA_PATH] == QUOTA_CONTENT
         await _assert_backends_deleted(service)
     finally:
         await service.close()

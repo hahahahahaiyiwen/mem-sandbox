@@ -1256,7 +1256,7 @@ direction visible without claiming unimplemented capabilities.
 
 #### 7.3 Behavior evidence and workflow evaluation
 
-- [ ] **7.3.1** Add deterministic model-double coverage for each showcase: success,
+- [x] **7.3.1** Add deterministic model-double coverage for each showcase: success,
   stale/rejected mutation, dependency failure, bounds, cancellation, and cleanup where
   applicable. Verify artifacts and interactions rather than accepting model prose.
 - [ ] **7.3.2** Run opt-in live evaluations on representative document and guarded-edit
