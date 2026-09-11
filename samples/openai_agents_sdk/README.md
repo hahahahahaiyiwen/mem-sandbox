@@ -10,6 +10,7 @@ and exact host verification.
 |---|---|
 | Run a maintained live scenario | Continue with this sample guide, then select the [official OpenAI](./providers/openai/README.md) or [Azure OpenAI](./providers/azure_openai/README.md) provider. |
 | Embed MemSandbox in an application | Follow the [reader-first `SandboxAgent` integration guide](../../packages/openai-agents/README.md#use-with-sandboxagent). |
+| Add an ordinary application tool | Follow the installed-package [host-tool composition example](../../packages/openai-agents/README.md#compose-with-a-host-owned-function-tool). |
 | Understand or extend the adapter | Read the integration [engineering reference](../../packages/openai-agents/README.md#engineering-reference). |
 | Inspect framework-neutral service composition | Read the [shared sample utilities](../shared/README.md) and their [composition root](../shared/service.py). |
 
@@ -185,9 +186,17 @@ credentials or network access.
   running a continuation agent with no prior conversation.
 - Every SDK session and backend handle is cleaned up on success, failure, or
   cancellation.
+- Every maintained run rejects tool-name collisions instead of accepting the SDK's
+  warning-and-winner default.
 - SDK-independent inspection uses the same live MemSandbox session and never invokes a
   host shell.
 - Required tests use deterministic `Model` doubles and do not call a live provider.
+
+The maintained scenarios intentionally expose only the four MemSandbox tools. The
+installed-package composition example demonstrates a separate application-owned
+`FunctionTool`; it passes only typed host input, opts into strict tool-name collision
+handling, and does not restore the SDK's default filesystem, shell, or compaction
+capabilities.
 
 See the [scenario design](./scenarios/README.md) for scenario-specific ownership.
 

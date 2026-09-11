@@ -1238,7 +1238,7 @@ direction visible without claiming unimplemented capabilities.
 - [x] **7.2.1** Reconcile the declared OpenAI SDK support range with exercised versions
   and contract checks; document tested versions and explicit unsupported behavior.
   Treat compatibility maintenance as recurring release work, not a one-time milestone.
-- [ ] **7.2.2** Demonstrate composition of the workspace capability with an ordinary
+- [x] **7.2.2** Demonstrate composition of the workspace capability with an ordinary
   host-owned tool and evaluate any additional SDK capability separately. Do not enable
   default shell/filesystem tools implicitly; document permissions, conflicts, and
   provider requirements. Keep conversation compaction outside the framework-neutral core.
@@ -1277,7 +1277,7 @@ direction visible without claiming unimplemented capabilities.
   and preserve existing sample names and behavior.
 - [ ] **7.9.2** Required tests remain deterministic and network-free; live evaluation
   requirements, costs, and limitations are explicit.
-- [ ] **7.9.3** Installed-package and supported SDK composition paths are documented
+- [x] **7.9.3** Installed-package and supported SDK composition paths are documented
   and exercised without implying full-shell compatibility.
 - [ ] **7.9.4** Current capabilities, future extensions, and evidence-based next
   priorities are distinguishable in public documentation.
