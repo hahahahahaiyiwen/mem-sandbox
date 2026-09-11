@@ -50,6 +50,7 @@ jobs:
         run: uv run pytest -m "not benchmark_smoke"
         env:
           HYPOTHESIS_PROFILE: ci
+          MEM_SANDBOX_OPENAI_AGENTS_TEST_VERSIONS: "0.22.0,0.22.2"
 
       - name: Benchmark smoke
         run: uv run pytest -m benchmark_smoke

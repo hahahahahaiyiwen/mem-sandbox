@@ -69,6 +69,25 @@ receives only `contents: read` and `id-token: write`; the separate build job can
 request an OIDC token. A pending adapter publisher must be configured and the canonical
 PyPI name rechecked before its first release.
 
+### OpenAI Agents SDK compatibility gate
+
+Every adapter release retains the exact SDK lower bound and reruns each patch listed in
+the adapter README's exercised-version matrix. The default command builds both
+distributions, installs them without editable or checkout imports, runs `pip check`, and
+executes the model-free SDK and document-review probe:
+
+```console
+uv run pytest tests/integrations/openai_agents/test_distribution_artifacts.py
+```
+
+To evaluate a new patch, set `MEM_SANDBOX_OPENAI_AGENTS_TEST_VERSIONS` to a
+comma-separated list containing `0.22.0` and the candidate. If it passes, add the version
+to the default test constant, the Quality workflow value, and the adapter compatibility
+matrix in the same change. Review SDK abstract methods, signatures, state/run
+configuration, lifecycle, serialization, capability binding, and snapshot changes
+before widening the SDK upper bound; do not infer wider support from dependency
+resolution alone.
+
 To publish:
 
 1. Merge the release changes and a unique semantic version in the selected package's
@@ -78,8 +97,23 @@ To publish:
    commit.
 4. Publish a GitHub release for that tag.
 5. Approve the selected environment deployment after reviewing its isolated artifacts.
-6. Install the exact version from PyPI in a clean environment and verify its public
-   imports.
+6. Install the exact version from PyPI in a clean environment, run `pip check`, and
+   verify its public imports and supported SDK version.
+
+For the post-publication adapter check, copy
+`tests/integrations/openai_agents/installed_package_probe.py` to a temporary directory
+outside the checkout and run it with the environment's Python:
+
+```console
+python -I installed_package_probe.py \
+  --expected-core-version <core-version> \
+  --expected-adapter-version <adapter-version> \
+  --expected-sdk-version <sdk-version>
+```
+
+Run this once for every exercised SDK row. Preserve its JSON output with the release
+evidence. The probe performs no model-network calls; a package-CDN download failure is a
+retrieval failure and must not be reported as SDK incompatibility.
 
 The release workflow rejects a tag that does not exactly match the selected package
 version and publishes only that package's wheel and source distribution. When both

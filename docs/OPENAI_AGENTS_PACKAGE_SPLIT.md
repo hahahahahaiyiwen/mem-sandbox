@@ -1,6 +1,7 @@
 # Core and OpenAI Agents Package Split
 
-**Status:** Implemented for issue #67; publication remains maintainer-controlled
+**Status:** Implemented and published for issue #67; compatibility maintenance continues
+under issue #73
 
 **Decision date:** 2026-09-10
 
@@ -91,7 +92,7 @@ repository examples rather than installed modules in either distribution.
 
 ## Dependency bounds
 
-The first adapter release will publish these runtime requirements:
+The first adapter release publishes these runtime requirements:
 
 ```toml
 requires-python = ">=3.12"
@@ -112,11 +113,12 @@ dependencies = [
 The core will continue to publish `dependencies = []`. Transitive availability through
 `openai-agents` is not a substitute for the adapter's direct Pydantic declaration.
 
-Required adapter validation will retain `openai-agents==0.22.0` and exercise
-`pydantic==2.12.2` as the lower-bound pair. Built-artifact tests must also install the
-adapter with the built core artifact from the same commit. The normal locked development
-environment may resolve newer versions inside the published bounds, but that does not
-expand either declared range.
+Required adapter validation retains `openai-agents==0.22.0` and
+`pydantic==2.12.2` as the lower-bound pair. It also maintains an explicit matrix of SDK
+patches exercised from installed artifacts; issue #73 adds `0.22.2`. Built-artifact tests
+install the adapter with the built core artifact from the same commit. The normal locked
+development environment or an unrecorded successful patch run does not expand either
+declared range.
 
 Core `0.3` or OpenAI Agents SDK `0.23` support requires a reviewed adapter release. A
 core-only patch inside `0.2.x` or an adapter-only patch does not require synchronized
@@ -223,3 +225,12 @@ combined layout. The repository now:
 The implementation updates imports, source-root checks, Ruff/Pyright inputs, CI, and
 release routing in the same migration. Publication and Trusted Publisher configuration
 remain explicitly outside issue #67.
+
+Issue #73 extends this evidence without changing package boundaries or dependency
+ranges. A standalone probe copied outside the checkout now checks exact distribution
+versions, public namespace ownership, dependency consistency, client/session lifecycle,
+the four-tool SDK `Runner` loop, JSON-safe snapshot state, replacement resume, the
+deterministic document-review editor/reviewer workflow, and cleanup. The default CI
+matrix exercises SDK `0.22.0` and `0.22.2`; other patches inside the declared range
+remain declared but not individually exercised until the matrix and adapter README are
+updated.
