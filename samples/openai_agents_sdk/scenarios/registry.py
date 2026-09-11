@@ -16,6 +16,9 @@ from samples.openai_agents_sdk.scenarios.independent_reviewers import (
 from samples.openai_agents_sdk.scenarios.multi_agent_handoff import (
     SCENARIO as MULTI_AGENT_HANDOFF,
 )
+from samples.openai_agents_sdk.scenarios.pause_continue import (
+    SCENARIO as PAUSE_CONTINUE,
+)
 from samples.openai_agents_sdk.scenarios.policy_recovery import (
     SCENARIO as POLICY_RECOVERY,
 )
@@ -34,6 +37,7 @@ _SCENARIOS = (
     WORKSPACE_EDIT,
     DOCUMENT_REVIEW,
     INDEPENDENT_REVIEWERS,
+    PAUSE_CONTINUE,
     INCIDENT_TRIAGE,
     CONFIG_MIGRATION,
     DATA_PIPELINE,

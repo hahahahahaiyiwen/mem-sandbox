@@ -14,6 +14,7 @@ _SCENARIO_NAMES = [
     "workspace-edit",
     "document-review",
     "independent-reviewers",
+    "pause-continue",
     "incident-triage",
     "config-migration",
     "data-pipeline",

@@ -8,6 +8,7 @@ from samples.openai_agents_sdk.application import (
 )
 from samples.openai_agents_sdk.runner import (
     InspectionContext,
+    ResumeLifecycleEvidence,
     ScenarioResult,
     VerifiedArtifact,
     VerifiedBranchResult,
@@ -25,6 +26,7 @@ __all__ = [
     "AsyncModelClient",
     "InspectionContext",
     "ModelFactory",
+    "ResumeLifecycleEvidence",
     "SampleServiceBundle",
     "ScenarioResult",
     "VerifiedArtifact",

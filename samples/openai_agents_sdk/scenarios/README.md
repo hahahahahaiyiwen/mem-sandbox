@@ -11,7 +11,8 @@ The shared runner owns:
 - one injected Agents SDK `Model`;
 - SDK session creation and capability binding;
 - bounded sequential agent stages;
-- snapshot-fork lifecycle, complete branch collection, and host selection;
+- snapshot-fork and pause/continue lifecycle, complete branch collection, and host
+  selection;
 - host-side artifact verification;
 - success/failure inspection callbacks;
 - cleanup of every SDK session and backend handle.
@@ -23,6 +24,7 @@ The shared runner owns:
 | Minimal file-tool smoke test | `workspace-edit`, single stage | One guarded status-file edit |
 | Guarded document revision and review | `document-review`, editor then reviewer | Preserved inputs, corrected draft, and evidence report |
 | Independent review perspectives | `independent-reviewers`, baseline plus reviewer forks | Unchanged baseline, isolated review results, and one host-selected fork |
+| Pause and continue work | `pause-continue`, initial run then replacement resume | JSON-safe state, restored checkpoint, and final result |
 | Search supplied logs | `incident-triage`, single stage | Incident report |
 | Atomic configuration migration | `config-migration`, single stage | Two configs and migration report |
 | Deterministic data transformation | `data-pipeline`, single stage | Event-count artifact |
@@ -87,8 +89,33 @@ The existing `snapshot-branching` scenario remains the smaller generic alternati
 example. `multi-agent-handoff` is intentionally different: its planner, implementer, and
 reviewer run sequentially in one shared session.
 
+## `pause-continue` contract
+
+The initial agent discovers a release request, patches the workflow status, and writes a
+self-contained checkpoint. The host verifies the source, paused status, and checkpoint
+bytes before any state is published. It then resumes while the original backend is
+available and asserts that this live reattachment uses the same handle and workspace.
+
+The host explicitly calls `stop()` to persist the workspace, serializes
+`InMemorySandboxSessionState` to JSON, deserializes it through the adapter, and deletes
+the original backend. The next `resume()` must therefore allocate a distinct handle and
+restore the retained snapshot. The runner verifies the checkpoint bytes immediately
+after restoration and before starting the continuation task.
+
+The continuation is a new `SandboxAgent` and `Runner.run` call. It receives no previous
+conversation or model final response; its prompt directs it to read the checkpoint as
+the only cross-run task context. Exact final verification proves that the source and
+checkpoint were preserved and that the resumed status and result were produced.
+
+Missing snapshots fail before replacement allocation. Continuation failures remain
+inspectable against the restored workspace, and cleanup deletes every source alias and
+replacement handle. Snapshot-store construction, state custody, retention, and service
+lifetime remain host responsibilities. The sample store is process-local and demonstrates
+same-process continuation, not recovery after process loss.
+
 ## Maintenance
 
 Prefer data-driven `StagedScenario` definitions. Add specialized runner behavior only
-when lifecycle semantics differ, as with `SnapshotBranchingScenario`. Do not add tasks
-that imply arbitrary Python, Git, network, or host-shell execution.
+when lifecycle semantics differ, as with `SnapshotBranchingScenario` and
+`PauseContinueScenario`. Do not add tasks that imply arbitrary Python, Git, network, or
+host-shell execution.

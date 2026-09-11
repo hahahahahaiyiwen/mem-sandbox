@@ -77,6 +77,33 @@ live workspace.
 The in-memory snapshot store supports this same-process workflow only. A live run still
 requires provider network access and may be billable.
 
+## Run pause and continue
+
+Use either provider entry point with the `pause-continue` scenario:
+
+```console
+uv run python -m samples.openai_agents_sdk.providers.openai \
+  --scenario pause-continue \
+  --inspect
+```
+
+The first fresh agent reads a release request, applies a hash-guarded paused status, and
+writes a complete checkpoint artifact. Host code verifies those exact bytes, demonstrates
+that resume reattaches to the same handle while it is live, and calls `stop()` before
+serializing the resulting `InMemorySandboxSessionState` through a JSON round trip.
+
+The host then deletes the original backend and resumes that saved state. Because the
+original handle is unavailable, the adapter allocates a distinct replacement and restores
+the retained snapshot before a second fresh agent starts. The continuation receives no
+prior model conversation or final prose; it discovers all cross-run task context by
+reading the restored workspace checkpoint. Host code verifies both the preserved
+checkpoint and final result.
+
+`--inspect` opens the replacement workspace after verification. Snapshot construction,
+state custody, retention, backend deletion, and service cleanup remain host-owned. The
+sample's bounded in-memory store supports same-process continuation only; it does not
+provide process-loss durability.
+
 ## Choose a scenario
 
 `workspace-edit` remains the command-line default and smallest integration smoke test.
@@ -86,6 +113,7 @@ Use `document-review` for the representative end-to-end workflow.
 |---|---|---|
 | Review and correct a document | `document-review` | Corrected draft plus path-linked findings |
 | Compare independent reviewers | `independent-reviewers` | Verified risk and clarity forks plus one host-selected result |
+| Pause and continue in a fresh run | `pause-continue` | Verified checkpoint, JSON-safe state, and restored final result |
 | Check basic file-tool wiring | `workspace-edit` | One guarded status-file edit |
 | Search supplied operational evidence | `incident-triage` | Incident report derived from seeded logs |
 | Migrate related configuration | `config-migration` | Two updated configs plus migration report |
@@ -106,7 +134,7 @@ The package owns:
 - scenario manifests, prompts, stages, policies, limits, and expected artifacts;
 - `SandboxAgent` construction and `InMemorySandboxCapability` binding;
 - SDK session and provider-client lifecycle;
-- snapshot branching, complete branch collection, host selection, and verification;
+- snapshot branching, pause/continue state transfer, host selection, and verification;
 - shared provider command-line arguments;
 - provider-client cleanup coordination.
 
@@ -152,6 +180,9 @@ credentials or network access.
 - `independent-reviewers` gives each reviewer a distinct snapshot-backed workspace,
   verifies every result and the unchanged baseline, and returns only the branch selected
   by host configuration; it performs no automatic merge.
+- `pause-continue` verifies the checkpoint before persistence, serializes state only
+  after a successful stop, deletes the source backend, and verifies restored bytes before
+  running a continuation agent with no prior conversation.
 - Every SDK session and backend handle is cleaned up on success, failure, or
   cancellation.
 - SDK-independent inspection uses the same live MemSandbox session and never invokes a

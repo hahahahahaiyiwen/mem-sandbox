@@ -1224,7 +1224,7 @@ direction visible without claiming unimplemented capabilities.
   one baseline. Prove that one reviewer's edits cannot alter another fork or the
   baseline; the host explicitly collects/selects outputs. Do not imply automatic merging
   or confuse this with the existing shared-session handoff example.
-- [ ] **7.1.3** Demonstrate pause/continue across separate agent runs using saved
+- [x] **7.1.3** Demonstrate pause/continue across separate agent runs using saved
   workspace state. Explain live reattachment versus replacement from a snapshot, host
   ownership of snapshot retention, and separate conversation/runner state. Do not claim
   process-loss durability from an in-memory store.

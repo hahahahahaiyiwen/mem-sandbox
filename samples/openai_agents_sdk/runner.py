@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import io
+import json
 import sys
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 from uuid import UUID
 
 from agents import RunConfig, Runner
@@ -26,6 +28,7 @@ from mem_sandbox_openai_agents import (
 from samples.openai_agents_sdk.scenarios import (
     AgentStage,
     ArtifactExpectation,
+    PauseContinueScenario,
     ScenarioDefinition,
     SnapshotBranchingScenario,
     StagedScenario,
@@ -53,6 +56,16 @@ class VerifiedBranchResult:
 
 
 @dataclass(frozen=True, slots=True)
+class ResumeLifecycleEvidence:
+    """Host-observed identities and JSON-safe state for a pause/continue run."""
+
+    saved_state_json: str
+    source_handle: str
+    live_reattached_handle: str
+    replacement_handle: str
+
+
+@dataclass(frozen=True, slots=True)
 class ScenarioResult:
     """Verified outputs, collected branches, and host selection from one scenario."""
 
@@ -62,6 +75,7 @@ class ScenarioResult:
     selected_branch: str | None = None
     branch_results: tuple[VerifiedBranchResult, ...] = ()
     baseline_artifacts: tuple[VerifiedArtifact, ...] = ()
+    resume_evidence: ResumeLifecycleEvidence | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,6 +112,7 @@ async def run_scenario(
         clock=clock,
     )
     sessions: list[OpenAISandboxSession] = []
+    discard_before_close: list[OpenAISandboxSession] = []
     active_session: OpenAISandboxSession | None = None
     inspection_attempted = False
     try:
@@ -118,7 +133,7 @@ async def run_scenario(
                 stage_outputs=stage_outputs,
                 artifacts=artifacts,
             )
-        else:
+        elif isinstance(scenario, SnapshotBranchingScenario):
             if snapshot_store is None or clock is None:
                 raise ValueError(
                     "snapshot-backed scenarios require snapshot_store and clock dependencies"
@@ -132,6 +147,22 @@ async def run_scenario(
                 client=client,
                 scenario=scenario,
                 tracked_sessions=sessions,
+            )
+        else:
+            if snapshot_store is None or clock is None:
+                raise ValueError(
+                    "snapshot-backed scenarios require snapshot_store and clock dependencies"
+                )
+            (
+                result,
+                active_session,
+            ) = await _run_pause_continue_scenario(
+                model=model,
+                service=service,
+                client=client,
+                scenario=scenario,
+                tracked_sessions=sessions,
+                discard_before_close=discard_before_close,
             )
         if inspect_success and inspector is not None:
             inspection_attempted = True
@@ -172,6 +203,7 @@ async def run_scenario(
             client=client,
             sessions=sessions,
             primary=sys.exception(),
+            discard_before_close=discard_before_close,
         )
 
 
@@ -226,17 +258,11 @@ async def _run_snapshot_scenario(
     if not isinstance(state, InMemorySandboxSessionState):
         raise ScenarioVerificationError("unexpected sandbox provider state")
     persisted_state = state.model_copy(deep=True)
-    tracked_sessions.remove(checkpoint_session)
-    tracked_sessions.remove(source)
-    try:
-        await _cleanup_sdk_sessions(
-            client=client,
-            sessions=[source, checkpoint_session],
-            primary=None,
-        )
-    except BaseException:
-        tracked_sessions.extend((source, checkpoint_session))
-        raise
+    await _retire_sdk_sessions(
+        client=client,
+        tracked_sessions=tracked_sessions,
+        retiring=(source, checkpoint_session),
+    )
 
     branch_outputs: list[str] = [baseline_output]
     branch_results: list[VerifiedBranchResult] = []
@@ -290,6 +316,118 @@ async def _run_snapshot_scenario(
         ),
         selected_session,
     )
+
+
+async def _run_pause_continue_scenario(
+    *,
+    model: Model,
+    service: SandboxService,
+    client: InMemorySandboxClient,
+    scenario: PauseContinueScenario,
+    tracked_sessions: list[OpenAISandboxSession],
+    discard_before_close: list[OpenAISandboxSession],
+) -> tuple[ScenarioResult, OpenAISandboxSession]:
+    source = await client.create(
+        snapshot=InMemorySandboxSnapshotSpec(),
+        manifest=scenario.manifest_factory(),
+        options=scenario.options_factory().model_copy(update={"owner_id": _OWNER_ID}),
+    )
+    tracked_sessions.append(source)
+    live_reattached: OpenAISandboxSession | None = None
+    try:
+        initial_output = await _run_stage(model, source, scenario.initial_stage)
+        checkpoint_artifacts = await _verify_artifacts(
+            await _core_session(service, source),
+            scenario.checkpoint_artifacts,
+        )
+        source_handle = _provider_state(source).sandbox_handle
+
+        live_reattached = await client.resume(_provider_state(source))
+        tracked_sessions.append(live_reattached)
+        await live_reattached.start()
+        live_reattached_handle = _provider_state(live_reattached).sandbox_handle
+        if live_reattached_handle != source_handle:
+            raise ScenarioVerificationError("live reattachment did not reuse the source handle")
+        live_artifacts = await _verify_artifacts(
+            await _core_session(service, live_reattached),
+            scenario.checkpoint_artifacts,
+        )
+        if live_artifacts != checkpoint_artifacts:
+            raise ScenarioVerificationError("live reattachment did not preserve checkpoint bytes")
+
+        await live_reattached.stop()
+    except BaseException:
+        discard_before_close.append(live_reattached or source)
+        raise
+    persisted_state = _provider_state(live_reattached).model_copy(deep=True)
+    saved_state_json = json.dumps(
+        client.serialize_session_state(persisted_state),
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    decoded_state = json.loads(saved_state_json)
+    if not isinstance(decoded_state, dict):
+        raise ScenarioVerificationError("serialized sandbox state was not a JSON object")
+    restored_state = client.deserialize_session_state(cast(dict[str, object], decoded_state))
+
+    await _retire_sdk_sessions(
+        client=client,
+        tracked_sessions=tracked_sessions,
+        retiring=(source, live_reattached),
+    )
+
+    continuation = await client.resume(restored_state)
+    tracked_sessions.append(continuation)
+    await continuation.start()
+    replacement_handle = _provider_state(continuation).sandbox_handle
+    if replacement_handle == source_handle:
+        raise ScenarioVerificationError("replacement resume reused the deleted source handle")
+    await _verify_artifacts(
+        await _core_session(service, continuation),
+        scenario.checkpoint_artifacts,
+    )
+    continuation_output = await _run_stage(
+        model,
+        continuation,
+        scenario.continuation_stage,
+    )
+    artifacts = await _verify_artifacts(
+        await _core_session(service, continuation),
+        scenario.expected_artifacts,
+    )
+    return (
+        ScenarioResult(
+            scenario_name=scenario.name,
+            stage_outputs=(initial_output, continuation_output),
+            artifacts=artifacts,
+            resume_evidence=ResumeLifecycleEvidence(
+                saved_state_json=saved_state_json,
+                source_handle=source_handle,
+                live_reattached_handle=live_reattached_handle,
+                replacement_handle=replacement_handle,
+            ),
+        ),
+        continuation,
+    )
+
+
+async def _retire_sdk_sessions(
+    *,
+    client: InMemorySandboxClient,
+    tracked_sessions: list[OpenAISandboxSession],
+    retiring: tuple[OpenAISandboxSession, ...],
+) -> None:
+    for session in retiring:
+        tracked_sessions.remove(session)
+    try:
+        await _cleanup_sdk_sessions(
+            client=client,
+            sessions=list(retiring),
+            primary=None,
+        )
+    except BaseException:
+        tracked_sessions.extend(retiring)
+        raise
 
 
 async def _run_stages(
@@ -363,17 +501,27 @@ async def _cleanup_sdk_sessions(
     client: InMemorySandboxClient,
     sessions: list[OpenAISandboxSession],
     primary: BaseException | None,
+    discard_before_close: list[OpenAISandboxSession] | None = None,
 ) -> None:
     cleanup_errors: list[tuple[str, BaseException]] = []
     for session in reversed(sessions):
+        discard = discard_before_close is not None and any(
+            session is candidate for candidate in discard_before_close
+        )
+        if discard:
+            try:
+                await client.delete(session)
+            except BaseException as error:
+                cleanup_errors.append(("backend delete", error))
         try:
             await session.aclose()
         except BaseException as error:
             cleanup_errors.append(("SDK session close", error))
-        try:
-            await client.delete(session)
-        except BaseException as error:
-            cleanup_errors.append(("backend delete", error))
+        if not discard:
+            try:
+                await client.delete(session)
+            except BaseException as error:
+                cleanup_errors.append(("backend delete", error))
     _surface_cleanup_errors(primary, cleanup_errors)
 
 
