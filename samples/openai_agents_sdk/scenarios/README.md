@@ -17,6 +17,79 @@ The shared runner owns:
 - success/failure inspection callbacks;
 - cleanup of every SDK session and backend handle.
 
+## Conformance matrix
+
+The matrix is an inventory of maintained evidence, not a requirement to repeat
+the same adapter invariant in every scenario. `Shared` means the scenario uses
+the same runner or capability path as the cited test. `N/A` means the scenario
+does not claim that behavior; it must not be replaced with a prose-only simulated
+failure.
+
+Evidence keys:
+
+- **ALL** -
+  `test_registered_scenario_runs_without_network_and_cleans_backends` runs every
+  registry entry with the deterministic model, checks test-owned expected
+  artifact paths and bytes, stage order, exact four-tool exposure, applicable
+  branch selection and identity, and backend cleanup.
+- **STAGED-FAIL / STAGED-CANCEL** -
+  `test_inspect_on_failure_runs_before_cleanup_and_preserves_error` and
+  `test_failure_does_not_inspect_without_requested_option` exercise dependency
+  failure and cancellation through the shared `StagedScenario` path.
+- **SDK-BOUNDS** -
+  `tests/integrations/openai_agents/test_capability.py` tests
+  `test_execute_accepts_fixed_profile_limit_boundaries`,
+  `test_execute_rejects_limits_above_fixed_profile_ceiling`, and
+  `test_expected_domain_errors_are_structured_and_cancellation_propagates` cover
+  shared adapter bounds, structured failures, and cancellation propagation.
+- **CORE-STALE** -
+  `tests/unit/workspace/test_patching.py::test_stale_hash_rejects_patch_without_mutation`
+  proves a rejected guarded patch leaves workspace state unchanged.
+- **DOC-GUARDS / DOC-FAIL** - document-review tests prove exact output, real
+  `session_policy_denied` and `stale_content` results without protected-file
+  mutation, reviewer ordering, dependency failure preservation, and cleanup.
+- **FORK / FORK-FAIL / SNAP-CANCEL** - independent-reviewer and snapshot tests
+  prove distinct handles, unchanged baselines, sibling isolation, host selection,
+  branch dependency failure, cancellation, and cleanup.
+- **PAUSE / PAUSE-INVALID / PAUSE-FAIL / PAUSE-CANCEL** - pause/continue tests
+  prove same-handle live attachment, JSON-safe state, distinct replacement
+  identity, a fresh conversation, invalid or missing state rejection, dependency
+  failure or cancellation boundaries, and cleanup.
+- **POLICY / QUOTA** - recovery tests retain the actual failed tool result and
+  assert its structured denial or quota code before verifying the narrower
+  recovery artifact.
+- **HANDOFF-FAIL** - the multi-agent failure test proves completed planner state
+  remains inspectable when the implementer dependency fails, then cleans up.
+- **PROVIDER** -
+  `test_provider_application_runs_without_network_and_closes_client`,
+  `test_provider_application_reports_pause_continue_lifecycle`, and both
+  provider `--list-scenarios` tests cover client/service ownership and
+  configuration-free discovery without live calls.
+
+| Scenario | Exact success | Policy / stale rejection | Dependency failure | Bounds | Cancellation | Interaction / identity | Cleanup |
+|---|---|---|---|---|---|---|---|
+| `workspace-edit` | ALL | N/A - no rejection contract | STAGED-FAIL | SDK-BOUNDS | STAGED-CANCEL | ALL: one stage, one handle | ALL, STAGED-FAIL, STAGED-CANCEL |
+| `document-review` | DOC-GUARDS | DOC-GUARDS | DOC-FAIL | SDK-BOUNDS | Shared STAGED-CANCEL | DOC-GUARDS and ALL: editor before reviewer, one handle | DOC-GUARDS, DOC-FAIL, Shared STAGED-CANCEL |
+| `independent-reviewers` | FORK | N/A - isolation, not rejection | FORK-FAIL | SDK-BOUNDS | Shared SNAP-CANCEL | FORK: baseline plus distinct risk and clarity handles | FORK, FORK-FAIL, Shared SNAP-CANCEL |
+| `pause-continue` | PAUSE | PAUSE-INVALID | PAUSE-FAIL | SDK-BOUNDS | PAUSE-CANCEL | PAUSE: live alias plus fresh replacement run | PAUSE, PAUSE-INVALID, PAUSE-FAIL, PAUSE-CANCEL |
+| `incident-triage` | ALL | N/A - no rejection contract | Shared STAGED-FAIL | SDK-BOUNDS | Shared STAGED-CANCEL | ALL: execute before report write | ALL, Shared STAGED-FAIL, Shared STAGED-CANCEL |
+| `config-migration` | ALL | Shared DOC-GUARDS and CORE-STALE | Shared STAGED-FAIL | SDK-BOUNDS | Shared STAGED-CANCEL | ALL: two reads before one guarded atomic patch | ALL, Shared STAGED-FAIL, Shared STAGED-CANCEL |
+| `data-pipeline` | ALL | N/A - no rejection contract | Shared STAGED-FAIL | SDK-BOUNDS | Shared STAGED-CANCEL | ALL: execute before host-verified read | ALL, Shared STAGED-FAIL, Shared STAGED-CANCEL |
+| `policy-recovery` | ALL, POLICY | POLICY | Shared STAGED-FAIL | SDK-BOUNDS | Shared STAGED-CANCEL | POLICY: denied execute before file-tool recovery | ALL, POLICY, Shared STAGED-CANCEL |
+| `quota-recovery` | ALL, QUOTA | N/A - quota is the applicable bound | Shared STAGED-FAIL | QUOTA, SDK-BOUNDS | Shared STAGED-CANCEL | QUOTA: rejected oversized write before bounded retry | ALL, QUOTA, Shared STAGED-CANCEL |
+| `multi-agent-handoff` | ALL | N/A - no rejection contract | HANDOFF-FAIL | SDK-BOUNDS | Shared STAGED-CANCEL | ALL: planner, implementer, reviewer share one handle | ALL, HANDOFF-FAIL, Shared STAGED-CANCEL |
+| `snapshot-branching` | ALL, FORK | N/A - isolation, not rejection | FORK-FAIL | SDK-BOUNDS | SNAP-CANCEL | FORK: distinct conservative and aggressive handles | ALL, FORK-FAIL, SNAP-CANCEL |
+
+`PROVIDER` applies to the registry and application lifecycle as a whole rather
+than to one scenario row.
+
+When a scenario changes, update its row and deterministic evidence in the same
+change. Add scenario-owned negative coverage only when the scenario promises
+state-preservation or lifecycle semantics beyond the shared runner; otherwise
+reference the shared invariant. Every new lifecycle runner needs success,
+dependency-failure, cancellation, identity, and cleanup evidence before it is
+registered.
+
 ## Scenario catalog
 
 | Task | Scenario shape | Verified result |
