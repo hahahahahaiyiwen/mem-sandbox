@@ -191,6 +191,10 @@ credentials or network access.
 - SDK-independent inspection uses the same live MemSandbox session and never invokes a
   host shell.
 - Required tests use deterministic `Model` doubles and do not call a live provider.
+- Optional instrumentation ports expose scenario lifecycle timing and
+  stage-specific model/capability construction to the repository-only
+  [workspace-showcase evaluation](../../evaluations/workspace_showcase/README.md).
+  The default sample path installs no observer and preserves existing behavior.
 
 The maintained scenarios intentionally expose only the four MemSandbox tools. The
 installed-package composition example demonstrates a separate application-owned
