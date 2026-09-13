@@ -1245,9 +1245,11 @@ direction visible without claiming unimplemented capabilities.
 - [x] **7.2.3** Verify the installed-package usage path outside the repository checkout.
   Keep repository-only sample imports out of public API examples and make service
   construction, provider injection, artifact access, and cleanup discoverable.
-- [ ] **7.2.4** Record concrete integration blockers and assess a second SDK under
+- [x] **7.2.4** Record concrete integration blockers and assess a second SDK under
   `12.1` only when user/collaborator evidence supports it. No networking or execution
-  milestone is a prerequisite for a workspace-only adapter.
+  milestone is a prerequisite for a workspace-only adapter. The
+  [workflow-blocker assessment](./product-validation/workflow-blocker-assessment.md)
+  records no external second-SDK demand and defers adapter work.
 - [x] **7.2.5** Implement issue #67's
   [approved package split](./OPENAI_AGENTS_PACKAGE_SPLIT.md): publish the dependency-free
   core and OpenAI Agents adapter as independently versioned distributions, migrate the
@@ -1266,10 +1268,13 @@ direction visible without claiming unimplemented capabilities.
 - [x] **7.3.3** Measure workspace seeding, mutation, snapshot, and cleanup separately
   from model latency and total cost. Use Milestone 6's measured triggers to decide
   whether internal optimization is warranted; do not reopen content offload by default.
-- [ ] **7.3.4** Record which missing operations block actual workflows and select the
+- [x] **7.3.4** Record which missing operations block actual workflows and select the
   next capability accordingly. Distinguish host retrieval needs, calculations/parsing,
   test-runtime needs, and integration friction; do not assume a bounded Python script
-  profile supports arbitrary repository test suites.
+  profile supports arbitrary repository test suites. The evidence-based disposition is
+  to defer new capability work until a reproducible product-surface
+  [review trigger](./product-validation/workflow-blocker-assessment.md#review-triggers)
+  is met.
 
 ### Exit criteria
 
@@ -1279,8 +1284,9 @@ direction visible without claiming unimplemented capabilities.
   requirements, costs, and limitations are explicit.
 - [x] **7.9.3** Installed-package and supported SDK composition paths are documented
   and exercised without implying full-shell compatibility.
-- [ ] **7.9.4** Current capabilities, future extensions, and evidence-based next
-  priorities are distinguishable in public documentation.
+- [x] **7.9.4** Current capabilities, future extensions, and evidence-based next
+  priorities are distinguishable in public documentation. The public README and
+  product-validation documentation link the current defer decision and its prerequisites.
 
 ## 12. Milestone 8: artifact exchange and focused external foundations
 

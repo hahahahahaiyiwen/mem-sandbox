@@ -200,6 +200,13 @@ and
 [isolated execution backends](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/docs/components/external-execution/README.md).
 Those capabilities are not part of the current profile.
 
+The current
+[workflow-blocker assessment](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/docs/product-validation/workflow-blocker-assessment.md)
+defers new capability and second-SDK work. Existing deterministic workflows pass, and
+the retained live and installed-package observations do not identify a missing
+MemSandbox operation. The assessment lists the reproducible review triggers and
+authority requirements that must be met before selecting a future extension.
+
 ## How the agent integration works
 
 ```text
