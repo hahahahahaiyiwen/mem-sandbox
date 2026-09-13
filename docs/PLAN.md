@@ -2003,7 +2003,7 @@ their referenced checklist task begins.
 | Resource accounting rollout | Define shared principles; implement required dimensions with each selected capability, preserving hard limits and exact-once settlement | `8.3` | Planned |
 | Repository ingestion and export | Host-controlled bounded archive/tree import plus revision/hash-bound diff, archive, or artifact export; no host path or Git authority | `8.4` | Planned |
 | Git repository retrieval | Planned input source; initiating actor, transport, credentials, ref resolution, refresh/merge semantics, and local-edit preservation require design approval | `8.4.6`-`8.4.8` | Open |
-| First optional external capability | Select controlled HTTP or network-disabled execution from observed workflow blockers, not milestone numbering | `7.3.4` / `9` / `10` | Open |
+| First optional external capability | Defer controlled HTTP and network-disabled execution until a linked [workflow-blocker review trigger](./product-validation/workflow-blocker-assessment.md#review-triggers) is met | `7.3.4` / `9` / `10` | Deferred |
 | Network egress | Default-deny HTTP/HTTPS through one host-owned gateway with destination policy, SSRF controls, destination-bound credentials, cumulative budgets, and audit | `9` | Planned |
 | First network command | Prefer `fetch` or `http`; use `curl` only for a documented compatible subset; never invoke a host executable | `9.4` | Open |
 | External execution | Run agent-supplied code only through a host-selected external backend with explicit security classification and atomic workspace publication | `10` | Planned |
