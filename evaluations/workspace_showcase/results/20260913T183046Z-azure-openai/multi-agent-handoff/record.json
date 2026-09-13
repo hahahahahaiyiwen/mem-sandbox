@@ -1,0 +1,410 @@
+{
+  "artifacts": [
+    {
+      "actual_sha256": "4ee2050e6eb9d7c76e8afbb8a14527782a6b9e9c46e12f179487b52431fa7c04",
+      "check_kinds": [
+        "output_correctness"
+      ],
+      "error_code": null,
+      "expected_sha256": "4ee2050e6eb9d7c76e8afbb8a14527782a6b9e9c46e12f179487b52431fa7c04",
+      "matched": true,
+      "path": "/workspace/app.conf"
+    },
+    {
+      "actual_sha256": "6788e9e3a108f780d251ad2325dae823b93713b60d1d15def339fb7d1d4dd28b",
+      "check_kinds": [
+        "output_correctness"
+      ],
+      "error_code": null,
+      "expected_sha256": "6788e9e3a108f780d251ad2325dae823b93713b60d1d15def339fb7d1d4dd28b",
+      "matched": true,
+      "path": "/workspace/handoff/plan.txt"
+    },
+    {
+      "actual_sha256": "bef935bb502c4320d5f03bd037d33097f183d04bed18e43bd5a987849d34d914",
+      "check_kinds": [
+        "evidence_accuracy"
+      ],
+      "error_code": null,
+      "expected_sha256": "bef935bb502c4320d5f03bd037d33097f183d04bed18e43bd5a987849d34d914",
+      "matched": true,
+      "path": "/workspace/handoff/review.txt"
+    }
+  ],
+  "failure": null,
+  "limitations": {
+    "comparable_across_uncontrolled_runs": false,
+    "gating": false,
+    "non_deterministic": true,
+    "provider_and_machine_specific": true
+  },
+  "metadata": {
+    "approval_reference": "https://github.com/hahahahahaiyiwen/mem-sandbox/issues/76#issuecomment-5655176089",
+    "architecture": "AMD64",
+    "fixture_version": 1,
+    "gating": false,
+    "mem_sandbox_openai_agents_version": "0.1.0",
+    "mem_sandbox_version": "0.2.0",
+    "model_or_deployment": "gpt-5.4-mini-global",
+    "non_deterministic": true,
+    "openai_agents_version": "0.22.0",
+    "openai_version": "3.8.0",
+    "operating_system": "Windows-11-10.0.22631-SP0",
+    "provider": "azure_openai",
+    "provider_api_version": "2024-12-01-preview",
+    "python_implementation": "CPython",
+    "python_version": "3.12.12",
+    "scenario": "multi-agent-handoff",
+    "source_commit": "9148d44ee281d3a6d5ccc3858ce117298ac128ff",
+    "source_dirty": true,
+    "started_at_utc": "2026-09-13T18:31:49.403118+00:00"
+  },
+  "outcome": "succeeded",
+  "schema_version": 1,
+  "stages": [
+    {
+      "error_code": null,
+      "outcome": "succeeded",
+      "sequence": 1,
+      "stage": "multi-agent-plan"
+    },
+    {
+      "error_code": null,
+      "outcome": "succeeded",
+      "sequence": 2,
+      "stage": "multi-agent-implement"
+    },
+    {
+      "error_code": null,
+      "outcome": "succeeded",
+      "sequence": 3,
+      "stage": "multi-agent-review"
+    }
+  ],
+  "timings": [
+    {
+      "category": "workspace_seed",
+      "duration_ns": 1926200,
+      "operation": "client_create",
+      "outcome": "succeeded",
+      "stage": null
+    },
+    {
+      "category": "provider_model",
+      "duration_ns": 3389005900,
+      "operation": "get_response",
+      "outcome": "succeeded",
+      "stage": "multi-agent-plan"
+    },
+    {
+      "category": "workspace_read",
+      "duration_ns": 790800,
+      "operation": "read_file",
+      "outcome": "succeeded",
+      "stage": "multi-agent-plan"
+    },
+    {
+      "category": "provider_model",
+      "duration_ns": 1190281300,
+      "operation": "get_response",
+      "outcome": "succeeded",
+      "stage": "multi-agent-plan"
+    },
+    {
+      "category": "workspace_mutation",
+      "duration_ns": 1143300,
+      "operation": "write_file",
+      "outcome": "succeeded",
+      "stage": "multi-agent-plan"
+    },
+    {
+      "category": "provider_model",
+      "duration_ns": 1165042900,
+      "operation": "get_response",
+      "outcome": "succeeded",
+      "stage": "multi-agent-plan"
+    },
+    {
+      "category": "provider_model",
+      "duration_ns": 2043181500,
+      "operation": "get_response",
+      "outcome": "succeeded",
+      "stage": "multi-agent-implement"
+    },
+    {
+      "category": "workspace_read",
+      "duration_ns": 1147300,
+      "operation": "read_file",
+      "outcome": "succeeded",
+      "stage": "multi-agent-implement"
+    },
+    {
+      "category": "workspace_read",
+      "duration_ns": 1327800,
+      "operation": "read_file",
+      "outcome": "succeeded",
+      "stage": "multi-agent-implement"
+    },
+    {
+      "category": "provider_model",
+      "duration_ns": 1502477300,
+      "operation": "get_response",
+      "outcome": "succeeded",
+      "stage": "multi-agent-implement"
+    },
+    {
+      "category": "workspace_mutation",
+      "duration_ns": 1192000,
+      "operation": "apply_patch",
+      "outcome": "failed",
+      "stage": "multi-agent-implement"
+    },
+    {
+      "category": "provider_model",
+      "duration_ns": 1408002700,
+      "operation": "get_response",
+      "outcome": "succeeded",
+      "stage": "multi-agent-implement"
+    },
+    {
+      "category": "workspace_mutation",
+      "duration_ns": 815000,
+      "operation": "apply_patch",
+      "outcome": "failed",
+      "stage": "multi-agent-implement"
+    },
+    {
+      "category": "provider_model",
+      "duration_ns": 1583604200,
+      "operation": "get_response",
+      "outcome": "succeeded",
+      "stage": "multi-agent-implement"
+    },
+    {
+      "category": "workspace_mutation",
+      "duration_ns": 858200,
+      "operation": "apply_patch",
+      "outcome": "succeeded",
+      "stage": "multi-agent-implement"
+    },
+    {
+      "category": "provider_model",
+      "duration_ns": 1173486900,
+      "operation": "get_response",
+      "outcome": "succeeded",
+      "stage": "multi-agent-implement"
+    },
+    {
+      "category": "provider_model",
+      "duration_ns": 1430034300,
+      "operation": "get_response",
+      "outcome": "succeeded",
+      "stage": "multi-agent-review"
+    },
+    {
+      "category": "workspace_read",
+      "duration_ns": 1125100,
+      "operation": "read_file",
+      "outcome": "succeeded",
+      "stage": "multi-agent-review"
+    },
+    {
+      "category": "workspace_read",
+      "duration_ns": 1285300,
+      "operation": "read_file",
+      "outcome": "succeeded",
+      "stage": "multi-agent-review"
+    },
+    {
+      "category": "provider_model",
+      "duration_ns": 1274143400,
+      "operation": "get_response",
+      "outcome": "succeeded",
+      "stage": "multi-agent-review"
+    },
+    {
+      "category": "workspace_mutation",
+      "duration_ns": 945300,
+      "operation": "write_file",
+      "outcome": "succeeded",
+      "stage": "multi-agent-review"
+    },
+    {
+      "category": "provider_model",
+      "duration_ns": 1591127700,
+      "operation": "get_response",
+      "outcome": "succeeded",
+      "stage": "multi-agent-review"
+    },
+    {
+      "category": "host_verification",
+      "duration_ns": 1452100,
+      "operation": "final_artifacts",
+      "outcome": "succeeded",
+      "stage": "multi-agent-review"
+    },
+    {
+      "category": "cleanup",
+      "duration_ns": 2644000,
+      "operation": "sdk_session_close",
+      "outcome": "succeeded",
+      "stage": null
+    },
+    {
+      "category": "cleanup",
+      "duration_ns": 559800,
+      "operation": "backend_delete",
+      "outcome": "succeeded",
+      "stage": null
+    },
+    {
+      "category": "host_verification",
+      "duration_ns": 111900,
+      "operation": "evaluation_artifact_hashes",
+      "outcome": "succeeded",
+      "stage": null
+    },
+    {
+      "category": "cleanup",
+      "duration_ns": 61300,
+      "operation": "service.close",
+      "outcome": "succeeded",
+      "stage": null
+    },
+    {
+      "category": "cleanup",
+      "duration_ns": 740500,
+      "operation": "provider_client.close",
+      "outcome": "succeeded",
+      "stage": null
+    },
+    {
+      "category": "end_to_end",
+      "duration_ns": 18010502700,
+      "operation": "workspace_showcase",
+      "outcome": "succeeded",
+      "stage": null
+    }
+  ],
+  "tool_interactions": [
+    {
+      "duration_ns": 790800,
+      "error_category": null,
+      "error_code": null,
+      "outcome": "succeeded",
+      "repair_of_sequence": null,
+      "sequence": 1,
+      "stage": "multi-agent-plan",
+      "tool_name": "read_file",
+      "unsupported": false
+    },
+    {
+      "duration_ns": 1143300,
+      "error_category": null,
+      "error_code": null,
+      "outcome": "succeeded",
+      "repair_of_sequence": null,
+      "sequence": 2,
+      "stage": "multi-agent-plan",
+      "tool_name": "write_file",
+      "unsupported": false
+    },
+    {
+      "duration_ns": 1147300,
+      "error_category": null,
+      "error_code": null,
+      "outcome": "succeeded",
+      "repair_of_sequence": null,
+      "sequence": 3,
+      "stage": "multi-agent-implement",
+      "tool_name": "read_file",
+      "unsupported": false
+    },
+    {
+      "duration_ns": 1327800,
+      "error_category": null,
+      "error_code": null,
+      "outcome": "succeeded",
+      "repair_of_sequence": null,
+      "sequence": 4,
+      "stage": "multi-agent-implement",
+      "tool_name": "read_file",
+      "unsupported": false
+    },
+    {
+      "duration_ns": 1192000,
+      "error_category": "invalid_request",
+      "error_code": "invalid_patch",
+      "outcome": "failed",
+      "repair_of_sequence": null,
+      "sequence": 5,
+      "stage": "multi-agent-implement",
+      "tool_name": "apply_patch",
+      "unsupported": false
+    },
+    {
+      "duration_ns": 815000,
+      "error_category": "invalid_request",
+      "error_code": "invalid_patch",
+      "outcome": "failed",
+      "repair_of_sequence": null,
+      "sequence": 6,
+      "stage": "multi-agent-implement",
+      "tool_name": "apply_patch",
+      "unsupported": false
+    },
+    {
+      "duration_ns": 858200,
+      "error_category": null,
+      "error_code": null,
+      "outcome": "succeeded",
+      "repair_of_sequence": 6,
+      "sequence": 7,
+      "stage": "multi-agent-implement",
+      "tool_name": "apply_patch",
+      "unsupported": false
+    },
+    {
+      "duration_ns": 1125100,
+      "error_category": null,
+      "error_code": null,
+      "outcome": "succeeded",
+      "repair_of_sequence": null,
+      "sequence": 8,
+      "stage": "multi-agent-review",
+      "tool_name": "read_file",
+      "unsupported": false
+    },
+    {
+      "duration_ns": 1285300,
+      "error_category": null,
+      "error_code": null,
+      "outcome": "succeeded",
+      "repair_of_sequence": null,
+      "sequence": 9,
+      "stage": "multi-agent-review",
+      "tool_name": "read_file",
+      "unsupported": false
+    },
+    {
+      "duration_ns": 945300,
+      "error_category": null,
+      "error_code": null,
+      "outcome": "succeeded",
+      "repair_of_sequence": null,
+      "sequence": 10,
+      "stage": "multi-agent-review",
+      "tool_name": "write_file",
+      "unsupported": false
+    }
+  ],
+  "usage": {
+    "cost_completeness": "unavailable",
+    "input_tokens": 50204,
+    "model_call_count": 11,
+    "output_tokens": 828,
+    "provider_cost": null,
+    "token_completeness": "complete",
+    "total_tokens": 51032
+  }
+}

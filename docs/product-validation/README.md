@@ -250,6 +250,44 @@ task completion. Its results are design evidence rather than a correctness or
 provisioning regression gate because model behavior and provider latency vary
 independently of MemSandbox.
 
+### Workspace-showcase live evaluation
+
+Milestone 7 adds a separate
+[workspace-showcase evaluation](../../evaluations/workspace_showcase/README.md)
+for maintained OpenAI Agents SDK scenarios. It does not replace model-free
+conformance, reuse the benchmark schema, or alter provisioning baselines.
+
+The versioned record stores only allowlisted metadata, artifact paths and hashes,
+stable tool outcomes, provider-supplied usage, fixed limitations, and raw
+nanosecond durations. It excludes prompts, model prose, tool arguments and
+outputs, file contents, endpoints, credentials, environment variables, exception
+messages, and tracebacks. Token or monetary cost values that are not supplied by
+the provider remain explicitly unavailable rather than becoming zero.
+
+Workspace seed, read, mutation, constrained execution, snapshot persist/restore,
+host verification, and cleanup measurements are distinct from provider-model and
+end-to-end durations. End-to-end overlaps the component measurements and is not
+an additive total. Live results are non-deterministic, non-gating, and not
+comparable across uncontrolled providers or machines.
+
+Required CI validates the record schema, redaction-by-construction, timing
+categorization, terminal states, usage availability, report rendering, and
+approval gate with injected fakes. A provider client is constructed only after an
+operator supplies both the billable-run flag and a recorded approval reference.
+Approved evidence must include `document-review` plus another guarded multi-stage
+workflow and must identify model behavior, provider integration, SDK behavior, or
+MemSandbox behavior as the observed failure boundary.
+
+The first approved pair is retained in the
+[2026-09-13 Azure OpenAI result set](../../evaluations/workspace_showcase/results/20260913T183046Z-azure-openai/README.md).
+The guarded multi-agent workflow passed all three exact artifact checks. The
+document workflow reached both stages and then failed exact host verification;
+the failed observation is retained because live model behavior is non-gating.
+Provider-model time dominated the observed end-to-end durations, while workspace
+seed, read, mutation, verification, and cleanup remained separately visible.
+Neither run exercised snapshots or demonstrated a Milestone 6 capacity trigger,
+so this evidence does not authorize workspace optimization or content offload.
+
 ## Benchmark workloads
 
 Benchmark cases use versioned generated profiles. Every result records exact file count,

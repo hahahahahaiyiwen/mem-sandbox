@@ -1,0 +1,442 @@
+{
+  "artifacts": [
+    {
+      "actual_sha256": null,
+      "check_kinds": [
+        "unrelated_content_preservation"
+      ],
+      "error_code": "verification_incomplete",
+      "expected_sha256": "511f4bf48872438278f9689a2e18a28e7dae6069142f579205de61fae330d188",
+      "matched": false,
+      "path": "/workspace/source/release-brief.txt"
+    },
+    {
+      "actual_sha256": null,
+      "check_kinds": [
+        "unrelated_content_preservation"
+      ],
+      "error_code": "verification_incomplete",
+      "expected_sha256": "a0391ff3afe7d4eb7f93460fd294268434a804a433f6d2ef04e703ac31bb15d5",
+      "matched": false,
+      "path": "/workspace/review/instructions.md"
+    },
+    {
+      "actual_sha256": null,
+      "check_kinds": [
+        "output_correctness",
+        "unrelated_content_preservation"
+      ],
+      "error_code": "verification_incomplete",
+      "expected_sha256": "8619ec133a6f497beb41cf128c3700770710af9ab48892de52c872b4c75cf90c",
+      "matched": false,
+      "path": "/workspace/drafts/release-notes.md"
+    },
+    {
+      "actual_sha256": null,
+      "check_kinds": [
+        "evidence_accuracy"
+      ],
+      "error_code": "verification_incomplete",
+      "expected_sha256": "0e6ee00e0de35bf270cafc813496007a7683b9da36c39137ccf9deb87a254e34",
+      "matched": false,
+      "path": "/workspace/review/findings.md"
+    }
+  ],
+  "failure": {
+    "category": "host_verification",
+    "exception_type": "ScenarioVerificationError",
+    "stable_code": "scenario_verification_failed",
+    "stage": null
+  },
+  "limitations": {
+    "comparable_across_uncontrolled_runs": false,
+    "gating": false,
+    "non_deterministic": true,
+    "provider_and_machine_specific": true
+  },
+  "metadata": {
+    "approval_reference": "https://github.com/hahahahahaiyiwen/mem-sandbox/issues/76#issuecomment-5655176089",
+    "architecture": "AMD64",
+    "fixture_version": 1,
+    "gating": false,
+    "mem_sandbox_openai_agents_version": "0.1.0",
+    "mem_sandbox_version": "0.2.0",
+    "model_or_deployment": "gpt-5.4-mini-global",
+    "non_deterministic": true,
+    "openai_agents_version": "0.22.0",
+    "openai_version": "3.8.0",
+    "operating_system": "Windows-11-10.0.22631-SP0",
+    "provider": "azure_openai",
+    "provider_api_version": "2024-12-01-preview",
+    "python_implementation": "CPython",
+    "python_version": "3.12.12",
+    "scenario": "document-review",
+    "source_commit": "9148d44ee281d3a6d5ccc3858ce117298ac128ff",
+    "source_dirty": false,
+    "started_at_utc": "2026-09-13T18:30:59.998894+00:00"
+  },
+  "outcome": "failed",
+  "schema_version": 1,
+  "stages": [
+    {
+      "error_code": null,
+      "outcome": "succeeded",
+      "sequence": 1,
+      "stage": "document-review-editor"
+    },
+    {
+      "error_code": null,
+      "outcome": "succeeded",
+      "sequence": 2,
+      "stage": "document-review-reviewer"
+    }
+  ],
+  "timings": [
+    {
+      "category": "workspace_seed",
+      "duration_ns": 9682600,
+      "operation": "client_create",
+      "outcome": "succeeded",
+      "stage": null
+    },
+    {
+      "category": "provider_model",
+      "duration_ns": 18296757900,
+      "operation": "get_response",
+      "outcome": "succeeded",
+      "stage": "document-review-editor"
+    },
+    {
+      "category": "workspace_read",
+      "duration_ns": 2602400,
+      "operation": "read_file",
+      "outcome": "succeeded",
+      "stage": "document-review-editor"
+    },
+    {
+      "category": "workspace_read",
+      "duration_ns": 1383400,
+      "operation": "read_file",
+      "outcome": "succeeded",
+      "stage": "document-review-editor"
+    },
+    {
+      "category": "workspace_read",
+      "duration_ns": 2388700,
+      "operation": "read_file",
+      "outcome": "succeeded",
+      "stage": "document-review-editor"
+    },
+    {
+      "category": "provider_model",
+      "duration_ns": 1820845700,
+      "operation": "get_response",
+      "outcome": "succeeded",
+      "stage": "document-review-editor"
+    },
+    {
+      "category": "workspace_mutation",
+      "duration_ns": 1499100,
+      "operation": "apply_patch",
+      "outcome": "failed",
+      "stage": "document-review-editor"
+    },
+    {
+      "category": "provider_model",
+      "duration_ns": 1665898900,
+      "operation": "get_response",
+      "outcome": "succeeded",
+      "stage": "document-review-editor"
+    },
+    {
+      "category": "workspace_mutation",
+      "duration_ns": 545300,
+      "operation": "apply_patch",
+      "outcome": "failed",
+      "stage": "document-review-editor"
+    },
+    {
+      "category": "provider_model",
+      "duration_ns": 2063953100,
+      "operation": "get_response",
+      "outcome": "succeeded",
+      "stage": "document-review-editor"
+    },
+    {
+      "category": "workspace_execute",
+      "duration_ns": 841600,
+      "operation": "execute",
+      "outcome": "failed",
+      "stage": "document-review-editor"
+    },
+    {
+      "category": "provider_model",
+      "duration_ns": 2064735200,
+      "operation": "get_response",
+      "outcome": "succeeded",
+      "stage": "document-review-editor"
+    },
+    {
+      "category": "workspace_mutation",
+      "duration_ns": 939500,
+      "operation": "apply_patch",
+      "outcome": "failed",
+      "stage": "document-review-editor"
+    },
+    {
+      "category": "provider_model",
+      "duration_ns": 1448713200,
+      "operation": "get_response",
+      "outcome": "succeeded",
+      "stage": "document-review-editor"
+    },
+    {
+      "category": "provider_model",
+      "duration_ns": 1608345600,
+      "operation": "get_response",
+      "outcome": "succeeded",
+      "stage": "document-review-reviewer"
+    },
+    {
+      "category": "workspace_read",
+      "duration_ns": 1387800,
+      "operation": "read_file",
+      "outcome": "succeeded",
+      "stage": "document-review-reviewer"
+    },
+    {
+      "category": "workspace_read",
+      "duration_ns": 1460000,
+      "operation": "read_file",
+      "outcome": "succeeded",
+      "stage": "document-review-reviewer"
+    },
+    {
+      "category": "workspace_read",
+      "duration_ns": 2517400,
+      "operation": "read_file",
+      "outcome": "succeeded",
+      "stage": "document-review-reviewer"
+    },
+    {
+      "category": "provider_model",
+      "duration_ns": 2137156700,
+      "operation": "get_response",
+      "outcome": "succeeded",
+      "stage": "document-review-reviewer"
+    },
+    {
+      "category": "workspace_mutation",
+      "duration_ns": 4172600,
+      "operation": "write_file",
+      "outcome": "succeeded",
+      "stage": "document-review-reviewer"
+    },
+    {
+      "category": "provider_model",
+      "duration_ns": 1255207500,
+      "operation": "get_response",
+      "outcome": "succeeded",
+      "stage": "document-review-reviewer"
+    },
+    {
+      "category": "workspace_read",
+      "duration_ns": 784500,
+      "operation": "read_file",
+      "outcome": "succeeded",
+      "stage": "document-review-reviewer"
+    },
+    {
+      "category": "provider_model",
+      "duration_ns": 1358557100,
+      "operation": "get_response",
+      "outcome": "succeeded",
+      "stage": "document-review-reviewer"
+    },
+    {
+      "category": "host_verification",
+      "duration_ns": 2214600,
+      "operation": "final_artifacts",
+      "outcome": "failed",
+      "stage": "document-review-reviewer"
+    },
+    {
+      "category": "cleanup",
+      "duration_ns": 3450700,
+      "operation": "sdk_session_close",
+      "outcome": "succeeded",
+      "stage": null
+    },
+    {
+      "category": "cleanup",
+      "duration_ns": 584800,
+      "operation": "backend_delete",
+      "outcome": "succeeded",
+      "stage": null
+    },
+    {
+      "category": "cleanup",
+      "duration_ns": 57600,
+      "operation": "service.close",
+      "outcome": "succeeded",
+      "stage": null
+    },
+    {
+      "category": "cleanup",
+      "duration_ns": 3673400,
+      "operation": "provider_client.close",
+      "outcome": "succeeded",
+      "stage": null
+    },
+    {
+      "category": "end_to_end",
+      "duration_ns": 34239156700,
+      "operation": "workspace_showcase",
+      "outcome": "failed",
+      "stage": null
+    }
+  ],
+  "tool_interactions": [
+    {
+      "duration_ns": 2602400,
+      "error_category": null,
+      "error_code": null,
+      "outcome": "succeeded",
+      "repair_of_sequence": null,
+      "sequence": 1,
+      "stage": "document-review-editor",
+      "tool_name": "read_file",
+      "unsupported": false
+    },
+    {
+      "duration_ns": 1383400,
+      "error_category": null,
+      "error_code": null,
+      "outcome": "succeeded",
+      "repair_of_sequence": null,
+      "sequence": 2,
+      "stage": "document-review-editor",
+      "tool_name": "read_file",
+      "unsupported": false
+    },
+    {
+      "duration_ns": 2388700,
+      "error_category": null,
+      "error_code": null,
+      "outcome": "succeeded",
+      "repair_of_sequence": null,
+      "sequence": 3,
+      "stage": "document-review-editor",
+      "tool_name": "read_file",
+      "unsupported": false
+    },
+    {
+      "duration_ns": 1499100,
+      "error_category": "invalid_request",
+      "error_code": "invalid_patch",
+      "outcome": "failed",
+      "repair_of_sequence": null,
+      "sequence": 4,
+      "stage": "document-review-editor",
+      "tool_name": "apply_patch",
+      "unsupported": false
+    },
+    {
+      "duration_ns": 545300,
+      "error_category": "invalid_request",
+      "error_code": "invalid_patch",
+      "outcome": "failed",
+      "repair_of_sequence": null,
+      "sequence": 5,
+      "stage": "document-review-editor",
+      "tool_name": "apply_patch",
+      "unsupported": false
+    },
+    {
+      "duration_ns": 841600,
+      "error_category": "policy_denied",
+      "error_code": "session_policy_denied",
+      "outcome": "failed",
+      "repair_of_sequence": null,
+      "sequence": 6,
+      "stage": "document-review-editor",
+      "tool_name": "execute",
+      "unsupported": false
+    },
+    {
+      "duration_ns": 939500,
+      "error_category": "invalid_request",
+      "error_code": "invalid_patch",
+      "outcome": "failed",
+      "repair_of_sequence": null,
+      "sequence": 7,
+      "stage": "document-review-editor",
+      "tool_name": "apply_patch",
+      "unsupported": false
+    },
+    {
+      "duration_ns": 1387800,
+      "error_category": null,
+      "error_code": null,
+      "outcome": "succeeded",
+      "repair_of_sequence": null,
+      "sequence": 8,
+      "stage": "document-review-reviewer",
+      "tool_name": "read_file",
+      "unsupported": false
+    },
+    {
+      "duration_ns": 1460000,
+      "error_category": null,
+      "error_code": null,
+      "outcome": "succeeded",
+      "repair_of_sequence": null,
+      "sequence": 9,
+      "stage": "document-review-reviewer",
+      "tool_name": "read_file",
+      "unsupported": false
+    },
+    {
+      "duration_ns": 2517400,
+      "error_category": null,
+      "error_code": null,
+      "outcome": "succeeded",
+      "repair_of_sequence": null,
+      "sequence": 10,
+      "stage": "document-review-reviewer",
+      "tool_name": "read_file",
+      "unsupported": false
+    },
+    {
+      "duration_ns": 4172600,
+      "error_category": null,
+      "error_code": null,
+      "outcome": "succeeded",
+      "repair_of_sequence": null,
+      "sequence": 11,
+      "stage": "document-review-reviewer",
+      "tool_name": "write_file",
+      "unsupported": false
+    },
+    {
+      "duration_ns": 784500,
+      "error_category": null,
+      "error_code": null,
+      "outcome": "succeeded",
+      "repair_of_sequence": null,
+      "sequence": 12,
+      "stage": "document-review-reviewer",
+      "tool_name": "read_file",
+      "unsupported": false
+    }
+  ],
+  "usage": {
+    "cost_completeness": "unavailable",
+    "input_tokens": 53722,
+    "model_call_count": 10,
+    "output_tokens": 1534,
+    "provider_cost": null,
+    "token_completeness": "complete",
+    "total_tokens": 55256
+  }
+}

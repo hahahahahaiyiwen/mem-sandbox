@@ -5,9 +5,9 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import AsyncIterator, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from io import StringIO
-from typing import Any, Literal, cast
+from typing import Any, Literal, Never, cast
 
 import pytest
 from agents import ModelResponse, Usage
@@ -33,7 +33,12 @@ from samples.openai_agents_sdk.providers.azure_openai.config import AzureOpenAIS
 from samples.openai_agents_sdk.providers.azure_openai.model import create_azure_model
 from samples.openai_agents_sdk.runner import (
     InspectionContext,
+    LifecycleTimingCategory,
+    LifecycleTimingObservation,
+    RunnerOutcome,
     ScenarioVerificationError,
+    StageFinishObservation,
+    StageStartObservation,
     run_scenario,
 )
 from samples.openai_agents_sdk.scenarios import (
@@ -173,6 +178,7 @@ from mem_sandbox.snapshots import (
     SnapshotNotFound,
     SnapshotRef,
 )
+from mem_sandbox_openai_agents import InMemorySandboxCapability
 
 _EXPECTED_TOOLS = ["execute", "read_file", "write_file", "apply_patch"]
 _INVALID_CHECKPOINT_CONTENT = b"# Invalid checkpoint\n"
@@ -446,6 +452,32 @@ class RecordingModelClient:
 
     async def close(self) -> None:
         self.closed = True
+
+
+class StepPerformanceClock:
+    def __init__(self, *, step_ns: int = 10) -> None:
+        self._now_ns = 0
+        self._step_ns = step_ns
+
+    def now_ns(self) -> int:
+        self._now_ns += self._step_ns
+        return self._now_ns
+
+
+class RecordingScenarioObserver:
+    def __init__(self) -> None:
+        self.timings: list[LifecycleTimingObservation] = []
+        self.stage_starts: list[StageStartObservation] = []
+        self.stage_finishes: list[StageFinishObservation] = []
+
+    def observe_lifecycle_timing(self, observation: LifecycleTimingObservation) -> None:
+        self.timings.append(observation)
+
+    def observe_stage_started(self, observation: StageStartObservation) -> None:
+        self.stage_starts.append(observation)
+
+    def observe_stage_finished(self, observation: StageFinishObservation) -> None:
+        self.stage_finishes.append(observation)
 
 
 class DeterministicScenarioModel(Model):
@@ -1336,6 +1368,331 @@ async def test_registered_scenario_runs_without_network_and_cleans_backends(
 
 
 @pytest.mark.asyncio
+async def test_staged_scenario_uses_optional_factories_and_observes_lifecycle() -> None:
+    scenario = get_scenario("document-review")
+    assert isinstance(scenario, StagedScenario)
+    bundle = create_sample_service_bundle(policy_engine=scenario.policy_engine_factory())
+    service = RecordingService(bundle.service)
+    model = DeterministicScenarioModel()
+    model_factory_keys: list[str] = []
+    capability_factory_keys: list[str] = []
+    observer = RecordingScenarioObserver()
+
+    def model_for_stage(stage_key: str) -> Model:
+        model_factory_keys.append(stage_key)
+        return model
+
+    def capability_for_stage(stage_key: str) -> InMemorySandboxCapability:
+        capability_factory_keys.append(stage_key)
+        return InMemorySandboxCapability()
+
+    try:
+        await run_scenario(
+            model=model,
+            service=service,
+            scenario=scenario,
+            stage_model_factory=model_for_stage,
+            stage_capability_factory=capability_for_stage,
+            performance_clock=StepPerformanceClock(),
+            observer=observer,
+        )
+
+        expected_stage_keys = [
+            "document-review-editor",
+            "document-review-reviewer",
+        ]
+        assert model_factory_keys == expected_stage_keys
+        assert capability_factory_keys == expected_stage_keys
+        assert observer.stage_starts == [
+            StageStartObservation(stage_key) for stage_key in expected_stage_keys
+        ]
+        assert observer.stage_finishes == [
+            StageFinishObservation(stage_key, RunnerOutcome.SUCCEEDED)
+            for stage_key in expected_stage_keys
+        ]
+        assert [timing.category for timing in observer.timings] == [
+            LifecycleTimingCategory.WORKSPACE_SEED,
+            LifecycleTimingCategory.HOST_VERIFICATION,
+            LifecycleTimingCategory.CLEANUP,
+            LifecycleTimingCategory.CLEANUP,
+        ]
+        assert [timing.operation for timing in observer.timings[-2:]] == [
+            "sdk_session_close",
+            "backend_delete",
+        ]
+        assert all(timing.outcome is RunnerOutcome.SUCCEEDED for timing in observer.timings)
+        assert all(timing.duration_ns == 10 for timing in observer.timings)
+        assert all(names == _EXPECTED_TOOLS for names in model.tool_names)
+        await _assert_backends_deleted(service)
+    finally:
+        await service.close()
+
+
+@pytest.mark.asyncio
+async def test_workspace_seed_failure_is_observed_without_starting_a_stage() -> None:
+    base_scenario = get_scenario("workspace-edit")
+    assert isinstance(base_scenario, StagedScenario)
+    service = RecordingService(create_sample_service())
+    observer = RecordingScenarioObserver()
+    failure = RuntimeError("manifest failed")
+
+    def fail_manifest() -> Never:
+        raise failure
+
+    scenario = replace(base_scenario, manifest_factory=fail_manifest)
+    try:
+        with pytest.raises(RuntimeError, match="manifest failed") as captured:
+            await run_scenario(
+                model=DeterministicScenarioModel(),
+                service=service,
+                scenario=scenario,
+                performance_clock=StepPerformanceClock(),
+                observer=observer,
+            )
+
+        assert captured.value is failure
+        assert observer.stage_starts == []
+        assert observer.stage_finishes == []
+        assert observer.timings == [
+            LifecycleTimingObservation(
+                category=LifecycleTimingCategory.WORKSPACE_SEED,
+                operation="client_create",
+                stage_key=None,
+                outcome=RunnerOutcome.FAILED,
+                duration_ns=10,
+            )
+        ]
+        assert service.created_handles == []
+    finally:
+        await service.close()
+
+
+@pytest.mark.asyncio
+async def test_pause_continue_observes_exact_persist_and_restore_boundaries() -> None:
+    scenario = get_scenario("pause-continue")
+    assert isinstance(scenario, PauseContinueScenario)
+    bundle = create_sample_service_bundle(policy_engine=scenario.policy_engine_factory())
+    service = RecordingService(bundle.service)
+    model = DeterministicScenarioModel()
+    model_factory_keys: list[str] = []
+    capability_factory_keys: list[str] = []
+    observer = RecordingScenarioObserver()
+
+    def model_for_stage(stage_key: str) -> Model:
+        model_factory_keys.append(stage_key)
+        return model
+
+    def capability_for_stage(stage_key: str) -> InMemorySandboxCapability:
+        capability_factory_keys.append(stage_key)
+        return InMemorySandboxCapability()
+
+    try:
+        await run_scenario(
+            model=model,
+            service=service,
+            scenario=scenario,
+            snapshot_store=bundle.snapshot_store,
+            clock=bundle.clock,
+            stage_model_factory=model_for_stage,
+            stage_capability_factory=capability_for_stage,
+            performance_clock=StepPerformanceClock(),
+            observer=observer,
+        )
+
+        assert model_factory_keys == [
+            "pause-continue-initial",
+            "pause-continue-resumed",
+        ]
+        assert capability_factory_keys == model_factory_keys
+        assert [
+            (timing.operation, timing.stage_key, timing.outcome)
+            for timing in observer.timings
+            if timing.category is LifecycleTimingCategory.SNAPSHOT_PERSIST
+        ] == [
+            (
+                "checkpoint_persist",
+                "pause-continue-initial",
+                RunnerOutcome.SUCCEEDED,
+            )
+        ]
+        assert [
+            (timing.operation, timing.stage_key, timing.outcome)
+            for timing in observer.timings
+            if timing.category is LifecycleTimingCategory.SNAPSHOT_RESTORE
+        ] == [
+            (
+                "live_reattachment",
+                "pause-continue-initial",
+                RunnerOutcome.SUCCEEDED,
+            ),
+            (
+                "replacement_resume",
+                "pause-continue-resumed",
+                RunnerOutcome.SUCCEEDED,
+            ),
+        ]
+        assert [
+            (timing.operation, timing.stage_key, timing.outcome)
+            for timing in observer.timings
+            if timing.category is LifecycleTimingCategory.HOST_VERIFICATION
+        ] == [
+            (
+                "checkpoint_artifacts",
+                "pause-continue-initial",
+                RunnerOutcome.SUCCEEDED,
+            ),
+            (
+                "live_reattachment_artifacts",
+                "pause-continue-initial",
+                RunnerOutcome.SUCCEEDED,
+            ),
+            (
+                "replacement_checkpoint_artifacts",
+                "pause-continue-resumed",
+                RunnerOutcome.SUCCEEDED,
+            ),
+            (
+                "final_artifacts",
+                "pause-continue-resumed",
+                RunnerOutcome.SUCCEEDED,
+            ),
+        ]
+        assert observer.stage_starts == [
+            StageStartObservation("pause-continue-initial"),
+            StageStartObservation("pause-continue-resumed"),
+        ]
+        assert observer.stage_finishes == [
+            StageFinishObservation("pause-continue-initial", RunnerOutcome.SUCCEEDED),
+            StageFinishObservation("pause-continue-resumed", RunnerOutcome.SUCCEEDED),
+        ]
+        await _assert_backends_deleted(service)
+    finally:
+        await service.close()
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected_outcome"),
+    [
+        pytest.param(
+            RuntimeError("conservative branch failed"),
+            RunnerOutcome.FAILED,
+            id="failed",
+        ),
+        pytest.param(
+            asyncio.CancelledError(),
+            RunnerOutcome.CANCELLED,
+            id="cancelled",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_snapshot_branch_stage_failure_observes_outcome_and_cleanup(
+    failure: BaseException,
+    expected_outcome: RunnerOutcome,
+) -> None:
+    scenario = get_scenario("snapshot-branching")
+    assert isinstance(scenario, SnapshotBranchingScenario)
+    bundle = create_sample_service_bundle(policy_engine=scenario.policy_engine_factory())
+    service = RecordingService(bundle.service)
+    model = DeterministicScenarioModel(
+        failure=failure,
+        failure_stage="snapshot-conservative",
+    )
+    model_factory_keys: list[str] = []
+    capability_factory_keys: list[str] = []
+    observer = RecordingScenarioObserver()
+
+    def model_for_stage(stage_key: str) -> Model:
+        model_factory_keys.append(stage_key)
+        return model
+
+    def capability_for_stage(stage_key: str) -> InMemorySandboxCapability:
+        capability_factory_keys.append(stage_key)
+        return InMemorySandboxCapability()
+
+    try:
+        with pytest.raises(type(failure)):
+            await run_scenario(
+                model=model,
+                service=service,
+                scenario=scenario,
+                snapshot_store=bundle.snapshot_store,
+                clock=bundle.clock,
+                stage_model_factory=model_for_stage,
+                stage_capability_factory=capability_for_stage,
+                performance_clock=StepPerformanceClock(),
+                observer=observer,
+            )
+
+        assert model_factory_keys == [
+            "snapshot-baseline",
+            "snapshot-conservative",
+        ]
+        assert capability_factory_keys == model_factory_keys
+        assert observer.stage_starts == [
+            StageStartObservation("snapshot-baseline"),
+            StageStartObservation("snapshot-conservative"),
+        ]
+        assert observer.stage_finishes == [
+            StageFinishObservation("snapshot-baseline", RunnerOutcome.SUCCEEDED),
+            StageFinishObservation("snapshot-conservative", expected_outcome),
+        ]
+        assert all(
+            observation.stage_key != "snapshot-aggressive"
+            for observation in (*observer.stage_starts, *observer.stage_finishes)
+        )
+        assert [
+            (timing.operation, timing.stage_key, timing.outcome)
+            for timing in observer.timings
+            if timing.category is LifecycleTimingCategory.WORKSPACE_MUTATION
+        ] == [
+            (
+                "checkpoint_write",
+                "snapshot-baseline",
+                RunnerOutcome.SUCCEEDED,
+            )
+            for _ in scenario.checkpoint_artifacts
+        ]
+        assert [
+            (timing.operation, timing.stage_key, timing.outcome)
+            for timing in observer.timings
+            if timing.category is LifecycleTimingCategory.SNAPSHOT_PERSIST
+        ] == [
+            (
+                "checkpoint_persist",
+                "snapshot-baseline",
+                RunnerOutcome.SUCCEEDED,
+            )
+        ]
+        assert [
+            (timing.operation, timing.stage_key, timing.outcome)
+            for timing in observer.timings
+            if timing.category is LifecycleTimingCategory.SNAPSHOT_RESTORE
+        ] == [
+            (
+                "live_reattachment",
+                "snapshot-baseline",
+                RunnerOutcome.SUCCEEDED,
+            ),
+            (
+                "branch_resume",
+                "snapshot-conservative",
+                RunnerOutcome.SUCCEEDED,
+            ),
+        ]
+        cleanup_timings = [
+            timing
+            for timing in observer.timings
+            if timing.category is LifecycleTimingCategory.CLEANUP
+        ]
+        assert cleanup_timings
+        assert all(timing.outcome is RunnerOutcome.SUCCEEDED for timing in cleanup_timings)
+        await _assert_backends_deleted(service)
+    finally:
+        await service.close()
+
+
+@pytest.mark.asyncio
 async def test_document_review_guards_revision_and_verifies_evidence() -> None:
     scenario = get_scenario("document-review")
     bundle = create_sample_service_bundle(policy_engine=scenario.policy_engine_factory())
@@ -1781,6 +2138,7 @@ async def test_pause_continue_cancellation_during_replacement_resume_load_cleans
         service,
     )
     model = DeterministicScenarioModel()
+    observer = RecordingScenarioObserver()
     try:
         with pytest.raises(asyncio.CancelledError):
             await run_scenario(
@@ -1789,10 +2147,37 @@ async def test_pause_continue_cancellation_during_replacement_resume_load_cleans
                 scenario=scenario,
                 snapshot_store=snapshot_store,
                 clock=bundle.clock,
+                performance_clock=StepPerformanceClock(),
+                observer=observer,
             )
 
         assert model.stage_order == ["pause-continue-initial"]
         assert model.calls == {"pause-continue-initial": 6}
+        assert observer.stage_starts == [
+            StageStartObservation("pause-continue-initial"),
+        ]
+        assert observer.stage_finishes == [
+            StageFinishObservation("pause-continue-initial", RunnerOutcome.SUCCEEDED),
+        ]
+        assert [
+            (timing.operation, timing.stage_key, timing.outcome)
+            for timing in observer.timings
+            if timing.category is LifecycleTimingCategory.SNAPSHOT_RESTORE
+        ] == [
+            (
+                "live_reattachment",
+                "pause-continue-initial",
+                RunnerOutcome.SUCCEEDED,
+            ),
+            (
+                "replacement_resume",
+                "pause-continue-resumed",
+                RunnerOutcome.CANCELLED,
+            ),
+        ]
+        assert any(
+            timing.category is LifecycleTimingCategory.CLEANUP for timing in observer.timings
+        )
         state = snapshot_store.state_at_cancellation
         assert state is not None
         assert len(state.created_handles) == 1
@@ -2209,15 +2594,26 @@ async def test_model_failure_remains_primary_when_delete_also_fails() -> None:
         delete_failure=RuntimeError("delete failed"),
     )
     model = DeterministicScenarioModel(failure=RuntimeError("model failed"))
+    observer = RecordingScenarioObserver()
     try:
         with pytest.raises(RuntimeError, match="model failed") as captured:
             await run_scenario(
                 model=model,
                 service=service,
                 scenario=scenario,
+                performance_clock=StepPerformanceClock(),
+                observer=observer,
             )
 
         assert captured.value.__notes__ == ["secondary backend delete failure: delete failed"]
+        assert [
+            (timing.operation, timing.outcome)
+            for timing in observer.timings
+            if timing.category is LifecycleTimingCategory.CLEANUP
+        ] == [
+            ("sdk_session_close", RunnerOutcome.SUCCEEDED),
+            ("backend_delete", RunnerOutcome.FAILED),
+        ]
         await _assert_backends_deleted(service)
     finally:
         await service.close()
