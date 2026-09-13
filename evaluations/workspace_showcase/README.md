@@ -140,6 +140,17 @@ prose.
 Every report must state that it is non-deterministic, non-gating, provider- and
 machine-specific, and not directly comparable across uncontrolled runs.
 
+## Retained evidence
+
+The first approved pair is retained under
+[`results/20260913T183046Z-azure-openai`](results/20260913T183046Z-azure-openai/README.md).
+The guarded multi-agent run succeeded with exact artifact matches. The document
+run reached both stages but failed final host verification after unsuccessful
+mutation attempts. That observed failure is retained rather than retried or
+converted into success-shaped evidence. Workspace operations were not the
+observed end-to-end constraint, and the runs did not demonstrate a Milestone 6
+capacity trigger.
+
 ## Maintenance
 
 Changing the schema creates a new schema version. Changing scenario inputs,

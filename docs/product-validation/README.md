@@ -278,6 +278,16 @@ Approved evidence must include `document-review` plus another guarded multi-stag
 workflow and must identify model behavior, provider integration, SDK behavior, or
 MemSandbox behavior as the observed failure boundary.
 
+The first approved pair is retained in the
+[2026-09-13 Azure OpenAI result set](../../evaluations/workspace_showcase/results/20260913T183046Z-azure-openai/README.md).
+The guarded multi-agent workflow passed all three exact artifact checks. The
+document workflow reached both stages and then failed exact host verification;
+the failed observation is retained because live model behavior is non-gating.
+Provider-model time dominated the observed end-to-end durations, while workspace
+seed, read, mutation, verification, and cleanup remained separately visible.
+Neither run exercised snapshots or demonstrated a Milestone 6 capacity trigger,
+so this evidence does not authorize workspace optimization or content offload.
+
 ## Benchmark workloads
 
 Benchmark cases use versioned generated profiles. Every result records exact file count,

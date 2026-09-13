@@ -1259,11 +1259,11 @@ direction visible without claiming unimplemented capabilities.
 - [x] **7.3.1** Add deterministic model-double coverage for each showcase: success,
   stale/rejected mutation, dependency failure, bounds, cancellation, and cleanup where
   applicable. Verify artifacts and interactions rather than accepting model prose.
-- [ ] **7.3.2** Run opt-in live evaluations on representative document and guarded-edit
+- [x] **7.3.2** Run opt-in live evaluations on representative document and guarded-edit
   fixtures. Record output correctness, preservation of unrelated content, evidence
   accuracy, unsupported-operation attempts, repair behavior, and tool usage. Separate
   these results from model-free conformance; model behavior is not deterministic.
-- [ ] **7.3.3** Measure workspace seeding, mutation, snapshot, and cleanup separately
+- [x] **7.3.3** Measure workspace seeding, mutation, snapshot, and cleanup separately
   from model latency and total cost. Use Milestone 6's measured triggers to decide
   whether internal optimization is warranted; do not reopen content offload by default.
 - [ ] **7.3.4** Record which missing operations block actual workflows and select the
@@ -1275,7 +1275,7 @@ direction visible without claiming unimplemented capabilities.
 
 - [ ] **7.9.1** The three workspace workflows are runnable, host-verified, documented,
   and preserve existing sample names and behavior.
-- [ ] **7.9.2** Required tests remain deterministic and network-free; live evaluation
+- [x] **7.9.2** Required tests remain deterministic and network-free; live evaluation
   requirements, costs, and limitations are explicit.
 - [x] **7.9.3** Installed-package and supported SDK composition paths are documented
   and exercised without implying full-shell compatibility.
