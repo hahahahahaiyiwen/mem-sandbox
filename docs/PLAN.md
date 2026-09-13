@@ -1292,9 +1292,11 @@ direction visible without claiming unimplemented capabilities.
 
 **Prerequisite:** Milestone 6 has recorded its scalability decision. Content offload is
 deferred; any future reconsideration and implementation remains independently scoped.
-The bounded artifact-exchange work in `8.4` may proceed alongside Milestone 7 using
-existing authority and limits. New protected operations require their applicable grant,
-policy, accounting, and conformance work before shipping, not all future resource modes.
+The bounded artifact-exchange work in `8.4` is deferred until a linked
+[artifact-exchange review trigger](./product-validation/workflow-blocker-assessment.md#review-triggers)
+is met. Its existing design is conditional future scope, not implementation authority.
+New protected operations require their applicable grant, policy, accounting, and
+conformance work before shipping, not all future resource modes.
 
 ### Goal
 
@@ -1998,10 +2000,10 @@ their referenced checklist task begins.
 | First live agent sample | Official OpenAI and Azure OpenAI models through the OpenAI Agents SDK and host-bound MemSandbox capability; live calls remain opt-in | `5.8` / `#7` / `#45` | Resolved |
 | Workspace mutation scaling | Prioritize phase instrumentation, single-pass seeding, and an immutable path-copying tree with cached subtree summaries in separately approved work | `6.2` / `6.9` | Resolved |
 | Workspace content offload | Deferred after Milestone 6; reconsider only on a measured capacity trigger with host budgets and provider lifecycle requirements | `6.3` / `6.9` | Deferred |
-| Next delivery priority | Useful workspace showcases, real artifact exchange, and SDK usability before broad external infrastructure | `7` / `8.4` | Planned |
+| Next delivery priority | Preserve completed workspace showcases and SDK usability; defer real artifact exchange until a linked workflow-blocker review trigger is met | `7` / `8.4` | Deferred |
 | External capability profiles | Preserve `virtual` as the default; add host-selected `connected`, `trusted-host-execution`, and `isolated-execution` profiles without snapshot- or model-driven widening | `8.1` | Planned |
 | Resource accounting rollout | Define shared principles; implement required dimensions with each selected capability, preserving hard limits and exact-once settlement | `8.3` | Planned |
-| Repository ingestion and export | Host-controlled bounded archive/tree import plus revision/hash-bound diff, archive, or artifact export; no host path or Git authority | `8.4` | Planned |
+| Repository ingestion and export | Defer the designed host-controlled bounded archive/tree import and revision/hash-bound export until the artifact-exchange review trigger is met | `8.4` | Deferred |
 | Git repository retrieval | Planned input source; initiating actor, transport, credentials, ref resolution, refresh/merge semantics, and local-edit preservation require design approval | `8.4.6`-`8.4.8` | Open |
 | First optional external capability | Defer controlled HTTP and network-disabled execution until a linked [workflow-blocker review trigger](./product-validation/workflow-blocker-assessment.md#review-triggers) is met | `7.3.4` / `9` / `10` | Deferred |
 | Network egress | Default-deny HTTP/HTTPS through one host-owned gateway with destination policy, SSRF controls, destination-bound credentials, cumulative budgets, and audit | `9` | Planned |
