@@ -1,6 +1,7 @@
 # Product Validation and Benchmark Design
 
-**Status:** Three-driver conformance, benchmark harness, and non-gating reference implemented
+**Status:** Three-driver conformance, benchmark harness, non-gating reference, and
+Milestone 7 workflow-blocker decision implemented
 
 ## Purpose
 
@@ -287,6 +288,22 @@ Provider-model time dominated the observed end-to-end durations, while workspace
 seed, read, mutation, verification, and cleanup remained separately visible.
 Neither run exercised snapshots or demonstrated a Milestone 6 capacity trigger,
 so this evidence does not authorize workspace optimization or content offload.
+
+### Workflow-blocker decision
+
+The Milestone 7
+[workflow-blocker assessment](./workflow-blocker-assessment.md) combines deterministic
+scenario results, installed-package exercises, approved live records, and integration
+research. It distinguishes host package retrieval, parsing/calculation, test/runtime,
+SDK/provider integration, and model behavior.
+
+The selected disposition is to defer new capability and second-SDK work. Current
+evidence contains no reproducible product-surface blocker: maintained deterministic
+workflows pass, one live workflow passed exactly, the failed live document run does not
+identify a missing operation, and recurring package-CDN failures belong to the host
+validation environment. The assessment defines the evidence and authority required to
+reopen artifact exchange, controlled HTTP, external execution, durable operation, or
+another SDK adapter.
 
 ## Benchmark workloads
 

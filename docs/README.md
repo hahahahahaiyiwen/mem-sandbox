@@ -13,6 +13,9 @@ successor to the original .NET Agent Sandbox.
   - workspace/backend adapters
 - Keep the implemented OpenAI Agents SDK capability and sandbox client/session as the
   first native integration; select a second SDK from user and ecosystem evidence.
+- Defer a new capability or second SDK until the
+  [workflow-blocker assessment](./product-validation/workflow-blocker-assessment.md)
+  records a reproducible product-surface trigger.
 - Preserve the host-free `virtual` profile as the default.
 - Add external capabilities only through immutable host-selected profiles, focused
   policy, cumulative resource accounting, and bounded audit.
@@ -43,6 +46,7 @@ successor to the original .NET Agent Sandbox.
 - [Controlled network egress](./components/network-egress/README.md)
 - [External execution and Python runtime](./components/external-execution/README.md)
 - [Product validation and benchmarks](./product-validation/README.md)
+- [Workflow blocker assessment](./product-validation/workflow-blocker-assessment.md)
 
 ## Post-Milestone-5 design directions
 
