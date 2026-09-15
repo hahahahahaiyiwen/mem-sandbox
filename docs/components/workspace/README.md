@@ -10,6 +10,10 @@ nodes and file bytes in memory and never delegates to the host filesystem.
 The workspace owns path semantics, node metadata, content integrity, quotas, and atomic
 filesystem mutations.
 
+For a host integration recipe and the distinction between current archives and future
+artifact-import/export conveniences, see the
+[artifact-workflow audit](../../product-validation/artifact-workflow-audit.md).
+
 ## Responsibilities
 
 - Normalize POSIX-style paths independently of the host operating system.

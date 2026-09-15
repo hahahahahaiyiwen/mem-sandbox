@@ -13,3 +13,7 @@ The public host-facing surface includes portable archive export and validate-the
 restore. Restore may require an expected current workspace revision and root hash;
 mismatches raise `SessionWorkspaceChanged` while the operation gate prevents a stale
 publication from overwriting newer session work.
+
+The [artifact-workflow audit](../../../docs/product-validation/artifact-workflow-audit.md)
+links these guarantees to a host input/output recipe and the distinction between
+pre-publication failure and error reporting after a committed mutation.

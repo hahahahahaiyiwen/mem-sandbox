@@ -12,6 +12,7 @@ shell.
 | Embed MemSandbox in a `SandboxAgent` application | Install the optional dependency, then follow [Use with `SandboxAgent`](#use-with-sandboxagent). |
 | Combine the workspace with an application tool | Start with [Compose with a host-owned function tool](#compose-with-a-host-owned-function-tool). |
 | Add snapshot-backed SDK resume | Read [Optional snapshot and resume support](#optional-snapshot-and-resume-support) after the basic lifecycle works. |
+| Understand current host artifact IO | Read the [artifact-workflow audit](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/docs/product-validation/artifact-workflow-audit.md) for core versus SDK boundaries and conditional future scope. |
 | Maintain or extend the adapter | Start at [Engineering reference](#engineering-reference). |
 
 ## Install

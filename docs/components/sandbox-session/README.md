@@ -13,6 +13,10 @@ store.
 
 The session contains orchestration logic. It does not contain concrete infrastructure.
 
+The [artifact-workflow audit](../../product-validation/artifact-workflow-audit.md)
+demonstrates current host binary IO and conditional archive restore, including why a
+post-commit event failure must not be interpreted as a rollback.
+
 ## Responsibilities
 
 - Expose agent-facing execute, bounded read, write, and patch operations.
