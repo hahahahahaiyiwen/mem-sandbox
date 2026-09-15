@@ -16,4 +16,7 @@ publication from overwriting newer session work.
 
 The [artifact-workflow audit](../../../docs/product-validation/artifact-workflow-audit.md)
 links these guarantees to a host input/output recipe and the distinction between
-pre-publication failure and error reporting after a committed mutation.
+pre-publication failure and error reporting after a committed mutation. The
+[bounded artifact-exchange design](../../../docs/product-validation/artifact-exchange-design.md)
+keeps future artifact facades host-facing, deadline-bound, and coordinated through
+session-owned admission and workspace-owned publication.

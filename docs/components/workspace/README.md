@@ -12,7 +12,8 @@ filesystem mutations.
 
 For a host integration recipe and the distinction between current archives and future
 artifact-import/export conveniences, see the
-[artifact-workflow audit](../../product-validation/artifact-workflow-audit.md).
+[artifact-workflow audit](../../product-validation/artifact-workflow-audit.md) and the
+[bounded artifact-exchange design](../../product-validation/artifact-exchange-design.md).
 
 ## Responsibilities
 
