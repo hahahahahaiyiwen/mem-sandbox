@@ -84,6 +84,11 @@ workspace-publication, and isolation facts. Repository exchange uses workspace-o
 prepared archives. Unified resource accounting may deny or narrow work but never
 increases component limits.
 
+The [Milestone 8 authority/accounting design](../../product-validation/authority-accounting-design.md)
+maps conditional artifact-exchange operations to host-selected grants, prepared facts,
+resource ownership, and settlement semantics. It preserves this narrow policy seam and
+does not introduce a generic rule language.
+
 Current `PolicyRequest` and `PolicyDecision` do not yet gain speculative union fields for
 these resources. Each implementation milestone must first define the narrow
 consumer-owned policy port and immutable facts required by that protected action.

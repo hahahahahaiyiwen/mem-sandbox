@@ -80,6 +80,10 @@ through its own APIs, but it is not an operating-system isolation boundary.
 - Add cumulative operation and session resource accounting while preserving
   independently authoritative workspace, command, provider, network, and execution
   limits.
+- Keep artifact-exchange authority and accounting consumer-driven: the
+  [Milestone 8 authority/accounting design](./product-validation/authority-accounting-design.md)
+  records conditional grants, event facts, settlement paths, and deferrals without
+  enabling a new default capability.
 
 ## 3. Goals
 

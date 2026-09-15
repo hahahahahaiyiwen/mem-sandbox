@@ -18,7 +18,10 @@ demonstrates current host binary IO and conditional archive restore, including w
 post-commit event failure must not be interpreted as a rollback. The
 [bounded artifact-exchange design](../../product-validation/artifact-exchange-design.md)
 keeps future import/export conveniences session-orchestrated over workspace-owned
-candidates.
+candidates. The
+[authority/accounting design](../../product-validation/authority-accounting-design.md)
+keeps their future grants host-selected and their resource settlement/event paths
+session-coordinated.
 
 ## Responsibilities
 

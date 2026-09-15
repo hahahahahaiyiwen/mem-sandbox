@@ -23,3 +23,8 @@ adapter, host filesystem implementation, or service locator.
 Add specific domain request and result types beside the component that owns their
 behavior. Change shared categories only when adapters and existing callers can preserve
 their meaning, and update foundation tests with every contract change.
+
+The [Milestone 8 authority/accounting design](../../../docs/product-validation/authority-accounting-design.md)
+keeps future resource identities, usage facts, and settlement metadata typed and
+framework-neutral while deferring any shared categories until a concrete implementation
+needs them.
