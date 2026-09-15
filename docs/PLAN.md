@@ -6,6 +6,9 @@ showcases, real artifact inputs/outputs, and SDK usability before broad external
 capability infrastructure. Git repository retrieval remains deferred by the
 [conditional Git retrieval decision](./product-validation/git-retrieval-decision.md)
 until a concrete trigger justifies host-granted provider work.
+The [Milestone 8 planning index](./product-validation/milestone-8-planning-index.md)
+records the accepted planning tranche and the remaining implementation gates; it is not
+milestone completion evidence by itself.
 Future workspace optimizations and external capabilities remain separately scoped,
 unimplemented, and disabled by default.
 

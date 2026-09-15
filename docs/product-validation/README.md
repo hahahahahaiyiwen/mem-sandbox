@@ -18,6 +18,8 @@ keeps those conditional operations consumer-driven and documents the grants, lim
 events, settlement paths, and deferrals required before implementation. The
 [conditional Git retrieval decision](./git-retrieval-decision.md) defers repository
 retrieval until a concrete trigger justifies host-granted provider work.
+The [Milestone 8 planning index](./milestone-8-planning-index.md) ties these accepted
+planning deliverables to the remaining exit criteria and future implementation gates.
 
 By the end of Milestone 5, MemSandbox should demonstrate that it:
 
