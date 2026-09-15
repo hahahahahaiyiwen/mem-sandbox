@@ -15,7 +15,9 @@ reuse-first host composition and conditional future contracts without lifting th
 next-capability deferral. The
 [authority, policy, accounting, and event design](./authority-accounting-design.md)
 keeps those conditional operations consumer-driven and documents the grants, limits,
-events, settlement paths, and deferrals required before implementation.
+events, settlement paths, and deferrals required before implementation. The
+[conditional Git retrieval decision](./git-retrieval-decision.md) defers repository
+retrieval until a concrete trigger justifies host-granted provider work.
 
 By the end of Milestone 5, MemSandbox should demonstrate that it:
 

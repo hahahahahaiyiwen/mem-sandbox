@@ -84,6 +84,10 @@ through its own APIs, but it is not an operating-system isolation boundary.
   [Milestone 8 authority/accounting design](./product-validation/authority-accounting-design.md)
   records conditional grants, event facts, settlement paths, and deferrals without
   enabling a new default capability.
+- Defer Git retrieval until the
+  [conditional Git retrieval decision](./product-validation/git-retrieval-decision.md)
+  has a concrete workflow trigger, selected transport, authority model and separate
+  implementation approval.
 
 ## 3. Goals
 

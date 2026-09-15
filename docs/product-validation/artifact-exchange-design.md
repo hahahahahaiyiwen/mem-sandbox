@@ -201,7 +201,9 @@ general archive format by accident.
 
 `GitRepo` manifests, remote clone/fetch, branch selection and dependency retrieval remain
 outside the current core capability. Inputs never authorize arbitrary host paths or
-model-supplied repository URLs.
+model-supplied repository URLs. The
+[conditional Git retrieval decision](./git-retrieval-decision.md) keeps repository
+retrieval deferred until a concrete trigger justifies host-granted provider work.
 
 ## Behavior-seam test matrix
 
