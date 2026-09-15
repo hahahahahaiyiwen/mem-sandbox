@@ -37,6 +37,10 @@ accounting, HTTP, and external execution. Those events remain correlated with on
 sandbox operation and follow the same classification, redaction, payload, sequencing,
 delivery, and failure rules.
 
+The [Milestone 8 authority/accounting design](../../product-validation/authority-accounting-design.md)
+records the conditional artifact import/export/report event facts and settlement paths
+without adding event types to the current profile.
+
 The resource-owning module defines its event facts; it does not emit raw provider
 exceptions through the generic sink. Candidate facts include resource kind, outcome,
 stable reason, bounded usage, destination class, runtime/profile identifier, workspace

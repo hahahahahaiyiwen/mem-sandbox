@@ -19,4 +19,7 @@ links these guarantees to a host input/output recipe and the distinction between
 pre-publication failure and error reporting after a committed mutation. The
 [bounded artifact-exchange design](../../../docs/product-validation/artifact-exchange-design.md)
 keeps future artifact facades host-facing, deadline-bound, and coordinated through
-session-owned admission and workspace-owned publication.
+session-owned admission and workspace-owned publication. The
+[authority/accounting design](../../../docs/product-validation/authority-accounting-design.md)
+documents the conditional grants, event facts, and settlement paths that any future
+session facade must preserve.

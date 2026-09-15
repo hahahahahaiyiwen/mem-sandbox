@@ -12,7 +12,10 @@ host input/output surfaces, a credential-free recipe, failure boundaries and evi
 gaps for Milestone 8 planning. The
 [bounded artifact-exchange design](./artifact-exchange-design.md) maps those findings to
 reuse-first host composition and conditional future contracts without lifting the
-next-capability deferral.
+next-capability deferral. The
+[authority, policy, accounting, and event design](./authority-accounting-design.md)
+keeps those conditional operations consumer-driven and documents the grants, limits,
+events, settlement paths, and deferrals required before implementation.
 
 By the end of Milestone 5, MemSandbox should demonstrate that it:
 
