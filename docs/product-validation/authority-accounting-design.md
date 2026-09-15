@@ -50,6 +50,8 @@ separate approved implementation issue.
 Current operations use the existing minimal policy seam and component limits. Conditional
 operations should add only the narrow prepared facts their consumer needs; they should not
 turn `PolicyRequest` into a speculative union of every future resource type.
+The [conditional Git retrieval decision](./git-retrieval-decision.md) records the
+repository-specific deferral and future authority requirements.
 
 ## Policy and prepared facts
 
