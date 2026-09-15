@@ -15,7 +15,10 @@ The session contains orchestration logic. It does not contain concrete infrastru
 
 The [artifact-workflow audit](../../product-validation/artifact-workflow-audit.md)
 demonstrates current host binary IO and conditional archive restore, including why a
-post-commit event failure must not be interpreted as a rollback.
+post-commit event failure must not be interpreted as a rollback. The
+[bounded artifact-exchange design](../../product-validation/artifact-exchange-design.md)
+keeps future import/export conveniences session-orchestrated over workspace-owned
+candidates.
 
 ## Responsibilities
 

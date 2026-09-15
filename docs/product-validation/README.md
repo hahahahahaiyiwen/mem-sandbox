@@ -9,7 +9,10 @@ This design turns the MemSandbox product thesis into executable evidence.
 
 The [current artifact-workflow audit](./artifact-workflow-audit.md) records existing
 host input/output surfaces, a credential-free recipe, failure boundaries and evidence
-gaps for Milestone 8 planning. It does not lift the next-capability deferral.
+gaps for Milestone 8 planning. The
+[bounded artifact-exchange design](./artifact-exchange-design.md) maps those findings to
+reuse-first host composition and conditional future contracts without lifting the
+next-capability deferral.
 
 By the end of Milestone 5, MemSandbox should demonstrate that it:
 
