@@ -47,6 +47,7 @@ successor to the original .NET Agent Sandbox.
 - [External execution and Python runtime](./components/external-execution/README.md)
 - [Product validation and benchmarks](./product-validation/README.md)
 - [Workflow blocker assessment](./product-validation/workflow-blocker-assessment.md)
+- [Milestone 7 exit evidence](./product-validation/milestone-7-exit-evidence.md)
 
 ## Post-Milestone-5 design directions
 
@@ -61,7 +62,7 @@ successor to the original .NET Agent Sandbox.
 - [External execution and Python runtime](./components/external-execution/README.md) -
   external backend execution with bounded workspace transfer, accurate isolation
   profiles, and Python as the first planned runtime.
-- [Implementation plan](./PLAN.md#11-milestone-7-external-capability-foundations) -
+- [Implementation plan](./PLAN.md#12-milestone-8-artifact-exchange-and-focused-external-foundations) -
   capability grants, unified resource accounting, and host-controlled repository
   ingestion and result export.
 

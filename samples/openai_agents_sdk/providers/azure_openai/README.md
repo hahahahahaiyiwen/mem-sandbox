@@ -104,6 +104,10 @@ required in-memory state is a failed scenario.
 See the [SDK scenario design](../../scenarios/README.md) for scenario
 ownership and lifecycle invariants.
 
+The [Milestone 7 evidence index](../../../../docs/product-validation/milestone-7-exit-evidence.md)
+links the deterministic checks and the retained Azure OpenAI observations, including
+failed host verification and unavailable provider monetary cost.
+
 ## Interactive inspection
 
 Pass `--inspect` to open an interactive CLI after successful verification. Pass

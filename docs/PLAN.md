@@ -1278,7 +1278,7 @@ direction visible without claiming unimplemented capabilities.
 
 ### Exit criteria
 
-- [ ] **7.9.1** The three workspace workflows are runnable, host-verified, documented,
+- [x] **7.9.1** The three workspace workflows are runnable, host-verified, documented,
   and preserve existing sample names and behavior.
 - [x] **7.9.2** Required tests remain deterministic and network-free; live evaluation
   requirements, costs, and limitations are explicit.
@@ -1287,6 +1287,11 @@ direction visible without claiming unimplemented capabilities.
 - [x] **7.9.4** Current capabilities, future extensions, and evidence-based next
   priorities are distinguishable in public documentation. The public README and
   product-validation documentation link the current defer decision and its prerequisites.
+
+The [Milestone 7 exit-evidence index](./product-validation/milestone-7-exit-evidence.md)
+maps every `7.1`-`7.3` item and each exit criterion to delivery, tests, documentation,
+commands, and retained reports. It separates historical evidence from current closure
+validation and preserves the tracker merge/closure gate.
 
 ## 12. Milestone 8: artifact exchange and focused external foundations
 

@@ -47,6 +47,10 @@ SDK `Runner` loop, JSON-safe snapshot state, replacement resume, the complete
 deterministic document-review editor/reviewer workflow, and cleanup without model-network
 calls.
 
+The [Milestone 7 evidence index](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/docs/product-validation/milestone-7-exit-evidence.md)
+links the SDK and installed-package delivery records, reproducible checks, and separate
+live-evaluation limitations.
+
 Applications migrating from the combined `mem-sandbox==0.1.x` package must replace both
 the old `openai-agents` extra and the `mem_sandbox.integrations.openai_agents` import; no
 forwarding shim is installed.
@@ -409,7 +413,7 @@ All supported adapter types are exported from `mem_sandbox_openai_agents`:
 | `InMemorySandboxClientOptions` | Immutable per-session owner, workspace, lifecycle, stream, and manifest limits | Optional for defaults; set explicitly for application provenance or limits |
 | `InMemorySandboxSession` | Concrete provider session behind the SDK instrumentation wrapper | Advanced inspection and adapter extension; applications normally use the returned SDK session |
 | `InMemorySandboxSessionState` | Strict JSON-safe handle, core identity, manifest, and optional archive metadata | Persist and pass to `client.resume()` when SDK resume is required |
-| `InMemorySandboxSnapshotSpec` | Request for a new adapter-owned snapshot identity | Optional input to `client.create()` when durable SDK persistence is configured |
+| `InMemorySandboxSnapshotSpec` | Request for a new adapter-owned snapshot identity | Optional input to `client.create()` when snapshot-backed SDK resume is configured |
 | `InMemorySandboxSnapshot` | Realized OpenAI snapshot bridge bound to owner and store metadata | Advanced state/persistence handling; normally produced by the adapter |
 
 ## Optional snapshot and resume support
