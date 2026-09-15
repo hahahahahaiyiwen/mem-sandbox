@@ -1,9 +1,9 @@
 # MemSandbox Implementation Plan
 
 **Status:** Active workspace-first delivery roadmap, reprioritized 2026-09-10
-**Current focus:** Milestones 0 through 6 are complete. Prioritize useful workspace
-showcases, real artifact inputs/outputs, and SDK usability before broad external
-capability infrastructure. Git repository retrieval remains deferred by the
+**Current focus:** Milestones 0 through 7 are complete. Prioritize useful workspace
+inputs/outputs and SDK usability before broad external capability infrastructure. Git
+repository retrieval remains deferred by the
 [conditional Git retrieval decision](./product-validation/git-retrieval-decision.md)
 until a concrete trigger justifies host-granted provider work.
 The [Milestone 8 planning index](./product-validation/milestone-8-planning-index.md)

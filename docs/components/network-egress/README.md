@@ -37,8 +37,9 @@ gateway and policy. Network access remains absent from the default virtual profi
 - Enforce egress for arbitrary external code below the guest through its execution
   runtime, network namespace, proxy, firewall, or equivalent boundary. A Python client
   wrapper cannot contain code that can import `socket`.
-- Account for requests, transferred bytes, concurrency, and time through the shared
-  resource-accounting model planned for Milestone 7.
+- Account for requests, transferred bytes, concurrency, and time through the conditional
+  Milestone 8 resource-accounting model selected for the first approved protected
+  capability.
 
 ## Trust model
 

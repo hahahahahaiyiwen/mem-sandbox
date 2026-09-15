@@ -33,7 +33,8 @@ Python is the first planned runtime, while the backend contract remains language
 - Route optional networking through the controlled-egress design and enforce it below
   the guest. No backend receives unrestricted egress by implication.
 - Account for compute, memory, process, scratch, workspace, output, transfer, network,
-  and concurrency use through the Milestone 7 resource-accounting boundary.
+  and concurrency use through the conditional Milestone 8 resource-accounting boundary
+  selected for the first approved protected capability.
 - Keep package installation and mutable runtime construction out of the first Python
   profile.
 
