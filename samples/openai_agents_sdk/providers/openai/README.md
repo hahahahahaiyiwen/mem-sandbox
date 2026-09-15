@@ -87,6 +87,9 @@ access. OpenAI Agents SDK tracing is disabled by the shared runner.
 Required tests construct and close the client without issuing a request. Scenario tests
 use a deterministic `Model` double, so CI requires no API key or inference endpoint.
 
+See the [Milestone 7 evidence index](../../../../docs/product-validation/milestone-7-exit-evidence.md)
+for reproducible deterministic checks and explicitly separate retained live results.
+
 ## Maintenance
 
 Keep only official OpenAI configuration and model construction in this package.

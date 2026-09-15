@@ -83,6 +83,10 @@ Evidence keys:
 `PROVIDER` applies to the registry and application lifecycle as a whole rather
 than to one scenario row.
 
+The [Milestone 7 exit evidence](../../../docs/product-validation/milestone-7-exit-evidence.md)
+connects this matrix to delivery records, executable commands, and the separate
+non-gating live observations.
+
 When a scenario changes, update its row and deterministic evidence in the same
 change. Add scenario-owned negative coverage only when the scenario promises
 state-preservation or lifecycle semantics beyond the shared runner; otherwise

@@ -1,7 +1,7 @@
 # Product Validation and Benchmark Design
 
 **Status:** Three-driver conformance, benchmark harness, non-gating reference, and
-Milestone 7 workflow-blocker decision implemented
+Milestone 7 workflow-blocker decision and exit-evidence index implemented
 
 ## Purpose
 
@@ -304,6 +304,15 @@ identify a missing operation, and recurring package-CDN failures belong to the h
 validation environment. The assessment defines the evidence and authority required to
 reopen artifact exchange, controlled HTTP, external execution, durable operation, or
 another SDK adapter.
+
+### Milestone 7 exit evidence
+
+The [exit-evidence index](./milestone-7-exit-evidence.md) maps every Milestone 7 work
+item and exit criterion to its delivery, deterministic tests, reader-facing guidance,
+and retained live observations. It also links the current closure validation record,
+including package checks and the remaining tracker merge gate. Historical child
+results are not fresh validation, and a failed live observation is not rewritten as
+deterministic success.
 
 ## Benchmark workloads
 

@@ -108,7 +108,7 @@ nanoseconds. The performance clock is injected for deterministic tests.
 | `workspace_read` | One model-facing MemSandbox read tool invocation |
 | `workspace_mutation` | One model-facing write/patch or host checkpoint mutation |
 | `workspace_execute` | One constrained command invocation |
-| `snapshot_persist` | Before checkpoint stop/persist through durable in-process state availability |
+| `snapshot_persist` | Before checkpoint stop/persist through retained in-process state availability |
 | `snapshot_restore` | Before resume through an available live attachment or started replacement/fork |
 | `host_verification` | Exact expected-byte reads and comparisons performed by the host |
 | `cleanup` | SDK session/backend, service, or provider-client cleanup operation |

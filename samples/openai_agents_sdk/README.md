@@ -18,6 +18,10 @@ The helpers under `samples` are repository examples, not installed
 `mem_sandbox` public APIs. Production applications should copy the composition pattern
 or inject their own public collaborators rather than importing `samples`.
 
+The [Milestone 7 exit evidence](../../docs/product-validation/milestone-7-exit-evidence.md)
+connects these workflows to deterministic host verification and documents the retained
+live-provider outcomes separately.
+
 ## Run the document-review showcase
 
 Configure either the [official OpenAI provider](./providers/openai/README.md) or

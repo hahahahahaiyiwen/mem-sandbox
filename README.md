@@ -207,6 +207,10 @@ the retained live and installed-package observations do not identify a missing
 MemSandbox operation. The assessment lists the reproducible review triggers and
 authority requirements that must be met before selecting a future extension.
 
+The [Milestone 7 evidence index](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/docs/product-validation/milestone-7-exit-evidence.md)
+links the maintained workflows, installed-package checks, retained live observations,
+and milestone exit criteria without treating live model outcomes as deterministic.
+
 ## How the agent integration works
 
 ```text
