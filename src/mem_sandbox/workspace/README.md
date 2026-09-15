@@ -30,6 +30,10 @@ atomically.
 
 ## Maintenance
 
+The [artifact-workflow audit](../../../docs/product-validation/artifact-workflow-audit.md)
+maps current binary/archive guarantees and tests to host integration use. Keep generic
+archive compatibility distinct from any future repository-specific importer policy.
+
 Keep paths host-independent, preserve exact failure atomicity, and update
 `docs/components/workspace/README.md` whenever path rules, quotas, hashes, patch syntax,
 snapshot encoding, or consistency guarantees change.
