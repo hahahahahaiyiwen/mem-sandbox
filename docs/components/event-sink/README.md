@@ -32,8 +32,9 @@ Events are observability records, not the source of truth for workspace or sessi
 
 ## Future resource events
 
-Milestones 7 through 9 may add bounded child resource events for repository transfer,
-accounting, HTTP, and external execution. Those events remain correlated with one parent
+Conditional Milestones 8 through 10 may add bounded child resource events for repository
+transfer, accounting, HTTP, and external execution only after a linked workflow trigger
+and separate implementation approval. Those events remain correlated with one parent
 sandbox operation and follow the same classification, redaction, payload, sequencing,
 delivery, and failure rules.
 
