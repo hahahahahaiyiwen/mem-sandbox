@@ -122,8 +122,9 @@ Adapters decide which methods become model-visible tools.
 ### Future optional external-capability operations
 
 The default session surface remains unchanged. Future connected and execution profiles
-may add typed HTTP and run-program operations only after Milestones 7 through 9 define
-their grants, policy, accounting, events, and stable failures.
+may add typed HTTP and run-program operations only after a linked workflow trigger,
+separate implementation approval, and definition of their grants, policy, accounting,
+events, and stable failures in Milestones 8 through 10.
 
 A typed adapter invokes the optional session operation so the normal gate, lifecycle,
 deadline, cancellation, and terminal event sequence remains authoritative. A virtual

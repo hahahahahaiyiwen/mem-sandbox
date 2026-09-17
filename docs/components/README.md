@@ -22,9 +22,9 @@ Components collaborate only through narrow interfaces owned by the consuming bou
 Concrete implementations are supplied through constructor injection. No component imports
 an agent SDK, adapter, protocol transport, or global service locator.
 
-The future unified resource-accounting and host repository-exchange contracts are
-sequenced in Milestone 7. Their module boundaries are created only when those issue-sized
-design tasks begin.
+The conditional resource-accounting and host repository-exchange contracts are planned
+in Milestone 8. Their implementation module boundaries are created only after a linked
+workflow trigger and separate implementation approval identify a concrete consumer.
 
 See the [High-Level Design](../HIGH_LEVEL_DESIGN.md) for architecture, integration levels,
 end-to-end flows, and phase scope.

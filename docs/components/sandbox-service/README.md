@@ -42,10 +42,11 @@ the public `SandboxService` protocol, while `DefaultSessionFactory`,
 
 ## Future capability-profile composition
 
-Milestone 7 may extend `SandboxOptions` with an immutable host-selected capability
-profile and cumulative session resource budget. The service remains a composition root;
-it does not parse commands, normalize URLs, execute Python, import repositories, or
-evaluate resource-specific policy.
+Milestone 8 may extend `SandboxOptions` with an immutable host-selected capability
+profile and cumulative session resource budget only after a linked workflow trigger and
+separate implementation approval identify a concrete consumer. The service remains a
+composition root; it does not parse commands, normalize URLs, execute Python, import
+repositories, or evaluate resource-specific policy.
 
 Create selects explicit collaborators for the profile. Resume applies the current host
 configuration and may preserve or narrow authority; snapshot state never enables
