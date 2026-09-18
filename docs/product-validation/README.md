@@ -20,6 +20,11 @@ events, settlement paths, and deferrals required before implementation. The
 retrieval until a concrete trigger justifies host-granted provider work.
 The [Milestone 8 planning index](./milestone-8-planning-index.md) ties these accepted
 planning deliverables to the remaining exit criteria and future implementation gates.
+The [controlled HTTP ecosystem evidence](./controlled-http-ecosystem-evidence.md)
+compares destination policy, credential mediation, enforcement depth, and documented
+network-enabled scenarios across ten agent and sandbox products. It identifies bounded
+current-source retrieval as the strongest MemSandbox fit while preserving the separate
+reproducible-workflow gate before Milestone 9 implementation.
 
 By the end of Milestone 5, MemSandbox should demonstrate that it:
 
