@@ -191,7 +191,7 @@ resource and credential scoping or an owned proxy/dedicated endpoint remains nec
 | Current public web or API retrieval for a workspace task | Explicitly enabled by Codex, Azure, Cloudflare, E2B, and Google; compatible with the other destination-control models | High. The existing workspace can inspect inputs and produce a verified report, but cannot obtain a runtime-current remote fact. | Strongest first connected scenario for nominally read-only bounded `GET`/`HEAD`. |
 | Authenticated upstream API call | Strong control evidence from Azure, Cloudflare, E2B, Claude, and Google | Medium to high, with more security work. It validates destination-bound credential routing but increases secret and audit scope. | Follow an unauthenticated, nominally read-only slice or require a separately justified credential route. |
 | Arbitrary guest-code networking | Core to full execution sandboxes | Low for Milestone 9 alone. A library gateway cannot constrain `socket` in external Python. | Compose only after Milestone 10 has a system-level egress boundary. |
-| Inbound previews, tunnels, or hosted services | Documented by Modal and Daytona | Out of scope. This reverses the traffic direction and adds service identity, exposure, and lifetime concerns. | Do not infer inbound networking from this evidence. |
+| Inbound network tunnels or preview URLs | Modal documents network tunnels; [Daytona documents generated inbound preview URLs for HTTP services](https://www.daytona.io/docs/en/preview.md) | Out of scope. This reverses the traffic direction and adds service identity, exposure, and lifetime concerns. | Do not infer inbound networking from this evidence. |
 
 ## Recommended product scenario
 
@@ -283,7 +283,8 @@ All sources were accessed on 2026-09-18.
   [sandbox sidecars](https://modal.com/docs/guide/sandbox-sidecars), and
   [sandbox scenarios](https://modal.com/docs/guide/sandboxes)
 - Daytona:
-  [network limits](https://www.daytona.io/docs/en/network-limits/) and
+  [network limits](https://www.daytona.io/docs/en/network-limits/),
+  [preview URLs](https://www.daytona.io/docs/en/preview.md), and
   [sandbox overview](https://www.daytona.io/docs/en/)
 - Microsoft:
   [Azure Container Apps Sandboxes egress policies](https://learn.microsoft.com/en-us/azure/container-apps/sandboxes-egress-policies)
