@@ -22,8 +22,9 @@ The [Milestone 8 planning index](./milestone-8-planning-index.md) ties these acc
 planning deliverables to the remaining exit criteria and future implementation gates.
 The [controlled HTTP ecosystem evidence](./controlled-http-ecosystem-evidence.md)
 compares destination policy, credential mediation, enforcement depth, and documented
-network-enabled scenarios across ten agent and sandbox products. It identifies bounded
-current-source retrieval as the strongest MemSandbox fit while preserving the separate
+network-enabled scenarios across ten agent and sandbox products. It records directional
+ecosystem behavior rather than observed MemSandbox demand, identifies bounded
+current-source retrieval as the strongest product fit, and preserves the separate
 reproducible-workflow gate before Milestone 9 implementation.
 
 By the end of Milestone 5, MemSandbox should demonstrate that it:

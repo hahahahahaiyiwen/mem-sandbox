@@ -4,7 +4,8 @@
 
 **Issue:** [#54](https://github.com/hahahahahaiyiwen/mem-sandbox/issues/54)
 
-**Evidence class:** Observed ecosystem evidence from first-party public documentation
+**Evidence class:** Documented ecosystem behavior from first-party public sources;
+directional demand remains speculative under #77
 
 **Decision impact:** Controlled HTTP is a well-supported product direction, but this
 research does not by itself satisfy the
@@ -68,14 +69,32 @@ for this research.
 | --- | --- | --- | --- |
 | [OpenAI Codex cloud](https://developers.openai.com/codex/cloud/internet-access) | The agent phase blocks internet access by default; setup scripts retain access for dependency installation. | Dependency and source retrieval; an issue URL is also used to explain the risk of agent-fetched, untrusted content. | Per-environment off/on control, domain allowlists, and an option to permit only `GET`, `HEAD`, and `OPTIONS`. The control covers commands in the cloud agent environment. |
 | [GitHub Copilot cloud agent](https://docs.github.com/en/copilot/how-tos/copilot-on-github/customize-copilot/customize-the-firewall) | A built-in firewall limits internet access. A recommended dependency allowlist is enabled by default in addition to hosts required for GitHub operation. | Download operating-system and language dependencies, use container registries, validate certificates, and download browsers for Playwright MCP. | Organization and repository domain or URL/path allowlists. Blocked requests are reported on the pull request. GitHub documents that the firewall applies to processes started by the agent's Bash tool and is not a comprehensive boundary for setup or MCP processes. |
-| [Anthropic Claude Code](https://code.claude.com/docs/en/sandboxing) | Sandboxed commands have no pre-allowed domains by default; a new destination prompts for approval unless managed or auto-mode policy decides it. | Run builds and tests that require package or source hosts; authenticated GitHub, npm, and AWS command-line workflows are documented in the sandbox configuration examples. | An operating-system sandbox routes command processes through a proxy with domain allowlists, strict managed lockdown, per-command destinations, and corporate/custom proxy support. Masked credentials can be injected only for named hosts without exposing their values to the command. |
-| [E2B](https://docs.e2b.dev/network/internet-access) | Outbound internet access is enabled by default and can be disabled or narrowed. | [AI code review CI](https://docs.e2b.dev/use-cases/ci-cd) clones a repository and installs dependencies inside the sandbox; its model request and PR-comment API call remain host-side, making that boundary explicit. [Runtime package installation](https://docs.e2b.dev/quickstart/install-custom-packages) is a separate documented use case. | Sandbox-wide disable, IP/CIDR and domain allow/deny rules, proxy routing, runtime policy replacement, and per-host header transforms. Secret and workload-identity values can be substituted outside the sandbox for an admitted HTTPS host. The controls cover guest traffic. |
+| [Anthropic Claude Code](https://code.claude.com/docs/en/sandboxing) | The sandbox feature is disabled by default. Once enabled, sandboxed commands have no pre-allowed domains; a new destination prompts for approval unless managed or auto-mode policy decides it. Startup failure and blocked commands can fall back to unsandboxed execution under defaults, so mandatory enforcement also requires fail-closed startup and disabling unsandboxed retries. | Run builds and tests that require package or source hosts; authenticated GitHub, npm, and AWS command-line workflows are documented in the sandbox configuration examples. | An operating-system sandbox routes command processes through a proxy with domain allowlists, strict managed lockdown, per-command destinations, and corporate/custom proxy support. Masked credentials can be injected only for named hosts without exposing their values to the command. |
+| [E2B](https://docs.e2b.dev/network/internet-access) | Outbound internet access is enabled by default and can be disabled or narrowed. | [AI code review CI](https://docs.e2b.dev/use-cases/ci-cd) clones a repository and installs dependencies inside the sandbox; its model request and PR-comment API call remain host-side, making that boundary explicit. [Runtime package installation](https://docs.e2b.dev/quickstart/install-custom-packages) is a separate documented use case. | Sandbox-wide disable, IP/CIDR allow and deny rules, domain allowlists, proxy routing, runtime policy replacement, and per-host header transforms. Secret and workload-identity values can be substituted outside the sandbox for an admitted HTTPS host. The controls cover guest traffic. |
 | [Modal Sandboxes](https://modal.com/docs/guide/sandbox-networking) | Public-IP outbound connections are allowed by default. | [Sandbox examples](https://modal.com/docs/guide/sandboxes) include generated or untrusted code, Git checkout, tests, and dependency setup. A network-policy example starts broad for dependency installation and later narrows access to tool domains. | Full block, CIDR allowlist, TLS domain allowlist, runtime policy replacement, and optional sidecar proxy. Controls apply below arbitrary sandbox code; Modal documents SNI/domain-fronting limits for the domain-only mode. |
-| [Daytona](https://www.daytona.io/docs/en/network-limits/) | The default is tier-dependent: lower tiers are restricted; higher tiers permit full internet unless a sandbox or organization rule narrows it. | AI-generated code and agent environments use essential Git, package-registry, model-provider, and related service domains. The guide uses HTTP checks and package-manager operations to test policy. | Mutually exclusive CIDR allowlist, domain allowlist, or block-all settings, plus an upstream HTTP(S) proxy. Rules can change on a running sandbox. These are guest-network controls; Daytona's preview URLs are a separate inbound feature. |
+| [Daytona](https://www.daytona.io/docs/en/network-limits/) | The default is tier-dependent: lower tiers are restricted; higher tiers permit full internet unless a sandbox or organization rule narrows it. | AI-generated code and agent environments use essential Git, package-registry, model-provider, and related service domains. The guide uses HTTP checks and package-manager operations to test policy. | Mutually exclusive CIDR allowlist, domain allowlist, or block-all firewall settings can change on a running sandbox. An optional upstream HTTP(S) proxy uses `HTTP_PROXY`/`HTTPS_PROXY`; proxy-unaware clients can bypass it unless a domain allowlist also constrains egress. Daytona's preview URLs are a separate inbound feature. |
 | [Azure Container Apps Sandboxes](https://learn.microsoft.com/en-us/azure/container-apps/sandboxes-egress-policies) | Policy supports either default allow or deny; Microsoft recommends default deny with explicit destinations for untrusted code. | AI-generated scripts, agent tool calls, arbitrary user code, authenticated LLM API calls, and access to environment-specific upstream services. | A built-in egress proxy matches host, path, and HTTP method, then allows, denies, transforms, or rewrites. Secret or managed-identity headers can be attached outside guest code. Inspection mode determines whether non-HTTP traffic is blocked. |
-| [Cloudflare Sandbox SDK](https://developers.cloudflare.com/sandbox/guides/outbound-traffic/) | Public internet access is enabled by default and can be disabled. | Agentic workloads access GitHub or an internal VCS during setup and can call Workers bindings or approved upstream services at runtime. | Host/IP allow and deny lists plus trusted programmable HTTP handlers outside the sandbox. Handlers can enforce methods, reroute requests, or inject per-host credentials without exposing them to guest code. Non-HTTP traffic is denied when public internet is disabled. |
+| [Cloudflare Sandbox SDK](https://developers.cloudflare.com/sandbox/guides/outbound-traffic/) | Public internet access is enabled by default and can be disabled. | Agentic workloads access GitHub or an internal VCS during setup and can call Workers bindings or approved upstream services at runtime. | Host/IP allow and deny lists plus trusted programmable HTTP handlers outside the sandbox. Handlers can enforce methods, reroute requests, or inject per-host credentials without exposing them to guest code. With public internet disabled, non-HTTP traffic is denied except for DNS through Cloudflare's resolvers. |
 | [Google Managed Agents](https://docs.cloud.google.com/gemini-enterprise-agent-platform/build/managed-agents/sandbox-environment) | External network access is disabled by default. | Download external libraries, access public internet resources, use standard web APIs, and connect to configured remote MCP servers. | Environment-owned domain allowlists. Mounted data receives downscoped tokens, MCP headers are sent only to configured endpoints, and the sandbox has no ambient project credentials. The policy covers the managed command environment. |
-| [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/governance/access-controls/network/) | Network access is policy-controlled; the documentation does not state one universal starting posture on the comparison page. | [Workflow guidance](https://docs.docker.com/ai/sandboxes/workflows/) covers Git, dependency installation, builds, tests, published services, registries, and authenticated command-line tools. | Local or organization rules allow or deny outbound TCP by hostname, CIDR, and port. Organization allow rules own grants when governance is active; local deny rules may narrow them. The microVM boundary covers agent processes and containers. |
+| [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/security/defaults/) | `sbx run claude` with no extra flags denies unmatched outbound TCP, including HTTP, HTTPS, and SSH; active local or organization rules may allow named destinations. Direct external UDP and ICMP remain blocked. | [Workflow guidance](https://docs.docker.com/ai/sandboxes/workflows/) covers Git, dependency installation, builds, tests, published services, registries, and authenticated command-line tools. | Local or organization rules allow or deny outbound TCP by hostname, CIDR, and port. Organization allow rules own grants when governance is active; local deny rules may narrow them. A host proxy enforces network policy and can inject destination-matched credentials outside the microVM. |
+
+### Control coverage and source maturity
+
+`Not documented` means that the reviewed first-party pages did not establish the
+dimension. It does not claim the product lacks the feature.
+
+| Product | Destination and method policy | Proxy boundary | Private-network path | Credential boundary | Audit or denied-request evidence | Maturity and important caveat |
+| --- | --- | --- | --- | --- | --- | --- |
+| OpenAI Codex cloud | Domain presets/custom allowlist; optional `GET`/`HEAD`/`OPTIONS` restriction | Not documented | Not documented | Not documented | Work-log review is recommended; a durable egress-decision record is not documented | No maturity label on the reviewed page |
+| GitHub Copilot cloud agent | Required hosts plus organization/repository domain and URL/path allowlists | Not documented | Not documented | Not documented by the firewall sources | Blocked address and command are added to the PR | Firewall scope excludes setup and direct MCP processes and is documented as bypassable |
+| Anthropic Claude Code | Session, persisted, strict-managed, and per-command domains | Corporate or custom upstream proxy | Not documented | File/environment sentinels can be replaced only for configured hosts | A denied host is named in the command result; durable egress audit is not documented | Sandboxing is off by default; fail-if-unavailable and unsandboxed retry are permissive by default; credential substitution requires experimental TLS termination |
+| E2B | Network off; IP/CIDR allow and deny; domains are valid only in `allowOut` | Host-enforced SOCKS5 egress proxy | Customer proxy can reach corporate networks, VPNs, and internal services | Public-beta per-host transforms replace secret or workload-identity references outside the sandbox | A customer proxy can log or inspect; built-in durable egress audit is not documented | Per-host transforms are public beta; bring-your-own proxy is private beta |
+| Modal | Network off; CIDR allowlist; beta TLS-domain allowlist | Alpha sidecar can transparently proxy HTTPS | Internal bridge connects the main container and sidecars; external private-network attachment is not documented | Alpha sidecar pattern can inject secrets outside the main container | Domain denials are written to system output; a sidecar can inspect/log requests; durable audit is not documented | Domain filtering is beta; live policy replacement and sidecars are alpha; a sidecar's own egress defaults open unless separately restricted |
+| Daytona | Network off, CIDR allowlist, or domain allowlist | Optional upstream HTTP(S) proxy | CIDR allowlists explicitly support private-network ranges | Not documented by the reviewed network sources | Not documented | Tier policy constrains availability; a proxy alone is cooperative and needs firewall allowlisting to prevent bypass |
+| Azure Container Apps Sandboxes | Ordered host/path/method rules with allow, deny, transform, and rewrite | Built-in egress proxy | Rewrite can route to an environment-specific upstream; network attachment details are not documented | Static, secret-reference, or managed-identity headers are attached by policy | Egress decisions and denied-count review are documented | Product and egress policy are preview |
+| Cloudflare Sandbox SDK | Internet off; host/IP allow and deny; programmable HTTP method policy | Trusted Worker outbound handlers | Platform bindings can mediate platform resources; general private-network attachment is not documented | Per-host handler reads Worker secrets outside the sandbox | A handler can log policy decisions; a prescribed durable audit contract is not documented | No maturity label on the reviewed page |
+| Google Managed Agents | Network off with a domain allowlist | Not documented by the reviewed sandbox sources | Not documented by the reviewed sandbox sources | Downscoped mount tokens and endpoint-specific MCP headers; no ambient project credentials | Not documented | The referenced managed base agent is preview; allowlist maturity is not separately labeled |
+| Docker Sandboxes | Deny-unmatched TCP with hostname, CIDR, and port rules | Mandatory host proxy for allowed outbound TCP | Not documented; direct sandbox-to-sandbox networking is blocked | Host proxy injects service/domain-matched credentials; raw values stay outside the VM | Active rules are inspectable; a durable egress-decision record is not documented | Default rules can contain broad wildcards and require operator review |
 
 ## Cross-product findings
 
@@ -90,7 +109,7 @@ This supports the MemSandbox design choice to keep the default profile network-d
 and let the host select a narrower connected profile. It does not establish whether
 MemSandbox should use another product's mutable-policy or broad wildcard behavior.
 
-### Read-only methods are a meaningful first boundary
+### Nominally read-only methods are a meaningful first boundary
 
 Codex explicitly supports limiting agent access to `GET`, `HEAD`, and `OPTIONS`.
 Azure policies match on HTTP method, and Cloudflare demonstrates a trusted handler that
@@ -100,13 +119,17 @@ bounded retrieval instead of a general networking or state-changing API.
 Method restriction is not enough on its own. The reviewed products pair it with
 destination policy, and the existing MemSandbox design additionally requires DNS,
 redirect, proxy, TLS, byte, time, concurrency, and cumulative-session controls.
+`GET` and `HEAD` are only nominally read-only: a remote service can attach side effects,
+and a failed request can leave its remote outcome uncertain.
 
 ### Credentials belong outside the untrusted workload
 
-Azure, Cloudflare, E2B, Claude Code, and Google Managed Agents all document a form of
-destination-scoped credential mediation or downscoped authorization. In each design,
-trusted infrastructure selects where a credential may be sent rather than relying on
-untrusted code to protect a raw value.
+Azure, Cloudflare, E2B, Claude Code, Google Managed Agents, Docker, and Modal all
+document a form of destination-scoped credential mediation or downscoped authorization.
+In each design, trusted infrastructure selects where a credential may be sent rather
+than relying on untrusted code to protect a raw value. The E2B transforms and Modal
+sidecar path are maturity-labeled rather than stable, as the control-coverage table
+records.
 
 That convergence supports MemSandbox's destination-bound secret broker. It also shows
 why simply placing a token in a workspace file or command environment would not be a
@@ -146,9 +169,15 @@ budgets, and audit events across host applications.
 
 E2B and Modal both document limitations of hostname filtering on shared TLS
 infrastructure. Modal describes domain-fronting risk; E2B calls its hostname allowlist a
-routing control rather than a strict boundary on shared infrastructure. Their warnings
-support MemSandbox's stricter plan to normalize the URL, admit before DNS, classify
-resolved addresses, pin admitted results, and repeat the process on redirects.
+routing control rather than a strict boundary on shared infrastructure.
+
+SSRF, DNS rebinding, and domain fronting require related but distinct controls.
+Normalization, pre-DNS admission, address classification, result pinning, and redirect
+re-admission address the first two. The gateway or its trusted proxy must also bind the
+normalized URL hostname consistently to DNS resolution, TLS SNI and certificate
+verification, and HTTP `Host` or HTTP/2 `:authority`; callers must not supply a
+mismatched authority. When one admitted hostname multiplexes unrelated resources,
+resource and credential scoping or an owned proxy/dedicated endpoint remains necessary.
 
 ## Scenario relevance for MemSandbox
 
@@ -156,8 +185,8 @@ resolved addresses, pin admitted results, and repeat the process on redirects.
 | --- | --- | --- | --- |
 | Package and operating-system dependency installation | Very common across Codex, Copilot, E2B, Modal, Daytona, Google, and Docker | Low. It requires an execution environment or host setup, not merely a trusted HTTP tool. Prior contributor CDN failures remain host evidence. | Keep with host setup or future external execution. |
 | Git clone, source checkout, and VCS mutation | Common across coding sandboxes | Low for the first HTTP slice. Current artifact and Git decisions are separately gated, and state-changing VCS behavior exceeds bounded retrieval. | Preserve the Milestone 8/12 Git decision boundary. |
-| Current public web or API retrieval for a workspace task | Explicitly enabled by Codex, Azure, Cloudflare, E2B, and Google; compatible with the other destination-control models | High. The existing workspace can inspect inputs and produce a verified report, but cannot obtain a runtime-current remote fact. | Strongest first connected scenario for bounded `GET`/`HEAD`. |
-| Authenticated upstream API call | Strong control evidence from Azure, Cloudflare, E2B, Claude, and Google | Medium to high, with more security work. It validates destination-bound credential routing but increases secret and audit scope. | Follow an unauthenticated/read-only slice or require a separately justified credential route. |
+| Current public web or API retrieval for a workspace task | Explicitly enabled by Codex, Azure, Cloudflare, E2B, and Google; compatible with the other destination-control models | High. The existing workspace can inspect inputs and produce a verified report, but cannot obtain a runtime-current remote fact. | Strongest first connected scenario for nominally read-only bounded `GET`/`HEAD`. |
+| Authenticated upstream API call | Strong control evidence from Azure, Cloudflare, E2B, Claude, and Google | Medium to high, with more security work. It validates destination-bound credential routing but increases secret and audit scope. | Follow an unauthenticated, nominally read-only slice or require a separately justified credential route. |
 | Arbitrary guest-code networking | Core to full execution sandboxes | Low for Milestone 9 alone. A library gateway cannot constrain `socket` in external Python. | Compose only after Milestone 10 has a system-level egress boundary. |
 | Inbound previews, tunnels, or hosted services | Documented by Modal and Daytona | Out of scope. This reverses the traffic direction and adds service identity, exposure, and lifetime concerns. | Do not infer inbound networking from this evidence. |
 
@@ -166,10 +195,16 @@ resolved addresses, pin admitted results, and repeat the process on redirects.
 The best next validation target is a **current-source verification workflow**:
 
 1. The host seeds a document, dataset, or review request into the workspace.
-2. Inspection discovers public URLs or identifiers whose required destination set is not
-   fixed before the task starts.
-3. The agent performs bounded `HEAD` or `GET` requests against host-approved destinations
-   to verify status, freshness, redirect destination, or current metadata.
+2. Inspection discovers public URLs or identifiers. If they fall within a destination
+   class pre-authorized by the immutable creation-time grant, the current connected
+   session may continue. Otherwise, the network-free session emits bounded candidates;
+   the host makes an explicit new authority decision and creates or resumes a connected
+   session under a bounded immutable grant. Model input never widens the running
+   session's authority.
+3. The agent performs bounded `HEAD` or `GET` requests against the granted destinations
+   to verify status, freshness, redirect destination, or current metadata. These methods
+   remain nominally read-only and retain explicit possible-side-effect and
+   unknown-remote-outcome handling.
 4. The agent writes a path-linked report and the host verifies the output artifact.
 
 Examples include checking external references in a document, validating current issue or
@@ -181,9 +216,11 @@ This scenario favors controlled HTTP over the current alternatives:
 
 - Static host seeding works when every input and response is known before the task. It
   does not provide a runtime-current observation for destinations discovered while
-  inspecting workspace content. A host can add a custom orchestration loop, but then
-  every application must independently own request policy, redirects, accounting,
-  provenance, and result reinjection.
+  inspecting workspace content. A host can add a custom orchestration loop, and host
+  approval remains necessary whenever discovery falls outside a pre-authorized
+  destination class. The gateway centralizes enforcement, redirects, accounting,
+  provenance, and result publication after that authority decision; it does not
+  eliminate the decision.
 - Network-disabled Python can parse or calculate over local data but cannot obtain the
   remote observation.
 - Artifact exchange can move host-owned bytes but does not define remote retrieval,
@@ -191,14 +228,17 @@ This scenario favors controlled HTTP over the current alternatives:
 - A trusted, host-granted HTTP gateway centralizes exactly that missing authority without
   granting arbitrary code or sockets.
 
-The candidate is deliberately read-only. Authenticated mutation, package installation,
-Git transport, browser execution, and arbitrary-code egress remain separate decisions.
+The candidate is deliberately limited to nominally read-only methods. Authenticated
+mutation, package installation, Git transport, browser execution, and arbitrary-code
+egress remain separate decisions.
 
 ## What would satisfy the product trigger
 
-This report remains **observed ecosystem evidence**, not a linked reproducible
-MemSandbox blocker. Before changing #77 or creating Milestone 9 child issues, retain one
-maintained or user workflow that records:
+This report documents ecosystem behavior, but its implication for MemSandbox demand is
+**directional and speculative** under #77 because it is not a linked reproducible
+MemSandbox blocker. Any one of #77's existing five review triggers can still reopen
+broader next-capability selection. Before selecting controlled HTTP or creating
+Milestone 9 child issues, retain one maintained or user workflow that records:
 
 - the concrete input artifact and expected verified output;
 - why destinations or freshness cannot be fully prepared through static host seeding;
@@ -210,8 +250,11 @@ maintained or user workflow that records:
 - the destination, response, time, redirect, and cumulative budgets needed for a bounded
   implementation.
 
-Only that evidence can reopen next-capability selection. Applicable Milestone 8 grant,
-policy, accounting, and event work must still be scoped before transport ships.
+Only linked evidence that meets #77 and discriminates controlled HTTP from the narrower
+alternatives can select Milestone 9. Another #77 trigger may instead reopen selection
+for artifact exchange, external execution, another SDK, or durable operation.
+Applicable Milestone 8 grant, policy, accounting, and event work must still be scoped
+before transport ships.
 
 ## Source index
 
@@ -225,13 +268,16 @@ All sources were accessed on 2026-09-18.
   and
   [cloud-agent scenarios](https://docs.github.com/en/copilot/concepts/agents/cloud-agent/about-cloud-agent)
 - Anthropic:
-  [Claude Code sandboxing](https://code.claude.com/docs/en/sandboxing)
+  [Claude Code sandboxing](https://code.claude.com/docs/en/sandboxing) and
+  [sandbox settings](https://code.claude.com/docs/en/settings-reference#sandbox-settings)
 - E2B:
   [internet access](https://docs.e2b.dev/network/internet-access),
+  [bring your own proxy](https://docs.e2b.dev/network/byop),
   [AI review CI/CD](https://docs.e2b.dev/use-cases/ci-cd), and
   [runtime packages](https://docs.e2b.dev/quickstart/install-custom-packages)
 - Modal:
-  [networking and security](https://modal.com/docs/guide/sandbox-networking) and
+  [networking and security](https://modal.com/docs/guide/sandbox-networking),
+  [sandbox sidecars](https://modal.com/docs/guide/sandbox-sidecars), and
   [sandbox scenarios](https://modal.com/docs/guide/sandboxes)
 - Daytona:
   [network limits](https://www.daytona.io/docs/en/network-limits/) and
@@ -245,6 +291,9 @@ All sources were accessed on 2026-09-18.
   and
   [network configuration](https://docs.cloud.google.com/gemini-enterprise-agent-platform/build/managed-agents/create-manage#configure-network-access)
 - Docker:
+  [default security posture](https://docs.docker.com/ai/sandboxes/security/defaults/),
+  [security model](https://docs.docker.com/ai/sandboxes/security/),
   [Sandbox network policies](https://docs.docker.com/ai/sandboxes/governance/access-controls/network/),
+  [credential management](https://docs.docker.com/ai/sandboxes/configuration/credentials/),
   [product boundary](https://docs.docker.com/ai/sandboxes/), and
   [workflow patterns](https://docs.docker.com/ai/sandboxes/workflows/)
