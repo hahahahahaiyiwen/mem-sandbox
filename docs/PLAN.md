@@ -1476,6 +1476,12 @@ artifact exchange must remain useful independently of Git or native sandbox netw
 HTTP resource accounting, and audit facts are complete. Select this milestone from
 workflow evidence; it need not precede network-disabled Milestone 10 execution.
 
+**Selection:** The
+[current-source verification evidence](./product-validation/current-source-verification-evidence.md)
+satisfies workflow-blocker review trigger 3 and selects this milestone for bounded child
+implementation. Networking remains absent from the current/default profile, and no
+checklist item is complete merely because the milestone is selected.
+
 Detailed design:
 [Controlled Network Egress](./components/network-egress/README.md).
 
@@ -2014,8 +2020,8 @@ their referenced checklist task begins.
 | Resource accounting rollout | Define shared principles; implement required dimensions with each selected capability, preserving hard limits and exact-once settlement | `8.3` | Planned |
 | Repository ingestion and export | Defer the designed host-controlled bounded archive/tree import and revision/hash-bound export until the artifact-exchange review trigger is met | `8.4` | Deferred |
 | Git repository retrieval | Planned input source; initiating actor, transport, credentials, ref resolution, refresh/merge semantics, and local-edit preservation require design approval | `8.4.6`-`8.4.8` | Open |
-| First optional external capability | Defer controlled HTTP and network-disabled execution until a linked [workflow-blocker review trigger](./product-validation/workflow-blocker-assessment.md#review-triggers) is met | `7.3.4` / `9` / `10` | Deferred |
-| Network egress | Default-deny HTTP/HTTPS through one host-owned gateway with destination policy, SSRF controls, destination-bound credentials, cumulative budgets, and audit | `9` | Planned |
+| First optional external capability | Select controlled HTTP from the linked [current-source verification evidence](./product-validation/current-source-verification-evidence.md); network-disabled execution remains separately evidence-gated | `7.3.4` / `9` / `10` | Selected |
+| Network egress | Default-deny HTTP/HTTPS through one host-owned gateway with destination policy, SSRF controls, destination-bound credentials, cumulative budgets, and audit | `9` | Selected, not implemented |
 | First network command | Prefer `fetch` or `http`; use `curl` only for a documented compatible subset; never invoke a host executable | `9.4` | Open |
 | External execution | Run agent-supplied code only through a host-selected external backend with explicit security classification and atomic workspace publication | `10` | Planned |
 | First external runtime | Immutable bounded Python workspace-script profile with package installation and networking disabled initially | `10.4` | Planned |

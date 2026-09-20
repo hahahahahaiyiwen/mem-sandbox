@@ -237,11 +237,10 @@ egress remain separate decisions.
 
 ## What would satisfy the product trigger
 
-This report documents ecosystem behavior, but its implication for MemSandbox demand is
-**directional and speculative** under #77 because it is not a linked reproducible
-MemSandbox blocker. Any one of #77's existing five review triggers can still reopen
-broader next-capability selection. Before selecting controlled HTTP or creating
-Milestone 9 child issues, retain one maintained or user workflow that records:
+At publication, this report documented ecosystem behavior whose implication for
+MemSandbox demand remained **directional and speculative** under #77 because it was not
+a linked reproducible MemSandbox blocker. Any one of #77's existing five review triggers
+could reopen broader next-capability selection. The required follow-up evidence was:
 
 - the concrete input artifact and expected verified output;
 - why destinations or freshness cannot be fully prepared through static host seeding;
@@ -253,11 +252,14 @@ Milestone 9 child issues, retain one maintained or user workflow that records:
 - the destination, response, time, redirect, and cumulative budgets needed for a bounded
   implementation.
 
-Only linked evidence that meets #77 and discriminates controlled HTTP from the narrower
-alternatives can select Milestone 9. Another #77 trigger may instead reopen selection
-for artifact exchange, external execution, another SDK, or durable operation.
-Applicable Milestone 8 grant, policy, accounting, and event work must still be scoped
-before transport ships.
+The subsequent
+[current-source verification evidence](./current-source-verification-evidence.md)
+records the concrete workflow, deterministic current-profile
+`command_not_found` result, callback developer-integration boundary, explicit selection
+authority, and bounded evidence grant. It satisfies #77 review trigger 3 and selects
+Milestone 9 for focused implementation planning. It does not retroactively turn this
+ecosystem comparison into measured demand, claim that networking has shipped, or remove
+the applicable Milestone 8 grant, policy, accounting, and event prerequisites.
 
 ## Source index
 

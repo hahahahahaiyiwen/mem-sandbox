@@ -1,7 +1,7 @@
 # Product Validation and Benchmark Design
 
-**Status:** Three-driver conformance, benchmark harness, non-gating reference, and
-Milestone 7 workflow-blocker decision and exit-evidence index implemented
+**Status:** Three-driver conformance, benchmark harness, non-gating reference,
+Milestone 7 workflow-blocker decision, and Milestone 9 selection evidence implemented
 
 ## Purpose
 
@@ -24,8 +24,13 @@ The [controlled HTTP ecosystem evidence](./controlled-http-ecosystem-evidence.md
 compares destination policy, credential mediation, enforcement depth, and documented
 network-enabled scenarios across ten agent and sandbox products. It records directional
 ecosystem behavior rather than observed MemSandbox demand, identifies bounded
-current-source retrieval as the strongest product fit, and preserves the separate
-reproducible-workflow gate before Milestone 9 implementation.
+current-source retrieval as the strongest product fit, and defines the separate
+reproducible-workflow gate. The
+[current-source verification evidence](./current-source-verification-evidence.md)
+subsequently records the maintained workflow, deterministic unsupported result,
+callback-versus-gateway developer-experience decision, bounded evidence grant, and
+human-authorized selection of controlled HTTP for focused implementation planning.
+Networking remains unimplemented and absent from the default profile.
 
 By the end of Milestone 5, MemSandbox should demonstrate that it:
 
