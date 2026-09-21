@@ -21,6 +21,7 @@ from mem_sandbox.network import (
     NetworkOperationContext,
     NetworkPolicyId,
     OutboundHttpBinding,
+    OutboundHttpCancelled,
     OutboundHttpDenied,
     OutboundHttpGatewayFailed,
     OutboundHttpGrant,
@@ -112,6 +113,28 @@ class SelfCancellingGateway(FakeOutboundHttpGateway):
         current.cancel()
         await asyncio.sleep(0)
         raise AssertionError("self-cancelling gateway returned without cancellation")
+
+
+class CancellationObservingGateway(FakeOutboundHttpGateway):
+    def __init__(self) -> None:
+        super().__init__(())
+        self.cancelled = asyncio.Event()
+        self.finished = asyncio.Event()
+
+    async def send(
+        self,
+        request: OutboundHttpRequest,
+        context: NetworkOperationContext,
+    ) -> OutboundHttpResponse:
+        self.entered.set()
+        try:
+            await asyncio.Event().wait()
+            raise AssertionError("blocking gateway returned without cancellation")
+        except asyncio.CancelledError:
+            self.cancelled.set()
+            raise
+        finally:
+            self.finished.set()
 
 
 class CancellationSuppressingGateway(FakeOutboundHttpGateway):
@@ -404,6 +427,28 @@ async def test_gateway_task_self_cancellation_is_a_stable_gateway_failure() -> N
     await configured.service.close()
 
 
+@pytest.mark.asyncio
+async def test_gateway_domain_cancellation_has_no_false_secondary_failure() -> None:
+    configured = bundle((OutboundHttpCancelled("provider secret"),))
+    connected = await connected_session(configured)
+
+    with pytest.raises(SessionOperationCancelled) as captured:
+        await connected.send_http(http_request())
+
+    _assert_exception_graph_hides(captured.value, "provider secret")
+    assert captured.value.__cause__ is None
+    assert captured.value.__context__ is None
+    assert _exception_graph_notes(captured.value) == ()
+    events = await configured.events.query(EventQuery(session_id=connected.session_id))
+    assert [
+        event.event_type for event in events if event.operation_kind is OperationKind.OUTBOUND_HTTP
+    ] == [
+        SandboxEventType.OPERATION_STARTED,
+        SandboxEventType.OPERATION_CANCELLED,
+    ]
+    await configured.service.close()
+
+
 @pytest.mark.parametrize(
     ("provider_failure", "expected_type"),
     [
@@ -476,6 +521,13 @@ async def test_gateway_that_suppresses_cancellation_cannot_block_timeout_or_clos
             await sending
         assert "collaborator also failed during timeout" in _exception_graph_notes(captured.value)
         assert connected.state is SandboxSessionState.FAILED
+        events = await configured.events.query(EventQuery(session_id=connected.session_id))
+        event_types = [event.event_type for event in events]
+        assert event_types[:2] == [
+            SandboxEventType.SANDBOX_STARTED,
+            SandboxEventType.OPERATION_STARTED,
+        ]
+        assert SandboxEventType.SANDBOX_FAILED not in event_types
 
         closing = asyncio.create_task(configured.service.close())
         closed, _ = await asyncio.wait((closing,), timeout=0.3)
@@ -520,16 +572,18 @@ async def test_gateway_that_suppresses_cancellation_cannot_block_close_driven_ca
 
 @pytest.mark.asyncio
 async def test_native_cancellation_cancels_gateway_and_emits_cancelled_terminal() -> None:
-    release = asyncio.Event()
-    configured = bundle((response(),), release=release)
+    gateway = CancellationObservingGateway()
+    configured = bundle((), gateway_override=gateway)
     connected = await connected_session(configured)
     sending = asyncio.create_task(connected.send_http(http_request()))
-    await configured.gateway.entered.wait()
+    await gateway.entered.wait()
 
     sending.cancel()
 
     with pytest.raises(asyncio.CancelledError):
         await sending
+    await asyncio.wait_for(gateway.finished.wait(), timeout=0.3)
+    assert gateway.cancelled.is_set()
     assert sending.cancelled()
     assert connected.state is SandboxSessionState.RUNNING
     events = await configured.events.query(EventQuery(session_id=connected.session_id))

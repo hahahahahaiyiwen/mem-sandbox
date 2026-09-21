@@ -1523,7 +1523,7 @@ class SandboxSession:
                 task,
                 cancellation_settlement_seconds,
             )
-            if secondary is not None:
+            if secondary is not None and secondary is not cancellation_error:
                 note = "collaborator also failed during cancellation"
                 if not protect_secondary_errors:
                     note = f"{note}: {secondary}"

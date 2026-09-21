@@ -459,14 +459,19 @@ Rules:
 - `close()` is idempotent for concurrent or repeated callers.
 - `FAILED` rejects new operations but still permits cleanup.
 - Expected operation errors, policy denials, command non-zero results, timeouts, and
-  cancellations do not by themselves fail the session.
+  cancellations do not by themselves fail the session. An outbound HTTP collaborator
+  that remains active beyond bounded cancellation settlement, or whose settlement
+  decision is interrupted by repeated native cancellation, is an invariant failure and
+  does fail a running session.
 - `FAILED` is reserved for lifecycle or invariant failures that make safe continued use
   uncertain.
-- Concrete `FAILED` triggers in Milestone 3 are:
+- Concrete `FAILED` triggers in the current session implementation are:
   - failure to complete required startup event delivery;
   - an internal lifecycle-state or operation-gate invariant violation;
   - a restore or session-state publication failure for which unchanged live state cannot
-    be proven.
+    be proven;
+  - an outbound HTTP collaborator whose bounded cancellation settlement cannot prove
+    that no task remains active.
 - Atomic restore rejection, expected collaborator errors, event failure after an
   otherwise safe completed operation, and resource-scope cleanup failure do not
   transition the session to `FAILED`.
@@ -611,10 +616,14 @@ raises `SessionOperationTimeout` and attempts no terminal event. A sink-originat
 failure raises `SessionEventDeliveryFailed`, also without a terminal event.
 
 Startup failure caused by `sandbox.started` delivery transitions to `FAILED` without
-attempting `sandbox.failed` on the same failing sink. `sandbox.failed` is emitted only
-when a non-event lifecycle or invariant failure transitions the session to `FAILED`; its
-own delivery failure does not change the already-published state and is attached safely
-to the primary failure.
+attempting `sandbox.failed` on the same failing sink. `sandbox.failed` is emitted when a
+non-event lifecycle or invariant failure transitions the session to `FAILED` and
+lifecycle delivery can safely be awaited; its own delivery failure does not change the
+already-published state and is attached safely to the primary failure. A fail-closed
+transition made while settling operation timeout or cancellation does not attempt a
+separate lifecycle event because the operation deadline or native cancellation is
+already active. The failed state plus the primary operation outcome, and its terminal
+event when that event still fits the deadline, are authoritative.
 
 Terminal operation kind is selected from the stable error category regardless of whether
 the error originated in the session or a collaborator:
