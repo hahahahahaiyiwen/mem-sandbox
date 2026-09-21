@@ -33,3 +33,8 @@ session facade must preserve.
 Milestone 9A implements only the HTTP grant/gateway seam. Session close cooperatively
 cancels an active HTTP operation but never closes the borrowed host-scoped gateway.
 Snapshots carry no network authority; service resume supplies the current host profile.
+The gateway call runs in a child task so provider self-cancellation is translated as a
+stable gateway failure rather than impersonating caller cancellation. Cancellation
+settlement tracks the collaborator before its bounded wait; repeated native
+cancellation therefore cannot bypass fail-closed retention, and close can re-signal an
+unfinished collaborator without waiting indefinitely.

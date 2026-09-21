@@ -248,7 +248,8 @@ async def _send_outbound_http_safely(
     failure: SandboxError | None = None
     native_cancellation = False
     try:
-        response = await binding.gateway.send(request, context)
+        gateway_task = asyncio.ensure_future(binding.gateway.send(request, context))
+        response = await gateway_task
         binding.grant.require_response(request, response)
     except asyncio.CancelledError:
         current_task = asyncio.current_task()
@@ -1534,19 +1535,30 @@ class SandboxSession:
         task: asyncio.Future[T],
         timeout_seconds: float | None,
     ) -> Exception | None:
-        if timeout_seconds is not None:
-            done, _ = await asyncio.wait((task,), timeout=timeout_seconds)
+        if timeout_seconds is not None and not task.done():
+            retained = cast(asyncio.Future[object], task)
+            self._track_unsettled_collaborator(retained)
+            try:
+                done, _ = await asyncio.wait((task,), timeout=timeout_seconds)
+            except asyncio.CancelledError:
+                if not task.done():
+                    self._fail_closed_for_unsettled_collaborator()
+                raise
             if not done:
-                retained = cast(asyncio.Future[object], task)
-                self._retain_unsettled_collaborator(retained)
+                self._fail_closed_for_unsettled_collaborator()
                 return RuntimeError("collaborator did not settle after cancellation")
+            self._unsettled_collaborators.discard(retained)
         return await _settle_cancelled_task(task)
 
-    def _retain_unsettled_collaborator(self, task: asyncio.Future[object]) -> None:
-        if self._state is SandboxSessionState.RUNNING:
-            self._state = SandboxSessionState.FAILED
+    def _track_unsettled_collaborator(self, task: asyncio.Future[object]) -> None:
+        if task in self._unsettled_collaborators:
+            return
         self._unsettled_collaborators.add(task)
         task.add_done_callback(self._observe_unsettled_collaborator)
+
+    def _fail_closed_for_unsettled_collaborator(self) -> None:
+        if self._state is SandboxSessionState.RUNNING:
+            self._state = SandboxSessionState.FAILED
 
     def _observe_unsettled_collaborator(self, task: asyncio.Future[object]) -> None:
         self._unsettled_collaborators.discard(task)

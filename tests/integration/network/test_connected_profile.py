@@ -97,12 +97,31 @@ class CancellationCleanupFailureGateway(FakeOutboundHttpGateway):
         raise AssertionError("blocking gateway returned without cancellation")
 
 
+class SelfCancellingGateway(FakeOutboundHttpGateway):
+    def __init__(self) -> None:
+        super().__init__(())
+
+    async def send(
+        self,
+        request: OutboundHttpRequest,
+        context: NetworkOperationContext,
+    ) -> OutboundHttpResponse:
+        self.entered.set()
+        current = asyncio.current_task()
+        assert current is not None
+        current.cancel()
+        await asyncio.sleep(0)
+        raise AssertionError("self-cancelling gateway returned without cancellation")
+
+
 class CancellationSuppressingGateway(FakeOutboundHttpGateway):
     def __init__(self, outcome: OutboundHttpResponse) -> None:
         super().__init__(())
         self._outcome = outcome
         self.release = asyncio.Event()
         self.finished = asyncio.Event()
+        self.cancelled = asyncio.Event()
+        self.cancel_count = 0
 
     async def send(
         self,
@@ -115,6 +134,8 @@ class CancellationSuppressingGateway(FakeOutboundHttpGateway):
                 try:
                     await self.release.wait()
                 except asyncio.CancelledError:
+                    self.cancel_count += 1
+                    self.cancelled.set()
                     continue
             return self._outcome
         finally:
@@ -355,6 +376,34 @@ async def test_unexpected_gateway_failure_is_translated_by_session_boundary(
     await configured.service.close()
 
 
+@pytest.mark.asyncio
+async def test_gateway_task_self_cancellation_is_a_stable_gateway_failure() -> None:
+    gateway = SelfCancellingGateway()
+    configured = bundle((), gateway_override=gateway)
+    connected = await connected_session(configured)
+
+    with pytest.raises(
+        OutboundHttpGatewayFailed,
+        match="gateway failed unexpectedly",
+    ) as captured:
+        await connected.send_http(http_request())
+
+    assert captured.value.__cause__ is None
+    assert captured.value.__context__ is None
+    current = asyncio.current_task()
+    assert current is not None
+    assert current.cancelling() == 0
+    assert connected.state is SandboxSessionState.RUNNING
+    events = await configured.events.query(EventQuery(session_id=connected.session_id))
+    assert [
+        event.event_type for event in events if event.operation_kind is OperationKind.OUTBOUND_HTTP
+    ] == [
+        SandboxEventType.OPERATION_STARTED,
+        SandboxEventType.OPERATION_FAILED,
+    ]
+    await configured.service.close()
+
+
 @pytest.mark.parametrize(
     ("provider_failure", "expected_type"),
     [
@@ -460,6 +509,63 @@ async def test_gateway_that_suppresses_cancellation_cannot_block_close_driven_ca
             captured.value
         )
         await closing
+    finally:
+        gateway.release.set()
+        await asyncio.wait_for(gateway.finished.wait(), timeout=0.3)
+        await asyncio.gather(sending, return_exceptions=True)
+        if closing is not None:
+            await asyncio.gather(closing, return_exceptions=True)
+        await configured.service.close()
+
+
+@pytest.mark.asyncio
+async def test_native_cancellation_cancels_gateway_and_emits_cancelled_terminal() -> None:
+    release = asyncio.Event()
+    configured = bundle((response(),), release=release)
+    connected = await connected_session(configured)
+    sending = asyncio.create_task(connected.send_http(http_request()))
+    await configured.gateway.entered.wait()
+
+    sending.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await sending
+    assert sending.cancelled()
+    assert connected.state is SandboxSessionState.RUNNING
+    events = await configured.events.query(EventQuery(session_id=connected.session_id))
+    assert [
+        event.event_type for event in events if event.operation_kind is OperationKind.OUTBOUND_HTTP
+    ] == [
+        SandboxEventType.OPERATION_STARTED,
+        SandboxEventType.OPERATION_CANCELLED,
+    ]
+    await configured.service.close()
+
+
+@pytest.mark.asyncio
+async def test_repeated_native_cancellation_retains_gateway_and_fails_closed() -> None:
+    gateway = CancellationSuppressingGateway(response())
+    configured = bundle((), gateway_override=gateway)
+    connected = await connected_session(configured)
+    sending = asyncio.create_task(connected.send_http(http_request()))
+    closing: asyncio.Task[None] | None = None
+    await gateway.entered.wait()
+    try:
+        sending.cancel()
+        await gateway.cancelled.wait()
+        sending.cancel()
+
+        with pytest.raises(asyncio.CancelledError):
+            await sending
+        assert connected.state is SandboxSessionState.FAILED
+        with pytest.raises(SessionFailed):
+            await connected.send_http(http_request())
+
+        closing = asyncio.create_task(configured.service.close())
+        closed, _ = await asyncio.wait((closing,), timeout=0.3)
+        assert closing in closed
+        await closing
+        assert gateway.cancel_count >= 2
     finally:
         gateway.release.set()
         await asyncio.wait_for(gateway.finished.wait(), timeout=0.3)

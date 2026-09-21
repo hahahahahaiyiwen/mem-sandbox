@@ -63,7 +63,10 @@ Session close cooperatively cancels an active HTTP operation and then waits for 
 operation gate. Gateway cancellation settlement has a small bound within the remaining
 terminal-event budget. If a gateway suppresses cancellation beyond that bound, the
 session fails closed, retains and observes the task, and close re-signals it without
-waiting indefinitely. The gateway is borrowed and is never closed by the session.
+waiting indefinitely. The provider call runs in a distinct child task so provider
+self-cancellation cannot impersonate orchestration cancellation. Settlement tracking is
+installed before the bounded wait so repeated native cancellation cannot leave an
+unfinished task unobserved. The gateway is borrowed and is never closed by the session.
 
 ## Fake and conformance support
 
@@ -82,7 +85,7 @@ probes; real transports added later must satisfy the same boundary.
 - Gateway and protected-input failures retain no provider exception context, cause, or
   raw settlement note at the session boundary.
 - Gateway-raised session-domain errors cannot forge session classifications or operation
-  identities; provider translation occurs inside the gateway task.
+  identities; provider translation wraps a distinct child task at the session boundary.
 - Basic scheme recognition is not destination admission. Until the controlled resolver
   and transport ship, the fake is the only provided gateway implementation.
 - Library contracts do not contain arbitrary guest code.
