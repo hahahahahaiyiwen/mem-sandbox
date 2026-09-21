@@ -1,6 +1,8 @@
 # Controlled Network Egress Design
 
-**Status:** Approved roadmap direction in issue #49; not implemented
+**Status:** Selected for bounded implementation planning by
+[current-source verification evidence](../../product-validation/current-source-verification-evidence.md);
+not implemented
 
 ## Purpose
 

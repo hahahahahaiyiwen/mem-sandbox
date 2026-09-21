@@ -200,12 +200,15 @@ and
 [isolated execution backends](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/docs/components/external-execution/README.md).
 Those capabilities are not part of the current profile.
 
-The current
+The historical
 [workflow-blocker assessment](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/docs/product-validation/workflow-blocker-assessment.md)
-defers new capability and second-SDK work. Existing deterministic workflows pass, and
-the retained live and installed-package observations do not identify a missing
-MemSandbox operation. The assessment lists the reproducible review triggers and
-authority requirements that must be met before selecting a future extension.
+deferred new capability and second-SDK work. The subsequent
+[current-source verification evidence](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/docs/product-validation/current-source-verification-evidence.md)
+records a reproducible unsupported interaction and selects controlled HTTP for bounded
+implementation planning. Networking has not shipped: the default profile remains
+network-free, and focused child issues must still satisfy the documented authority,
+policy, accounting, security, validation, and review gates. A second SDK remains
+deferred.
 
 The [Milestone 7 evidence index](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/docs/product-validation/milestone-7-exit-evidence.md)
 links the maintained workflows, installed-package checks, retained live observations,

@@ -7,6 +7,13 @@
 **Decision:** Defer new capability and SDK work until a reproducible
 product-surface blocker meets a review trigger below.
 
+> **Subsequent selection:** On 2026-09-20, the
+> [current-source verification workflow](./current-source-verification-evidence.md)
+> recorded a deterministic unsupported interaction, satisfied review trigger 3, and
+> received explicit human approval to select controlled HTTP for bounded Milestone 9
+> decomposition. This document remains the historical Milestone 7 assessment; the
+> follow-up does not claim that networking is implemented.
+
 ## Purpose
 
 This assessment classifies the blockers observed while completing the
