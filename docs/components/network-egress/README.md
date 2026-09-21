@@ -30,6 +30,11 @@ close cancels an active HTTP operation but does not close the shared gateway. Re
 uses only the current host-selected options. Snapshot state contains no grant, gateway,
 policy identifier, route, or provider configuration.
 
+Gateway-originated failures are translated inside the gateway task, so provider code
+cannot forge session-owned timeout/cancellation identity. Cancellation settlement is
+bounded; a non-cooperative gateway makes the session fail closed while its task remains
+retained and observed, and cannot hold session close indefinitely.
+
 The only gateway implementation is deterministic and fake. It opens no network
 connection. Basic scheme recognition and grant checks are implemented, but URL
 canonicalization, hostname/IP admission, DNS, TLS, redirect handling, ambient-proxy
