@@ -130,6 +130,36 @@ def test_http_request_rejects_unsupported_or_over_limit_input(
         request_factory()  # type: ignore[operator]
 
 
+@pytest.mark.parametrize(
+    "invalid_factory",
+    [
+        lambda: HttpHeader("Authorization", "Bearer protected\udcffvalue"),
+        lambda: OutboundHttpRequest(
+            method=HttpMethod.GET,
+            url="https://example.test/protected\udcffvalue",
+            limits=limits(),
+        ),
+        lambda: OutboundHttpRequest(
+            method=HttpMethod.GET,
+            url="protected-scheme://example.test/value",
+            limits=limits(),
+        ),
+    ],
+    ids=["header-encoding", "url-encoding", "url-scheme"],
+)
+def test_invalid_protected_input_is_absent_from_the_exception_graph(
+    invalid_factory: object,
+) -> None:
+    with pytest.raises(OutboundHttpRequestInvalid) as captured:
+        invalid_factory()  # type: ignore[operator]
+
+    error = captured.value
+    assert "protected" not in str(error)
+    assert error.__cause__ is None
+    assert error.__context__ is None
+    assert getattr(error, "__notes__", ()) == ()
+
+
 def test_transfer_limits_accept_exact_minimums_and_reject_invalid_boundaries() -> None:
     minimum = HttpTransferLimits(
         timeout_seconds=0.001,

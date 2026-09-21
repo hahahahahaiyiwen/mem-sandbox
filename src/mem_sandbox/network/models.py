@@ -81,8 +81,10 @@ class HttpHeader:
             raise OutboundHttpRequestInvalid("HTTP header value contains a line break")
         try:
             size = len(value.encode("utf-8"))
-        except UnicodeEncodeError as error:
-            raise OutboundHttpRequestInvalid("HTTP header value must be valid UTF-8") from error
+        except UnicodeEncodeError:
+            size = None
+        if size is None:
+            raise OutboundHttpRequestInvalid("HTTP header value must be valid UTF-8")
         if size > _MAX_HEADER_VALUE_BYTES:
             raise OutboundHttpLimitExceeded("HTTP header value exceeds its byte limit")
 
@@ -265,15 +267,21 @@ class OutboundHttpRequest:
             raise TypeError("url must be a string")
         try:
             url_size = len(url.encode("utf-8"))
-        except UnicodeEncodeError as error:
-            raise OutboundHttpRequestInvalid("URL must be valid UTF-8") from error
+        except UnicodeEncodeError:
+            url_size = None
+        if url_size is None:
+            raise OutboundHttpRequestInvalid("URL must be valid UTF-8")
         if not url or url_size > _MAX_URL_BYTES or any(ord(char) < 32 for char in url):
             raise OutboundHttpRequestInvalid("URL is empty, contains control data, or is too long")
+        split = None
+        scheme = None
         try:
             split = urlsplit(url)
             scheme = HttpScheme(split.scheme.lower())
-        except (TypeError, ValueError) as error:
-            raise OutboundHttpRequestInvalid("URL must use an HTTP or HTTPS scheme") from error
+        except (TypeError, ValueError):
+            pass
+        if split is None or scheme is None:
+            raise OutboundHttpRequestInvalid("URL must use an HTTP or HTTPS scheme")
         if not split.netloc:
             raise OutboundHttpRequestInvalid("URL must contain an authority")
         object.__setattr__(self, "_scheme", scheme)

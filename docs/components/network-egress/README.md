@@ -102,6 +102,8 @@ containment for arbitrary code.
   count, concurrency, and session-wide transfer.
 - Bind secret use to an approved destination and operation.
 - Keep provider, resolver, and HTTP-client exceptions behind stable domain errors.
+- Remove provider and protected-input details from complete exception graphs and
+  cancellation-settlement notes, not only displayed messages.
 - Make required tests deterministic and independent of the public internet.
 - Preserve the current framework-neutral core and exact default four-tool profile.
 

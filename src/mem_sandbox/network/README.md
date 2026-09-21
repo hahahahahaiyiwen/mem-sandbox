@@ -76,8 +76,8 @@ probes; real transports added later must satisfy the same boundary.
 - Model-facing input cannot choose a destination policy or add a credential reference.
 - Request/context/response representations do not expose URLs, headers, bodies,
   credential routes, or grant details.
-- Unexpected gateway exceptions become a cause-free stable error at the session
-  boundary.
+- Gateway and protected-input failures retain no provider exception context, cause, or
+  raw settlement note at the session boundary.
 - Basic scheme recognition is not destination admission. Until the controlled resolver
   and transport ship, the fake is the only provided gateway implementation.
 - Library contracts do not contain arbitrary guest code.

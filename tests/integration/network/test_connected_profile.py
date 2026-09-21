@@ -18,13 +18,17 @@ from mem_sandbox.network import (
     HttpScheme,
     HttpTransferLimits,
     HttpTransferUsage,
+    NetworkOperationContext,
     NetworkPolicyId,
     OutboundHttpBinding,
     OutboundHttpDenied,
     OutboundHttpGatewayFailed,
     OutboundHttpGrant,
+    OutboundHttpLimitExceeded,
     OutboundHttpRequest,
+    OutboundHttpRequestInvalid,
     OutboundHttpResponse,
+    OutboundHttpTimeout,
     OutboundHttpUnavailable,
 )
 from mem_sandbox.network.testing import FakeOutboundHttpGateway
@@ -45,6 +49,7 @@ from mem_sandbox.session import (
     CreateSnapshotRequest,
     SandboxSession,
     SendHttpRequest,
+    SessionFailed,
     SessionOperationCancelled,
     SessionOperationTimeout,
     SessionPolicyDenied,
@@ -71,6 +76,24 @@ class DenyHttpPolicy:
             reason_code="http_denied",
             effective_limits=request.requested_limits,
         )
+
+
+class CancellationCleanupFailureGateway(FakeOutboundHttpGateway):
+    def __init__(self, message: str) -> None:
+        super().__init__(())
+        self._message = message
+
+    async def send(
+        self,
+        request: OutboundHttpRequest,
+        context: NetworkOperationContext,
+    ) -> OutboundHttpResponse:
+        self.entered.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            raise RuntimeError(self._message) from None
+        raise AssertionError("blocking gateway returned without cancellation")
 
 
 @dataclass(frozen=True, slots=True)
@@ -153,6 +176,7 @@ def bundle(
     policy: AllowAllPolicyEngine | DenyHttpPolicy | None = None,
     release: asyncio.Event | None = None,
     configure_gateway: bool = True,
+    gateway_override: FakeOutboundHttpGateway | None = None,
 ) -> Bundle:
     clock = SystemClock()
     uuids = SystemUuidGenerator()
@@ -167,7 +191,7 @@ def bundle(
     )
     snapshots = InMemoryServiceSnapshotGateway(store)
     events = InMemoryEventSink(max_events=500, max_payload_bytes=4 * 1024 * 1024)
-    gateway = FakeOutboundHttpGateway(outcomes, release=release)
+    gateway = gateway_override or FakeOutboundHttpGateway(outcomes, release=release)
     factory = DefaultSessionFactory(
         policy_engine=policy or AllowAllPolicyEngine(),
         secret_broker=NoSecretBroker(),
@@ -271,8 +295,20 @@ async def test_connected_profile_requires_host_binding_before_session_publicatio
 
 
 @pytest.mark.asyncio
-async def test_unexpected_gateway_failure_is_translated_by_session_boundary() -> None:
-    configured = bundle((RuntimeError("provider secret"),))
+@pytest.mark.parametrize(
+    "provider_failure",
+    [
+        RuntimeError("provider secret"),
+        SessionFailed("provider secret"),
+        asyncio.CancelledError("provider secret"),
+    ],
+    ids=["ordinary", "unrelated-domain", "self-cancelled"],
+)
+@pytest.mark.asyncio
+async def test_unexpected_gateway_failure_is_translated_by_session_boundary(
+    provider_failure: BaseException,
+) -> None:
+    configured = bundle((provider_failure,))
     connected = await connected_session(configured)
 
     with pytest.raises(
@@ -281,8 +317,55 @@ async def test_unexpected_gateway_failure_is_translated_by_session_boundary() ->
     ) as captured:
         await connected.send_http(http_request())
 
-    assert "provider secret" not in str(captured.value)
-    assert captured.value.__cause__ is None
+    _assert_exception_graph_hides(captured.value, "provider secret")
+    await configured.service.close()
+
+
+@pytest.mark.parametrize(
+    ("provider_failure", "expected_type"),
+    [
+        (OutboundHttpDenied("provider secret"), OutboundHttpDenied),
+        (OutboundHttpLimitExceeded("provider secret"), OutboundHttpLimitExceeded),
+        (OutboundHttpRequestInvalid("provider secret"), OutboundHttpRequestInvalid),
+        (OutboundHttpTimeout("provider secret"), OutboundHttpTimeout),
+        (OutboundHttpGatewayFailed("provider secret"), OutboundHttpGatewayFailed),
+    ],
+)
+@pytest.mark.asyncio
+async def test_supported_gateway_failures_keep_stable_types_without_provider_details(
+    provider_failure: BaseException,
+    expected_type: type[BaseException],
+) -> None:
+    configured = bundle((provider_failure,))
+    connected = await connected_session(configured)
+
+    with pytest.raises(expected_type) as captured:
+        await connected.send_http(http_request())
+
+    _assert_exception_graph_hides(captured.value, "provider secret")
+    await configured.service.close()
+
+
+@pytest.mark.asyncio
+async def test_gateway_cleanup_failure_is_hidden_during_timeout_settlement() -> None:
+    gateway = CancellationCleanupFailureGateway("provider cleanup secret")
+    configured = bundle((), gateway_override=gateway)
+    connected = await connected_session(configured)
+
+    with pytest.raises(SessionOperationTimeout) as captured:
+        await connected.send_http(
+            http_request(
+                operation_limits=OperationLimits(
+                    timeout_seconds=0.05,
+                    terminal_event_reserve_seconds=0.01,
+                )
+            )
+        )
+
+    _assert_exception_graph_hides(captured.value, "provider cleanup secret")
+    assert tuple(getattr(captured.value, "__notes__", ())) == (
+        "collaborator also failed during timeout",
+    )
     await configured.service.close()
 
 
@@ -411,3 +494,10 @@ async def test_resume_uses_current_host_profile_and_never_snapshot_authority() -
         )
     assert len(configured.gateway.calls) == 1
     await configured.service.close()
+
+
+def _assert_exception_graph_hides(error: BaseException, canary: str) -> None:
+    assert canary not in str(error)
+    assert error.__cause__ is None
+    assert error.__context__ is None
+    assert all(canary not in note for note in getattr(error, "__notes__", ()))
