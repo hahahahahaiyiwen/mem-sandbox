@@ -10,6 +10,8 @@ conventions shared by MemSandbox domain boundaries.
 - Time enters behavior through a narrow `Clock` protocol and is represented as aware UTC.
 - UUID creation enters behavior through a narrow `UuidGenerator` protocol.
 - Expected failures use stable domain categories and codes.
+- `OperationKind` is the shared operation taxonomy. Optional outbound HTTP adds only its
+  identifier here; all network contracts and behavior remain owned by `mem_sandbox.network`.
 - Request and result metadata is immutable and uses domain identifiers rather than raw
   strings or dictionaries.
 

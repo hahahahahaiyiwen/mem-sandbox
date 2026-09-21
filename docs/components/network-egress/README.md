@@ -1,8 +1,9 @@
 # Controlled Network Egress Design
 
-**Status:** Selected for bounded implementation planning by
-[current-source verification evidence](../../product-validation/current-source-verification-evidence.md);
-not implemented
+**Status:** Selected by
+[current-source verification evidence](../../product-validation/current-source-verification-evidence.md).
+The Milestone 9A gateway/profile/fake seam is implemented; real transport, destination
+admission, credentials, accounting, adapters, and full security conformance are not.
 
 ## Purpose
 
@@ -13,6 +14,27 @@ authority.
 The network boundary is framework-neutral. A trusted virtual command and a typed agent
 tool may present different user interfaces, but both delegate to the same host-selected
 gateway and policy. Network access remains absent from the default virtual profile.
+
+## Implemented Milestone 9A boundary
+
+`mem_sandbox.network` now provides immutable HTTP/HTTPS `GET`/`HEAD` request, response,
+limit, usage, grant, context, binding, stable-error, gateway, fake, and conformance
+contracts. `SandboxOptions` defaults to `VirtualSandboxProfile`; an explicit
+`ConnectedSandboxProfile` supplies a requested grant. `DefaultSessionFactory` accepts a
+constructor-injected host binding and rejects missing or over-ceiling connected profiles
+before session publication.
+
+`SandboxSession.send_http()` routes an approved request through the normal operation
+gate, high-level policy, deadline, cancellation, event, and metadata sequence. Session
+close cancels an active HTTP operation but does not close the shared gateway. Resume
+uses only the current host-selected options. Snapshot state contains no grant, gateway,
+policy identifier, route, or provider configuration.
+
+The only gateway implementation is deterministic and fake. It opens no network
+connection. Basic scheme recognition and grant checks are implemented, but URL
+canonicalization, hostname/IP admission, DNS, TLS, redirect handling, ambient-proxy
+isolation, credential attachment, cumulative accounting, network-specific events,
+commands, and agent tools remain later Milestone 9 work.
 
 ## Decision summary
 
@@ -148,10 +170,10 @@ owned by the command executor. Session lifecycle and operation ordering remain o
 
 ## Session and command integration
 
-A future optional typed session operation may delegate directly to the gateway under the
-normal session gate, deadline, admission, accounting, event, and cancellation sequence.
-A model-facing HTTP tool calls that session operation rather than bypassing session
-coordination.
+The implemented optional `send_http()` session operation delegates to the gateway under
+the normal session gate, deadline, high-level admission, event, and cancellation
+sequence. A future model-facing HTTP tool calls that session operation rather than
+bypassing session coordination.
 
 The virtual-command path is already inside one admitted `execute` operation. Its handler
 must not call a public session method and reacquire the session gate. Instead, the
@@ -165,30 +187,26 @@ unchanged unless the host explicitly enables and exposes the optional typed oper
 
 ## Capability profile
 
-The host selects networking at sandbox creation through an immutable profile. The first
-profile should contain:
+The host selects networking at sandbox creation or resume through an immutable profile.
+The implemented profile contains:
 
-- whether outbound HTTP is enabled;
-- an approved destination-policy identifier or injected policy object;
+- an explicit connected-profile choice rather than an enable flag in model input;
+- an approved destination-policy identifier;
 - allowed methods and schemes;
 - immutable upper bounds;
 - optional host-owned credential routes;
-- event-delivery requirements;
-- whether the grant may be compiled into an external execution runtime.
+- event-delivery requirements.
 
-The serialized sandbox manifest may describe that bounded HTTP is available, but it
-must not serialize credentials, internal network topology, resolver results, proxy
-configuration, or provider-specific policy state.
+Snapshot state does not serialize the profile, grant, credentials, internal network
+topology, resolver results, proxy configuration, or provider-specific policy state.
+Resume uses the destination host's current explicit options and must fit the
+constructor-injected binding ceiling. The snapshot can neither restore nor widen
+authority.
 
-Network configuration is not part of workspace state and is not restored from a
-snapshot. Resume uses the destination host's current approved profile. A host may resume
-a snapshot into an equal or narrower profile. Widening authority requires an explicit
-new host decision rather than snapshot data.
+## Gateway contract
 
-## Illustrative gateway contract
-
-Exact names remain an implementation decision, but the boundary should use immutable
-domain values rather than dictionaries:
+The implemented boundary uses immutable domain values rather than dictionaries. This
+excerpt omits defaults and validation:
 
 ```python
 @dataclass(frozen=True, slots=True)
@@ -200,7 +218,9 @@ class HttpHeader:
 @dataclass(frozen=True, slots=True, kw_only=True)
 class HttpTransferLimits:
     timeout_seconds: float
+    max_request_header_bytes: int
     max_request_body_bytes: int
+    max_response_header_bytes: int
     max_response_body_bytes: int
     max_decompressed_response_bytes: int
     max_redirects: int
@@ -210,11 +230,12 @@ class HttpTransferLimits:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class OutboundHttpRequest:
-    method: str
+    method: HttpMethod
     url: str
+    limits: HttpTransferLimits
     headers: tuple[HttpHeader, ...] = ()
     body: bytes = b""
-    limits: HttpTransferLimits
+    credential_route: CredentialRouteId | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -243,10 +264,10 @@ class OutboundHttpGateway(Protocol):
     ) -> OutboundHttpResponse: ...
 ```
 
-`NetworkOperationContext` carries the session and operation identities, the immutable
-host grant, cancellation, the remaining operation deadline, resource-accounting access,
-and protected-value handling. It has a non-revealing representation and never contains
-a host path or raw credential value.
+`NetworkOperationContext` currently carries the session and operation identities, the
+immutable effective grant, cancellation, and the operation deadline. Later accounting
+and credential work adds focused collaborators without placing raw credential values or
+host paths in the context. Its representation is non-revealing.
 
 The gateway returns complete bounded bytes in the first iteration. Streaming,
 range-based downloads, and large artifact transfer require separate contracts because
@@ -524,14 +545,20 @@ resource owner, not an individual command.
 
 ## Delivery sequence
 
-1. Define immutable network grants, focused policy facts, stable errors, and fake
-   accounting.
-2. Implement a fake gateway and conformance suite without a real transport.
-3. Implement one bounded HTTP transport with controlled DNS, redirect, proxy, and TLS
+Completed in Milestone 9A:
+
+1. Define immutable network grants, request/result/context contracts, and stable errors.
+2. Implement a fake gateway and conformance driver without a real transport.
+3. Integrate explicit virtual/connected service profiles and one typed session operation.
+
+Remaining:
+
+1. Implement one bounded HTTP transport with controlled DNS, redirect, proxy, and TLS
    behavior.
-4. Add destination-bound credential routing and secret-canary coverage.
-5. Add one typed tool and one virtual command over the same gateway.
-6. Compile the same grant into an external execution backend only after its system-level
+2. Add destination-bound credential routing, accounting, events, and secret-canary
+   coverage.
+3. Add one typed tool and one virtual command over the same gateway.
+4. Compile the same grant into an external execution backend only after its system-level
    egress enforcement is proven.
 
 ## Exit criteria

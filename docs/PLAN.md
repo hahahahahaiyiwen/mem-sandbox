@@ -1480,7 +1480,8 @@ workflow evidence; it need not precede network-disabled Milestone 10 execution.
 [current-source verification evidence](./product-validation/current-source-verification-evidence.md)
 satisfies workflow-blocker review trigger 3 and selects this milestone for bounded child
 implementation. Networking remains absent from the current/default profile, and no
-checklist item is complete merely because the milestone is selected.
+checklist item is complete merely because the milestone is selected. Issue #104
+subsequently completed the gateway/profile/fake seam without adding a real transport.
 
 Detailed design:
 [Controlled Network Egress](./components/network-egress/README.md).
@@ -1504,14 +1505,14 @@ audit behavior.
 
 #### 9.1 Gateway and profile
 
-- [ ] **9.1.1** Define an async framework-neutral `OutboundHttpGateway` using immutable
+- [x] **9.1.1** Define an async framework-neutral `OutboundHttpGateway` using immutable
   request, response, limits, usage, context, and stable error models.
-- [ ] **9.1.2** Keep networking absent when no connected profile is configured. A resumed
+- [x] **9.1.2** Keep networking absent when no connected profile is configured. A resumed
   snapshot receives only the current host-selected equal or narrower grant.
-- [ ] **9.1.3** Support bounded HTTP and HTTPS first with `GET` and `HEAD` as the baseline
+- [x] **9.1.3** Support bounded HTTP and HTTPS first with `GET` and `HEAD` as the baseline
   method grant and no ambient proxy, credential, cookie, cache, or host-client
   configuration. State-changing methods require explicit host policy.
-- [ ] **9.1.4** Implement a fake gateway and conformance driver before one real bounded
+- [x] **9.1.4** Implement a fake gateway and conformance driver before one real bounded
   transport.
 
 #### 9.2 Destination policy and SSRF controls

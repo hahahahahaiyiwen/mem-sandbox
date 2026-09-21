@@ -9,6 +9,12 @@ deadline. The session borrows behavior collaborators, closes only its injected
 policy, event delivery, secrets, and snapshot persistence behind constructor-injected
 interfaces.
 
+An optional host-selected `OutboundHttpBinding` adds the typed `send_http()` operation.
+The default session has no binding and fails before gateway use. A connected session
+uses the same operation gate, policy, deadline, cancellation, metadata, and event
+sequence as other public operations while URL and transport behavior remain owned by
+`mem_sandbox.network`.
+
 The public host-facing surface includes portable archive export and validate-then-publish
 restore. Restore may require an expected current workspace revision and root hash;
 mismatches raise `SessionWorkspaceChanged` while the operation gate prevents a stale
@@ -23,3 +29,7 @@ session-owned admission and workspace-owned publication. The
 [authority/accounting design](../../../docs/product-validation/authority-accounting-design.md)
 documents the conditional grants, event facts, and settlement paths that any future
 session facade must preserve.
+
+Milestone 9A implements only the HTTP grant/gateway seam. Session close cooperatively
+cancels an active HTTP operation but never closes the borrowed host-scoped gateway.
+Snapshots carry no network authority; service resume supplies the current host profile.

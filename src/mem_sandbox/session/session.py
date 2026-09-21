@@ -40,6 +40,16 @@ from mem_sandbox.events import (
     SandboxEvent,
     SandboxEventType,
 )
+from mem_sandbox.network import (
+    NetworkCancellationSignal,
+    NetworkOperationContext,
+    OutboundHttpBinding,
+    OutboundHttpCancelled,
+    OutboundHttpGatewayFailed,
+    OutboundHttpGrant,
+    OutboundHttpResponse,
+    OutboundHttpUnavailable,
+)
 from mem_sandbox.policy import (
     PathMutationPolicyContext,
     PolicyDecision,
@@ -85,6 +95,8 @@ from mem_sandbox.session.models import (
     RestoreSnapshotRequest,
     RestoreSnapshotResult,
     SandboxSessionState,
+    SendHttpRequest,
+    SendHttpResult,
     SessionExecuteRequest,
     SessionExecuteResult,
     SessionExecutionContext,
@@ -194,8 +206,23 @@ class _OperationValueProtection:
         return self._redactor.redact_text(value) != value
 
 
+class _SessionNetworkCancellation:
+    __slots__ = ("_request", "_session")
+
+    def __init__(
+        self,
+        request: NetworkCancellationSignal | None,
+        session: asyncio.Event,
+    ) -> None:
+        self._request = request
+        self._session = session
+
+    def is_set(self) -> bool:
+        return self._session.is_set() or (self._request is not None and self._request.is_set())
+
+
 class SandboxSession:
-    """Serialize and coordinate the approved Milestone 3 sandbox operations."""
+    """Serialize and coordinate approved sandbox operations."""
 
     def __init__(
         self,
@@ -213,6 +240,7 @@ class SandboxSession:
         resource_scope: SessionResourceScope,
         clock: Clock,
         uuid_generator: UuidGenerator,
+        outbound_http: OutboundHttpBinding | None = None,
         initial_cwd: SandboxPath | None = None,
         initial_environment: CommandEnvironment | None = None,
         lifecycle_limits: OperationLimits | None = None,
@@ -230,6 +258,7 @@ class SandboxSession:
         self._resource_scope = resource_scope
         self._clock = clock
         self._uuid_generator = uuid_generator
+        self._outbound_http = outbound_http
         self._cwd = initial_cwd or SandboxPath.root()
         self._environment = initial_environment or CommandEnvironment()
         self._lifecycle_limits = lifecycle_limits or OperationLimits()
@@ -237,6 +266,7 @@ class SandboxSession:
         self._operation_gate = asyncio.Lock()
         self._event_sequence = 0
         self._close_task: asyncio.Task[None] | None = None
+        self._network_close_requested = asyncio.Event()
 
     @property
     def session_id(self) -> SessionId:
@@ -253,6 +283,11 @@ class SandboxSession:
     @property
     def environment(self) -> CommandEnvironment:
         return self._environment
+
+    @property
+    def outbound_http_grant(self) -> OutboundHttpGrant | None:
+        binding = self._outbound_http
+        return binding.grant if binding is not None else None
 
     async def start(self) -> None:
         if self._state is not SandboxSessionState.CREATED:
@@ -451,6 +486,69 @@ class SandboxSession:
             result.resulting_cwd,
             result.environment_changes,
         )
+
+    async def send_http(self, request: SendHttpRequest) -> SendHttpResult:
+        self._reject_non_running()
+        binding = self._outbound_http
+        if binding is None:
+            raise OutboundHttpUnavailable("outbound HTTP is not enabled for this sandbox")
+        binding.grant.require_request(request.request)
+        cancellation = _SessionNetworkCancellation(
+            request.cancellation,
+            self._network_close_requested,
+        )
+
+        async def action(
+            context: _OperationContext,
+        ) -> tuple[OutboundHttpResponse, Revision]:
+            gateway_deadline = min(
+                context.collaborator_deadline,
+                asyncio.get_running_loop().time() + request.request.limits.timeout_seconds,
+            )
+            try:
+                response = await self._await_collaborator(
+                    lambda: binding.gateway.send(
+                        request.request,
+                        NetworkOperationContext(
+                            session_id=self._session_id,
+                            operation_id=context.operation_id,
+                            grant=binding.grant,
+                            deadline_monotonic=gateway_deadline,
+                            cancellation=cancellation,
+                        ),
+                    ),
+                    gateway_deadline,
+                    cancellation,
+                    context.operation_id,
+                )
+                binding.grant.require_response(request.request, response)
+            except OutboundHttpCancelled as error:
+                raise SessionOperationCancelled(
+                    "outbound HTTP operation was cancelled",
+                    operation_id=context.operation_id,
+                ) from error
+            except SandboxError:
+                raise
+            except Exception:
+                raise OutboundHttpGatewayFailed(
+                    "outbound HTTP gateway failed unexpectedly"
+                ) from None
+            stats = await self._await_collaborator(
+                self._workspace_reader.stats,
+                context.collaborator_deadline,
+                cancellation,
+                context.operation_id,
+            )
+            return response, stats.revision
+
+        outcome = await self._run_operation(
+            OperationKind.OUTBOUND_HTTP,
+            request.limits,
+            cancellation,
+            lambda: None,
+            action,
+        )
+        return SendHttpResult(outcome.metadata, outcome.value)
 
     async def read_file(self, request: ReadFileRequest) -> ReadFileResult:
         path_box: list[SandboxPath] = []
@@ -1004,6 +1102,7 @@ class SandboxSession:
         )
 
     async def close(self) -> None:
+        self._network_close_requested.set()
         close_task = self._close_task
         if close_task is not None:
             if close_task.done():

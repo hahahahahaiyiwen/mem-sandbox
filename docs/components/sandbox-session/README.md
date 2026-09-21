@@ -1,8 +1,7 @@
 # Sandbox Session Design
 
-**Status:** Core lifecycle, issue #20 secret execution behavior, and issue #31 native
-directory operations implemented; future external-capability coordination approved in
-issue #49
+**Status:** Core lifecycle, issue #20 secret execution behavior, issue #31 native
+directory operations, and issue #104 connected HTTP gateway coordination implemented
 
 ## Purpose
 
@@ -27,6 +26,7 @@ session-coordinated.
 
 - Expose agent-facing execute, bounded read, write, and patch operations.
 - Expose host-only binary, directory, snapshot, and lifecycle operations.
+- Expose optional typed HTTP only when the host injects a connected binding.
 - Enforce the session state machine.
 - Normalize requests and attach session identity.
 - Require an explicit admission decision before invoking a protected operation
@@ -48,6 +48,7 @@ class SandboxSession:
     async def read_file(self, request: ReadFileRequest) -> ReadFileResult: ...
     async def write_file(self, request: WriteFileRequest) -> FileMutationResult: ...
     async def apply_patch(self, request: ApplyPatchRequest) -> PatchMutationResult: ...
+    async def send_http(self, request: SendHttpRequest) -> SendHttpResult: ...
 ```
 
 Session-owned request and result types add operation identity, timing, and revision
@@ -119,27 +120,24 @@ async def close() -> None: ...
 
 Adapters decide which methods become model-visible tools.
 
-### Future optional external-capability operations
+### Optional external-capability operations
 
-The default session surface remains unchanged. Future connected and execution profiles
-may add typed HTTP and run-program operations only after a linked workflow trigger,
-separate implementation approval, and definition of their grants, policy, accounting,
-events, and stable failures in Milestones 8 through 10.
+Issue #104 adds typed `send_http()` over a constructor-injected
+`OutboundHttpBinding`. The operation first requires an effective grant, then uses the
+normal gate, high-level policy, deadline, cancellation, terminal event, and metadata
+sequence. Method, scheme, transfer-limit, and credential-route requests outside the
+grant fail before gateway use. URL/destination admission and real transport remain
+network-module work.
 
-A typed adapter invokes the optional session operation so the normal gate, lifecycle,
-deadline, cancellation, and terminal event sequence remains authoritative. A virtual
-HTTP or Python command is already inside one admitted `execute` operation and must not
-call back into a public session method. Instead, its `CommandExecutionContext` carries
-the current operation identity and narrow resource collaborators.
+A future typed adapter invokes `send_http()` rather than bypassing session coordination.
+A virtual HTTP command is already inside one admitted `execute` operation and must not
+call back into the public method; its command context will carry narrow gateway access in
+issue #106. The session never imports an HTTP client or owns URL normalization, DNS, TLS,
+redirects, credentials, or provider behavior.
 
-One concrete network gateway or external execution coordinator may therefore implement
-both a session-owned port and a command-owned port without introducing a dependency from
-the command executor to `SandboxSession`. The session does not own URL parsing, DNS,
-runtime provisioning, workspace archive validation, or provider-specific behavior.
-
-Capability grants are host-selected configuration, not session snapshot state. Resume
-may use an equal or narrower current profile and never gains authority from serialized
-state.
+Capability grants are host-selected configuration, not snapshot state. Resume uses the
+current host profile under its injected binding ceiling and never gains authority from
+serialized state. Run-program operations remain future Milestone 10 work.
 
 ### Native directory mutation contract
 
@@ -454,8 +452,8 @@ Rules:
 - Construction produces `CREATED`; only explicit `start()` enters `RUNNING`.
 - Agent operations require `RUNNING`.
 - `start()` is valid only from `CREATED`.
-- Once close is requested, the active operation may finish, but queued and newly
-  arriving operations are rejected.
+- Once close is requested, an active HTTP operation receives cooperative cancellation;
+  other active operations may finish. Queued and newly arriving operations are rejected.
 - Once the transition to `CLOSING` begins, close completes resource-scope cleanup despite
   caller cancellation before propagating cancellation.
 - `close()` is idempotent for concurrent or repeated callers.
@@ -659,8 +657,9 @@ or restored state remains committed.
 
 ## Close and resource cleanup
 
-`close()` transitions to `CLOSING`, waits for the active operation, and closes the
-session-owned resource scope exactly once. Shared borrowed collaborators are untouched.
+`close()` transitions to `CLOSING`, signals an active HTTP operation to cancel, waits for
+the active operation, and closes the session-owned resource scope exactly once. Shared
+borrowed collaborators, including the host-scoped HTTP gateway, are untouched.
 
 If resource-scope cleanup fails, the session still reaches `CLOSED` and `close()` raises a
 stable cleanup error. Later idempotent close calls observe the completed close and do not

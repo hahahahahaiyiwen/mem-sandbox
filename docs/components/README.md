@@ -1,7 +1,7 @@
 # Core Component Design Index
 
-The framework-neutral core has eight implemented boundaries and two approved future
-external-capability boundaries:
+The framework-neutral core has eight fully implemented boundaries, one implemented
+external-capability seam, and one approved future external-capability boundary:
 
 | Component | Owns | Status |
 |---|---|---|
@@ -13,7 +13,7 @@ external-capability boundaries:
 | [Secret broker](./secret-broker/README.md) | Explicit no-secret default and operation-scoped leasing | Implemented |
 | [Event sink](./event-sink/README.md) | Structured lifecycle, operation, decision, and audit events | Implemented |
 | [Snapshot store](./snapshot-store/README.md) | Immutable versioned snapshot persistence, quotas, expiry, purge, and retrieval | Implemented |
-| [Controlled network egress](./network-egress/README.md) | HTTP admission, destination policy, SSRF defense, credential routing, transfer limits, and audit | Approved design; not implemented |
+| [Controlled network egress](./network-egress/README.md) | HTTP grant/gateway contracts, connected profile, fake conformance, and future transport/security behavior | Gateway/profile seam implemented; transport deferred |
 | [External execution and Python runtime](./external-execution/README.md) | Execution coordination, workspace transfer, backend isolation, publication, resources, and runtime provenance | Approved design; not implemented |
 
 ## Dependency rule

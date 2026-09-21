@@ -1,6 +1,7 @@
 # Sandbox Service Design
 
-**Status:** Implemented in issue #19
+**Status:** Core service implemented in issue #19; connected HTTP profile composition
+implemented in issue #104
 
 ## Purpose
 
@@ -40,18 +41,19 @@ the public `SandboxService` protocol, while `DefaultSessionFactory`,
 - Network transport, MCP, or an HTTP control plane.
 - Producing `sandbox.created` or `sandbox.deleted` events in issue #19.
 
-## Future capability-profile composition
+## Connected capability-profile composition
 
-Milestone 8 may extend `SandboxOptions` with an immutable host-selected capability
-profile and cumulative session resource budget only after a linked workflow trigger and
-separate implementation approval identify a concrete consumer. The service remains a
+Issue #104 extends `SandboxOptions` with an immutable host-selected profile.
+`VirtualSandboxProfile` remains the default and injects no network capability.
+`ConnectedSandboxProfile` requires an `OutboundHttpGrant`. The service remains a
 composition root; it does not parse commands, normalize URLs, execute Python, import
 repositories, or evaluate resource-specific policy.
 
-Create selects explicit collaborators for the profile. Resume applies the current host
-configuration and may preserve or narrow authority; snapshot state never enables
-networking, host execution, a stronger isolation claim, or larger limits. Missing or
-incompatible required collaborators fail before a session is published.
+`DefaultSessionFactory` receives an optional constructor-injected
+`OutboundHttpBinding`, which combines a borrowed gateway with the maximum host grant.
+Create and resume may select an equal or narrower grant. A missing binding or an
+over-ceiling grant fails before a session is published. Snapshot state contains no
+network profile or authority; resume always applies the current request options.
 
 Repository ingestion remains a host create/restore concern over bounded workspace
 artifacts, not a model-visible path or clone operation. Network clients, execution
@@ -97,10 +99,22 @@ class SandboxHandle:
     value: UUID
 
 
+@dataclass(frozen=True, slots=True)
+class VirtualSandboxProfile: ...
+
+
+@dataclass(frozen=True, slots=True)
+class ConnectedSandboxProfile:
+    outbound_http: OutboundHttpGrant
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class SandboxOptions:
     workspace_limits: WorkspaceLimits = field(default_factory=WorkspaceLimits)
     lifecycle_limits: OperationLimits = field(default_factory=OperationLimits)
+    profile: VirtualSandboxProfile | ConnectedSandboxProfile = field(
+        default_factory=VirtualSandboxProfile
+    )
 
 
 @dataclass(frozen=True, slots=True)

@@ -5,8 +5,16 @@ from __future__ import annotations
 from mem_sandbox.command_executor import create_default_executor
 from mem_sandbox.core import Clock, SandboxError, UuidGenerator
 from mem_sandbox.events import EventDispatcher, EventSink
+from mem_sandbox.network import (
+    OutboundHttpBinding,
+    OutboundHttpDenied,
+)
 from mem_sandbox.service.errors import InvalidSandboxRequest, SessionFactoryFailed
-from mem_sandbox.service.models import SessionFactoryRequest
+from mem_sandbox.service.models import (
+    ConnectedSandboxProfile,
+    SessionFactoryRequest,
+    VirtualSandboxProfile,
+)
 from mem_sandbox.service.ports import ServiceSessionRuntime
 from mem_sandbox.service.resources import (
     CompositeResourceScope,
@@ -39,6 +47,7 @@ class DefaultSessionFactory:
         snapshot_codec: SessionSnapshotCodec,
         clock: Clock,
         uuid_generator: UuidGenerator,
+        outbound_http: OutboundHttpBinding | None = None,
     ) -> None:
         self._policy_engine = policy_engine
         self._secret_broker = secret_broker
@@ -46,8 +55,13 @@ class DefaultSessionFactory:
         self._snapshot_codec = snapshot_codec
         self._clock = clock
         self._uuid_generator = uuid_generator
+        self._outbound_http = outbound_http
 
     async def create(self, request: SessionFactoryRequest) -> ServiceSessionRuntime:
+        outbound_http = _bind_outbound_http(
+            request.options.profile,
+            self._outbound_http,
+        )
         workspace = MemoryWorkspace(request.options.workspace_limits)
         try:
             await _prepare_initial_state(workspace, request)
@@ -73,6 +87,7 @@ class DefaultSessionFactory:
                 resource_scope=NoOpSessionResourceScope(),
                 clock=self._clock,
                 uuid_generator=self._uuid_generator,
+                outbound_http=outbound_http,
                 initial_cwd=(
                     request.restored_state.cwd if request.restored_state is not None else None
                 ),
@@ -94,6 +109,22 @@ class DefaultSessionFactory:
         except Exception as error:
             await _close_after_construction_failure(post_session_scope, error)
             raise SessionFactoryFailed("session factory construction failed") from error
+
+
+def _bind_outbound_http(
+    profile: VirtualSandboxProfile | ConnectedSandboxProfile,
+    configured: OutboundHttpBinding | None,
+) -> OutboundHttpBinding | None:
+    if isinstance(profile, VirtualSandboxProfile):
+        return None
+    if configured is None:
+        raise InvalidSandboxRequest("connected profile requires a configured outbound HTTP binding")
+    try:
+        return configured.with_grant(profile.outbound_http)
+    except OutboundHttpDenied as error:
+        raise InvalidSandboxRequest(
+            "connected profile exceeds the host outbound HTTP grant ceiling"
+        ) from error
 
 
 async def _prepare_initial_state(

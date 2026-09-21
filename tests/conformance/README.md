@@ -119,6 +119,14 @@ and domain-faithful results that the generic SDK stream methods do not expose. T
 capability driver invokes only the four JSON tools. Both replacement-resume paths restore
 workspace, cwd, and approved environment from backward-compatible provider state v1.
 
+## Controlled HTTP gateway conformance
+
+`tests/conformance/network/test_gateway.py` exercises the reusable
+`OutboundHttpGatewayConformanceDriver` against the deterministic fake. It verifies exact
+request/context round trips, stable domain failures, and cooperative cancellation without
+opening a network connection. A later real transport must pass the same public driver in
+addition to its destination and security tests.
+
 ## Behavior-first coverage
 
 | Category | Required conformance behavior |
@@ -160,6 +168,7 @@ documented mutation.
 
 - Direct file: `tests/conformance/test_direct_session.py`
 - Product equivalence: `tests/conformance/product/test_equivalence.py`
+- Controlled HTTP gateway: `tests/conformance/network/test_gateway.py`
 - Run: `python -m pytest tests/conformance -q`
 - The test must pass on Windows and Ubuntu with Python 3.12 and 3.14.
 - The normalized trace must contain no private object representations or unstable timing

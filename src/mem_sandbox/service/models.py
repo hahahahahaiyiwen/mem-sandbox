@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, cast
 from uuid import UUID
 
 from mem_sandbox.core import OperationLimits, SessionId
+from mem_sandbox.network import OutboundHttpGrant
 from mem_sandbox.snapshots import SessionSnapshotState, SnapshotRef
 from mem_sandbox.workspace import WorkspaceLimits
 
@@ -50,16 +51,41 @@ class SandboxHandle:
         return str(self.value)
 
 
+@dataclass(frozen=True, slots=True)
+class VirtualSandboxProfile:
+    """Default profile with no connected capabilities."""
+
+
+@dataclass(frozen=True, slots=True)
+class ConnectedSandboxProfile:
+    """Explicit host-selected profile for bounded outbound HTTP."""
+
+    outbound_http: OutboundHttpGrant
+
+    def __post_init__(self) -> None:
+        if not isinstance(cast(object, self.outbound_http), OutboundHttpGrant):
+            raise TypeError("outbound_http must be OutboundHttpGrant")
+
+
+type SandboxProfile = VirtualSandboxProfile | ConnectedSandboxProfile
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class SandboxOptions:
     workspace_limits: WorkspaceLimits = field(default_factory=WorkspaceLimits)
     lifecycle_limits: OperationLimits = field(default_factory=OperationLimits)
+    profile: SandboxProfile = field(default_factory=VirtualSandboxProfile)
 
     def __post_init__(self) -> None:
         if not isinstance(cast(object, self.workspace_limits), WorkspaceLimits):
             raise TypeError("workspace_limits must be WorkspaceLimits")
         if not isinstance(cast(object, self.lifecycle_limits), OperationLimits):
             raise TypeError("lifecycle_limits must be OperationLimits")
+        if not isinstance(
+            cast(object, self.profile),
+            VirtualSandboxProfile | ConnectedSandboxProfile,
+        ):
+            raise TypeError("profile must be VirtualSandboxProfile or ConnectedSandboxProfile")
 
 
 @dataclass(frozen=True, slots=True)

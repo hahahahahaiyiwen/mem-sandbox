@@ -15,6 +15,11 @@ from mem_sandbox.command_executor import (
     EnvironmentValue,
 )
 from mem_sandbox.core import OperationLimits, OperationResultMetadata
+from mem_sandbox.network import (
+    NetworkCancellationSignal,
+    OutboundHttpRequest,
+    OutboundHttpResponse,
+)
 from mem_sandbox.secrets import SecretRef
 from mem_sandbox.snapshots import SnapshotRef
 from mem_sandbox.workspace import (
@@ -109,6 +114,32 @@ class SessionExecuteResult:
     duration_ms: float
     resulting_cwd: SandboxPath
     environment_changes: tuple[EnvironmentChange, ...]
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class SendHttpRequest:
+    request: OutboundHttpRequest
+    limits: OperationLimits = field(default_factory=OperationLimits)
+    cancellation: NetworkCancellationSignal | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(cast(object, self.request), OutboundHttpRequest):
+            raise TypeError("request must be OutboundHttpRequest")
+        if not isinstance(cast(object, self.limits), OperationLimits):
+            raise TypeError("limits must be OperationLimits")
+        cancellation = cast(object, self.cancellation)
+        if cancellation is not None and not callable(getattr(cancellation, "is_set", None)):
+            raise TypeError("cancellation must provide is_set() or be None")
+
+
+@dataclass(frozen=True, slots=True)
+class SendHttpResult:
+    metadata: OperationResultMetadata
+    response: OutboundHttpResponse
+
+    def __post_init__(self) -> None:
+        if not isinstance(cast(object, self.response), OutboundHttpResponse):
+            raise TypeError("response must be OutboundHttpResponse")
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
