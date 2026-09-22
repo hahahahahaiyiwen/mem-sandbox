@@ -40,6 +40,21 @@ from mem_sandbox.events import (
     SandboxEvent,
     SandboxEventType,
 )
+from mem_sandbox.network import (
+    NetworkCancellationSignal,
+    NetworkOperationContext,
+    OutboundHttpBinding,
+    OutboundHttpCancelled,
+    OutboundHttpDenied,
+    OutboundHttpGatewayFailed,
+    OutboundHttpGrant,
+    OutboundHttpLimitExceeded,
+    OutboundHttpRequest,
+    OutboundHttpRequestInvalid,
+    OutboundHttpResponse,
+    OutboundHttpTimeout,
+    OutboundHttpUnavailable,
+)
 from mem_sandbox.policy import (
     PathMutationPolicyContext,
     PolicyDecision,
@@ -85,6 +100,8 @@ from mem_sandbox.session.models import (
     RestoreSnapshotRequest,
     RestoreSnapshotResult,
     SandboxSessionState,
+    SendHttpRequest,
+    SendHttpResult,
     SessionExecuteRequest,
     SessionExecuteResult,
     SessionExecutionContext,
@@ -137,6 +154,7 @@ from mem_sandbox.workspace import (
 
 _T = TypeVar("_T")
 _POLL_SECONDS = 0.01
+_OUTBOUND_HTTP_MAX_CANCELLATION_SETTLEMENT_SECONDS = 0.05
 
 
 @dataclass(frozen=True, slots=True)
@@ -194,8 +212,95 @@ class _OperationValueProtection:
         return self._redactor.redact_text(value) != value
 
 
+class _SessionNetworkCancellation:
+    __slots__ = ("_request", "_session")
+
+    def __init__(
+        self,
+        request: NetworkCancellationSignal | None,
+        session: asyncio.Event,
+    ) -> None:
+        self._request = request
+        self._session = session
+
+    def is_set(self) -> bool:
+        return self._session.is_set() or (self._request is not None and self._request.is_set())
+
+
+def _sanitize_outbound_http_failure(error: SandboxError) -> SandboxError:
+    if isinstance(error, OutboundHttpDenied):
+        return OutboundHttpDenied("outbound HTTP gateway denied the request")
+    if isinstance(error, OutboundHttpLimitExceeded):
+        return OutboundHttpLimitExceeded("outbound HTTP gateway reported a limit violation")
+    if isinstance(error, OutboundHttpRequestInvalid):
+        return OutboundHttpRequestInvalid("outbound HTTP gateway rejected the request")
+    if isinstance(error, OutboundHttpTimeout):
+        return OutboundHttpTimeout("outbound HTTP gateway timed out")
+    return OutboundHttpGatewayFailed("outbound HTTP gateway failed unexpectedly")
+
+
+def _task_exception_is[T](
+    task: asyncio.Future[T] | None,
+    error: BaseException,
+) -> bool:
+    return task is not None and task.done() and not task.cancelled() and task.exception() is error
+
+
+async def _send_outbound_http_safely(
+    binding: OutboundHttpBinding,
+    request: OutboundHttpRequest,
+    context: NetworkOperationContext,
+) -> OutboundHttpResponse:
+    response: OutboundHttpResponse | None = None
+    failure: SandboxError | None = None
+    native_cancellation = False
+    gateway_task: asyncio.Future[OutboundHttpResponse] | None = None
+    try:
+        gateway_task = asyncio.ensure_future(binding.gateway.send(request, context))
+        response = await gateway_task
+        binding.grant.require_response(request, response)
+    except asyncio.CancelledError:
+        current_task = asyncio.current_task()
+        if current_task is not None and current_task.cancelling():
+            native_cancellation = True
+        else:
+            failure = OutboundHttpGatewayFailed("outbound HTTP gateway failed unexpectedly")
+    except OutboundHttpCancelled:
+        failure = SessionOperationCancelled(
+            "outbound HTTP operation was cancelled",
+            operation_id=context.operation_id,
+        )
+    except (
+        OutboundHttpDenied,
+        OutboundHttpGatewayFailed,
+        OutboundHttpLimitExceeded,
+        OutboundHttpRequestInvalid,
+        OutboundHttpTimeout,
+    ) as error:
+        failure = _sanitize_outbound_http_failure(error)
+    except SandboxError:
+        failure = OutboundHttpGatewayFailed("outbound HTTP gateway failed unexpectedly")
+    except Exception:
+        failure = OutboundHttpGatewayFailed("outbound HTTP gateway failed unexpectedly")
+    except GeneratorExit as error:
+        if gateway_task is None or _task_exception_is(gateway_task, error):
+            failure = OutboundHttpGatewayFailed("outbound HTTP gateway failed unexpectedly")
+        else:
+            raise
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except BaseException:
+        failure = OutboundHttpGatewayFailed("outbound HTTP gateway failed unexpectedly")
+    if native_cancellation:
+        raise asyncio.CancelledError
+    if failure is not None:
+        raise failure
+    assert response is not None
+    return response
+
+
 class SandboxSession:
-    """Serialize and coordinate the approved Milestone 3 sandbox operations."""
+    """Serialize and coordinate approved sandbox operations."""
 
     def __init__(
         self,
@@ -213,6 +318,7 @@ class SandboxSession:
         resource_scope: SessionResourceScope,
         clock: Clock,
         uuid_generator: UuidGenerator,
+        outbound_http: OutboundHttpBinding | None = None,
         initial_cwd: SandboxPath | None = None,
         initial_environment: CommandEnvironment | None = None,
         lifecycle_limits: OperationLimits | None = None,
@@ -230,6 +336,7 @@ class SandboxSession:
         self._resource_scope = resource_scope
         self._clock = clock
         self._uuid_generator = uuid_generator
+        self._outbound_http = outbound_http
         self._cwd = initial_cwd or SandboxPath.root()
         self._environment = initial_environment or CommandEnvironment()
         self._lifecycle_limits = lifecycle_limits or OperationLimits()
@@ -237,6 +344,8 @@ class SandboxSession:
         self._operation_gate = asyncio.Lock()
         self._event_sequence = 0
         self._close_task: asyncio.Task[None] | None = None
+        self._network_close_requested = asyncio.Event()
+        self._unsettled_collaborators: set[asyncio.Future[object]] = set()
 
     @property
     def session_id(self) -> SessionId:
@@ -253,6 +362,11 @@ class SandboxSession:
     @property
     def environment(self) -> CommandEnvironment:
         return self._environment
+
+    @property
+    def outbound_http_grant(self) -> OutboundHttpGrant | None:
+        binding = self._outbound_http
+        return binding.grant if binding is not None else None
 
     async def start(self) -> None:
         if self._state is not SandboxSessionState.CREATED:
@@ -451,6 +565,63 @@ class SandboxSession:
             result.resulting_cwd,
             result.environment_changes,
         )
+
+    async def send_http(self, request: SendHttpRequest) -> SendHttpResult:
+        self._reject_non_running()
+        binding = self._outbound_http
+        if binding is None:
+            raise OutboundHttpUnavailable("outbound HTTP is not enabled for this sandbox")
+        binding.grant.require_request(request.request)
+        cancellation = _SessionNetworkCancellation(
+            request.cancellation,
+            self._network_close_requested,
+        )
+
+        async def action(
+            context: _OperationContext,
+        ) -> tuple[OutboundHttpResponse, Revision]:
+            gateway_deadline = min(
+                context.collaborator_deadline,
+                asyncio.get_running_loop().time() + request.request.limits.timeout_seconds,
+            )
+            gateway_context = NetworkOperationContext(
+                session_id=self._session_id,
+                operation_id=context.operation_id,
+                grant=binding.grant,
+                deadline_monotonic=gateway_deadline,
+                cancellation=cancellation,
+            )
+            response = await self._await_collaborator(
+                lambda: _send_outbound_http_safely(
+                    binding,
+                    request.request,
+                    gateway_context,
+                ),
+                gateway_deadline,
+                cancellation,
+                context.operation_id,
+                protect_secondary_errors=True,
+                cancellation_settlement_seconds=min(
+                    _OUTBOUND_HTTP_MAX_CANCELLATION_SETTLEMENT_SECONDS,
+                    (context.original_deadline - gateway_deadline) / 4,
+                ),
+            )
+            stats = await self._await_collaborator(
+                self._workspace_reader.stats,
+                context.collaborator_deadline,
+                cancellation,
+                context.operation_id,
+            )
+            return response, stats.revision
+
+        outcome = await self._run_operation(
+            OperationKind.OUTBOUND_HTTP,
+            request.limits,
+            cancellation,
+            lambda: None,
+            action,
+        )
+        return SendHttpResult(outcome.metadata, outcome.value)
 
     async def read_file(self, request: ReadFileRequest) -> ReadFileResult:
         path_box: list[SandboxPath] = []
@@ -1004,6 +1175,7 @@ class SandboxSession:
         )
 
     async def close(self) -> None:
+        self._network_close_requested.set()
         close_task = self._close_task
         if close_task is not None:
             if close_task.done():
@@ -1031,6 +1203,7 @@ class SandboxSession:
 
     async def _close_once(self) -> None:
         await self._operation_gate.acquire()
+        self._cancel_unsettled_collaborators()
         primary: SandboxError | None = None
         secondary: SandboxError | None = None
         try:
@@ -1303,6 +1476,8 @@ class SandboxSession:
         operation_id: OperationId,
         *,
         completed_result_is_authoritative: bool = False,
+        protect_secondary_errors: bool = False,
+        cancellation_settlement_seconds: float | None = None,
     ) -> _T:
         self._remaining(deadline, operation_id)
         self._check_cooperative_cancellation(cancellation, operation_id)
@@ -1317,9 +1492,15 @@ class SandboxSession:
                         "operation exceeded its protected collaborator budget",
                         operation_id=operation_id,
                     )
-                    secondary = await _settle_cancelled_task(task)
+                    secondary = await self._settle_cancelled_collaborator(
+                        task,
+                        cancellation_settlement_seconds,
+                    )
                     if secondary is not None:
-                        timeout.add_note(f"collaborator also failed during timeout: {secondary}")
+                        note = "collaborator also failed during timeout"
+                        if not protect_secondary_errors:
+                            note = f"{note}: {secondary}"
+                        timeout.add_note(note)
                     raise timeout
                 await asyncio.wait((task,), timeout=min(remaining, _POLL_SECONDS))
             result = await task
@@ -1336,11 +1517,15 @@ class SandboxSession:
             ):
                 return task.result()
             task.cancel()
-            secondary = await _settle_cancelled_task(task)
+            secondary = await self._settle_cancelled_collaborator(
+                task,
+                cancellation_settlement_seconds,
+            )
             if secondary is not None:
-                cancellation_error.add_note(
-                    f"collaborator also failed during cancellation: {secondary}"
-                )
+                note = "collaborator also failed during cancellation"
+                if not protect_secondary_errors:
+                    note = f"{note}: {secondary}"
+                cancellation_error.add_note(note)
             raise
         except SessionOperationCancelled as cancellation_error:
             if (
@@ -1351,12 +1536,55 @@ class SandboxSession:
             ):
                 return task.result()
             task.cancel()
-            secondary = await _settle_cancelled_task(task)
-            if secondary is not None:
-                cancellation_error.add_note(
-                    f"collaborator also failed during cancellation: {secondary}"
-                )
+            secondary = await self._settle_cancelled_collaborator(
+                task,
+                cancellation_settlement_seconds,
+            )
+            if secondary is not None and secondary is not cancellation_error:
+                note = "collaborator also failed during cancellation"
+                if not protect_secondary_errors:
+                    note = f"{note}: {secondary}"
+                cancellation_error.add_note(note)
             raise
+
+    async def _settle_cancelled_collaborator[T](
+        self,
+        task: asyncio.Future[T],
+        timeout_seconds: float | None,
+    ) -> BaseException | None:
+        if timeout_seconds is not None and not task.done():
+            retained = cast(asyncio.Future[object], task)
+            self._track_unsettled_collaborator(retained)
+            try:
+                done, _ = await asyncio.wait((task,), timeout=timeout_seconds)
+            except asyncio.CancelledError:
+                if not task.done():
+                    self._fail_closed_for_unsettled_collaborator()
+                raise
+            if not done:
+                self._fail_closed_for_unsettled_collaborator()
+                return RuntimeError("collaborator did not settle after cancellation")
+            self._unsettled_collaborators.discard(retained)
+        return await _settle_cancelled_task(task)
+
+    def _track_unsettled_collaborator(self, task: asyncio.Future[object]) -> None:
+        if task in self._unsettled_collaborators:
+            return
+        self._unsettled_collaborators.add(task)
+        task.add_done_callback(self._observe_unsettled_collaborator)
+
+    def _fail_closed_for_unsettled_collaborator(self) -> None:
+        if self._state is SandboxSessionState.RUNNING:
+            self._state = SandboxSessionState.FAILED
+
+    def _observe_unsettled_collaborator(self, task: asyncio.Future[object]) -> None:
+        self._unsettled_collaborators.discard(task)
+        if not task.cancelled():
+            task.exception()
+
+    def _cancel_unsettled_collaborators(self) -> None:
+        for task in tuple(self._unsettled_collaborators):
+            task.cancel()
 
     async def _publish_restore(
         self,
@@ -1684,12 +1912,18 @@ async def _close_secret_leases(leases: tuple[SecretLease, ...]) -> bool:
 
 async def _settle_cancelled_task[T](
     task: asyncio.Future[T],
-) -> Exception | None:
+) -> BaseException | None:
     try:
         await task
     except asyncio.CancelledError:
         return None
-    except Exception as error:
+    except GeneratorExit as error:
+        if _task_exception_is(task, error):
+            return error
+        raise
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except BaseException as error:
         return error
     return None
 

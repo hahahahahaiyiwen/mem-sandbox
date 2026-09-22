@@ -13,12 +13,15 @@ from mem_sandbox.service.errors import (
 )
 from mem_sandbox.service.factory import DefaultSessionFactory
 from mem_sandbox.service.models import (
+    ConnectedSandboxProfile,
     CreateSandboxRequest,
     OwnerId,
     ResumeSandboxRequest,
     SandboxHandle,
     SandboxOptions,
+    SandboxProfile,
     SessionFactoryRequest,
+    VirtualSandboxProfile,
     WorkspaceSeedFile,
 )
 from mem_sandbox.service.ports import (
@@ -40,6 +43,7 @@ from mem_sandbox.service.snapshots import InMemoryServiceSnapshotGateway
 __all__ = [
     "AsyncCloseable",
     "CompositeResourceScope",
+    "ConnectedSandboxProfile",
     "CreateSandboxRequest",
     "DefaultServiceSessionRuntime",
     "DefaultSessionFactory",
@@ -54,6 +58,7 @@ __all__ = [
     "SandboxIdentifierConflict",
     "SandboxNotFound",
     "SandboxOptions",
+    "SandboxProfile",
     "SandboxResumeFailed",
     "SandboxService",
     "SandboxServiceClosed",
@@ -65,5 +70,6 @@ __all__ = [
     "SessionFactoryCleanupFailed",
     "SessionFactoryFailed",
     "SessionFactoryRequest",
+    "VirtualSandboxProfile",
     "WorkspaceSeedFile",
 ]

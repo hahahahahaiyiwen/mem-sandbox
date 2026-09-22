@@ -6,7 +6,7 @@ from enum import StrEnum
 
 
 class OperationKind(StrEnum):
-    """Milestone 3 model-facing and host operation kinds."""
+    """Shared model-facing, host, and optional connected operation kinds."""
 
     EXECUTE = "execute"
     READ_FILE = "read_file"
@@ -22,6 +22,7 @@ class OperationKind(StrEnum):
     RESTORE_SNAPSHOT = "restore_snapshot"
     EXPORT_PORTABLE_ARCHIVE = "export_portable_archive"
     RESTORE_PORTABLE_ARCHIVE = "restore_portable_archive"
+    OUTBOUND_HTTP = "outbound_http"
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

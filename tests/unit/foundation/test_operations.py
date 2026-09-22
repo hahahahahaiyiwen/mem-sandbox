@@ -21,6 +21,7 @@ def test_supported_operation_kinds_are_exact() -> None:
         OperationKind.RESTORE_SNAPSHOT,
         OperationKind.EXPORT_PORTABLE_ARCHIVE,
         OperationKind.RESTORE_PORTABLE_ARCHIVE,
+        OperationKind.OUTBOUND_HTTP,
     )
     assert tuple(item.value for item in OperationKind) == (
         "execute",
@@ -37,6 +38,7 @@ def test_supported_operation_kinds_are_exact() -> None:
         "restore_snapshot",
         "export_portable_archive",
         "restore_portable_archive",
+        "outbound_http",
     )
 
 

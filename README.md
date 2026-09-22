@@ -194,9 +194,10 @@ in process without sandbox-owned network access or arbitrary code execution. Liv
 samples still call a hosted inference provider outside the workspace, so they require
 network access and may incur provider charges.
 
-Separately gated future work may add application-selected external tools,
-[controlled network access](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/docs/components/network-egress/README.md),
-and
+An explicit connected-profile gateway contract now exists for bounded HTTP, but its only
+implementation is a deterministic fake. Separately gated work must still add
+[controlled network transport](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/docs/components/network-egress/README.md),
+application-selected external tools, and
 [isolated execution backends](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/docs/components/external-execution/README.md).
 Those capabilities are not part of the current profile.
 
@@ -204,11 +205,12 @@ The historical
 [workflow-blocker assessment](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/docs/product-validation/workflow-blocker-assessment.md)
 deferred new capability and second-SDK work. The subsequent
 [current-source verification evidence](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/docs/product-validation/current-source-verification-evidence.md)
-records a reproducible unsupported interaction and selects controlled HTTP for bounded
-implementation planning. Networking has not shipped: the default profile remains
-network-free, and focused child issues must still satisfy the documented authority,
-policy, accounting, security, validation, and review gates. A second SDK remains
-deferred.
+records a reproducible unsupported interaction and selects controlled HTTP. Milestone 9A
+ships the framework-neutral grant/gateway contract, explicit connected profile, typed
+session seam, and fake conformance support. No real networking transport has shipped:
+the default profile remains network-free, and downstream issues must still satisfy the
+documented destination, accounting, credential, adapter, security, validation, and
+review gates. A second SDK remains deferred.
 
 The [Milestone 7 evidence index](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/docs/product-validation/milestone-7-exit-evidence.md)
 links the maintained workflows, installed-package checks, retained live observations,
