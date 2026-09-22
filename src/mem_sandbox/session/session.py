@@ -274,6 +274,10 @@ async def _send_outbound_http_safely(
         failure = OutboundHttpGatewayFailed("outbound HTTP gateway failed unexpectedly")
     except Exception:
         failure = OutboundHttpGatewayFailed("outbound HTTP gateway failed unexpectedly")
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except BaseException:
+        failure = OutboundHttpGatewayFailed("outbound HTTP gateway failed unexpectedly")
     if native_cancellation:
         raise asyncio.CancelledError
     if failure is not None:
@@ -1534,7 +1538,7 @@ class SandboxSession:
         self,
         task: asyncio.Future[T],
         timeout_seconds: float | None,
-    ) -> Exception | None:
+    ) -> BaseException | None:
         if timeout_seconds is not None and not task.done():
             retained = cast(asyncio.Future[object], task)
             self._track_unsettled_collaborator(retained)
@@ -1895,12 +1899,14 @@ async def _close_secret_leases(leases: tuple[SecretLease, ...]) -> bool:
 
 async def _settle_cancelled_task[T](
     task: asyncio.Future[T],
-) -> Exception | None:
+) -> BaseException | None:
     try:
         await task
     except asyncio.CancelledError:
         return None
-    except Exception as error:
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except BaseException as error:
         return error
     return None
 

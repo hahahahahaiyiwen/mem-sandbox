@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from datetime import timedelta
+from typing import cast
 
 import pytest
 
@@ -80,6 +81,30 @@ class DenyHttpPolicy:
         )
 
 
+class ProviderAbort(BaseException):
+    pass
+
+
+class BaseExceptionGroupGateway(FakeOutboundHttpGateway):
+    def __init__(self, message: str) -> None:
+        super().__init__(())
+        self._message = message
+
+    async def send(
+        self,
+        request: OutboundHttpRequest,
+        context: NetworkOperationContext,
+    ) -> OutboundHttpResponse:
+        self.entered.set()
+
+        async def abort() -> None:
+            raise ProviderAbort(self._message)
+
+        async with asyncio.TaskGroup() as tasks:
+            tasks.create_task(abort())
+        raise AssertionError("task group returned after a provider failure")
+
+
 class CancellationCleanupFailureGateway(FakeOutboundHttpGateway):
     def __init__(self, message: str) -> None:
         super().__init__(())
@@ -95,6 +120,24 @@ class CancellationCleanupFailureGateway(FakeOutboundHttpGateway):
             await asyncio.Event().wait()
         except asyncio.CancelledError:
             raise RuntimeError(self._message) from None
+        raise AssertionError("blocking gateway returned without cancellation")
+
+
+class FatalCancellationCleanupGateway(FakeOutboundHttpGateway):
+    def __init__(self, failure: BaseException) -> None:
+        super().__init__(())
+        self._failure = failure
+
+    async def send(
+        self,
+        request: OutboundHttpRequest,
+        context: NetworkOperationContext,
+    ) -> OutboundHttpResponse:
+        self.entered.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            raise self._failure from None
         raise AssertionError("blocking gateway returned without cancellation")
 
 
@@ -371,6 +414,7 @@ async def test_connected_profile_requires_host_binding_before_session_publicatio
         SessionOperationTimeout("provider secret"),
         SessionOperationCancelled("provider secret"),
         asyncio.CancelledError("provider secret"),
+        ProviderAbort("provider secret"),
     ],
     ids=[
         "ordinary",
@@ -378,6 +422,7 @@ async def test_connected_profile_requires_host_binding_before_session_publicatio
         "forged-session-timeout",
         "forged-session-cancellation",
         "self-cancelled",
+        "fatal",
     ],
 )
 @pytest.mark.asyncio
@@ -396,6 +441,38 @@ async def test_unexpected_gateway_failure_is_translated_by_session_boundary(
     _assert_exception_graph_hides(captured.value, "provider secret")
     assert captured.value.__cause__ is None
     assert captured.value.__context__ is None
+    events = await configured.events.query(EventQuery(session_id=connected.session_id))
+    assert [
+        event.event_type for event in events if event.operation_kind is OperationKind.OUTBOUND_HTTP
+    ] == [
+        SandboxEventType.OPERATION_STARTED,
+        SandboxEventType.OPERATION_FAILED,
+    ]
+    await configured.service.close()
+
+
+@pytest.mark.asyncio
+async def test_gateway_task_group_base_exception_is_translated_by_session_boundary() -> None:
+    gateway = BaseExceptionGroupGateway("provider group secret")
+    configured = bundle((), gateway_override=gateway)
+    connected = await connected_session(configured)
+
+    with pytest.raises(
+        OutboundHttpGatewayFailed,
+        match="gateway failed unexpectedly",
+    ) as captured:
+        await connected.send_http(http_request())
+
+    _assert_exception_graph_hides(captured.value, "provider group secret")
+    assert captured.value.__cause__ is None
+    assert captured.value.__context__ is None
+    events = await configured.events.query(EventQuery(session_id=connected.session_id))
+    assert [
+        event.event_type for event in events if event.operation_kind is OperationKind.OUTBOUND_HTTP
+    ] == [
+        SandboxEventType.OPERATION_STARTED,
+        SandboxEventType.OPERATION_FAILED,
+    ]
     await configured.service.close()
 
 
@@ -494,6 +571,73 @@ async def test_gateway_cleanup_failure_is_hidden_during_timeout_settlement() -> 
 
     _assert_exception_graph_hides(captured.value, "provider cleanup secret")
     assert "collaborator also failed during timeout" in _exception_graph_notes(captured.value)
+    await configured.service.close()
+
+
+@pytest.mark.parametrize("grouped", (False, True), ids=("fatal", "fatal-group"))
+@pytest.mark.asyncio
+async def test_gateway_fatal_cleanup_is_hidden_during_timeout_settlement(
+    grouped: bool,
+) -> None:
+    canary = "provider fatal cleanup secret"
+    failure: BaseException = ProviderAbort(canary)
+    if grouped:
+        failure = BaseExceptionGroup("provider cleanup group", (failure,))
+    gateway = FatalCancellationCleanupGateway(failure)
+    configured = bundle((), gateway_override=gateway)
+    connected = await connected_session(configured)
+
+    with pytest.raises(SessionOperationTimeout) as captured:
+        await connected.send_http(
+            http_request(
+                operation_limits=OperationLimits(
+                    timeout_seconds=0.05,
+                    terminal_event_reserve_seconds=0.01,
+                )
+            )
+        )
+
+    _assert_exception_graph_hides(captured.value, canary)
+    assert "collaborator also failed during timeout" in _exception_graph_notes(captured.value)
+    events = await configured.events.query(EventQuery(session_id=connected.session_id))
+    assert [
+        event.event_type for event in events if event.operation_kind is OperationKind.OUTBOUND_HTTP
+    ] == [
+        SandboxEventType.OPERATION_STARTED,
+        SandboxEventType.OPERATION_TIMED_OUT,
+    ]
+    await configured.service.close()
+
+
+@pytest.mark.parametrize("grouped", (False, True), ids=("fatal", "fatal-group"))
+@pytest.mark.asyncio
+async def test_gateway_fatal_cleanup_does_not_replace_native_cancellation(
+    grouped: bool,
+) -> None:
+    canary = "provider fatal cleanup secret"
+    failure: BaseException = ProviderAbort(canary)
+    if grouped:
+        failure = BaseExceptionGroup("provider cleanup group", (failure,))
+    gateway = FatalCancellationCleanupGateway(failure)
+    configured = bundle((), gateway_override=gateway)
+    connected = await connected_session(configured)
+    sending = asyncio.create_task(connected.send_http(http_request()))
+    await gateway.entered.wait()
+
+    sending.cancel()
+
+    with pytest.raises(asyncio.CancelledError) as captured:
+        await sending
+    assert sending.cancelled()
+    _assert_exception_graph_hides(captured.value, canary)
+    assert "collaborator also failed during cancellation" in _exception_graph_notes(captured.value)
+    events = await configured.events.query(EventQuery(session_id=connected.session_id))
+    assert [
+        event.event_type for event in events if event.operation_kind is OperationKind.OUTBOUND_HTTP
+    ] == [
+        SandboxEventType.OPERATION_STARTED,
+        SandboxEventType.OPERATION_CANCELLED,
+    ]
     await configured.service.close()
 
 
@@ -773,6 +917,9 @@ def _assert_exception_graph_hides(error: BaseException, canary: str) -> None:
             pending.append(current.__cause__)
         if current.__context__ is not None:
             pending.append(current.__context__)
+        if isinstance(current, BaseExceptionGroup):
+            group = cast(BaseExceptionGroup[BaseException], current)
+            pending.extend(group.exceptions)
 
 
 def _exception_graph_notes(error: BaseException) -> tuple[str, ...]:
@@ -789,4 +936,7 @@ def _exception_graph_notes(error: BaseException) -> tuple[str, ...]:
             pending.append(current.__cause__)
         if current.__context__ is not None:
             pending.append(current.__context__)
+        if isinstance(current, BaseExceptionGroup):
+            group = cast(BaseExceptionGroup[BaseException], current)
+            pending.extend(group.exceptions)
     return tuple(notes)
