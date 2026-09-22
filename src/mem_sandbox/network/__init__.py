@@ -1,14 +1,35 @@
 """Framework-neutral controlled outbound HTTP contracts."""
 
+from mem_sandbox.network.destination import (
+    HttpDestinationRule,
+    HttpRequestClass,
+    IpAddressClass,
+    NetworkPolicyDecision,
+    NetworkPolicyOutcome,
+    NetworkPolicyPhase,
+    NetworkPolicyReason,
+    NetworkPolicyRequest,
+    NetworkResolution,
+    NormalizedHttpUrl,
+    ResolvedHttpAddress,
+    StaticNetworkPolicy,
+    StaticNetworkPolicyEngine,
+    classify_ip_address,
+    normalize_http_url,
+)
 from mem_sandbox.network.errors import (
     OutboundHttpCancelled,
     OutboundHttpDenied,
     OutboundHttpGatewayFailed,
     OutboundHttpLimitExceeded,
     OutboundHttpRequestInvalid,
+    OutboundHttpResolutionFailed,
+    OutboundHttpResponseInvalid,
     OutboundHttpTimeout,
+    OutboundHttpTransportFailed,
     OutboundHttpUnavailable,
 )
+from mem_sandbox.network.gateway import BoundedOutboundHttpGateway
 from mem_sandbox.network.models import (
     CredentialRouteId,
     HttpEventDelivery,
@@ -25,21 +46,49 @@ from mem_sandbox.network.models import (
     OutboundHttpResponse,
 )
 from mem_sandbox.network.ports import (
+    HttpTransport,
     NetworkCancellationSignal,
+    NetworkPolicyEngine,
+    NetworkResolver,
     OutboundHttpGateway,
+)
+from mem_sandbox.network.resolver import SystemNetworkResolver
+from mem_sandbox.network.transport import (
+    AdmittedHttpDestination,
+    AsyncioHttpTransport,
+    HttpTransportRequest,
+    HttpTransportResponse,
 )
 
 __all__ = [
+    "AdmittedHttpDestination",
+    "AsyncioHttpTransport",
+    "BoundedOutboundHttpGateway",
     "CredentialRouteId",
+    "HttpDestinationRule",
     "HttpEventDelivery",
     "HttpHeader",
     "HttpMethod",
+    "HttpRequestClass",
     "HttpScheme",
     "HttpTransferLimits",
     "HttpTransferUsage",
+    "HttpTransport",
+    "HttpTransportRequest",
+    "HttpTransportResponse",
+    "IpAddressClass",
     "NetworkCancellationSignal",
     "NetworkOperationContext",
+    "NetworkPolicyDecision",
+    "NetworkPolicyEngine",
     "NetworkPolicyId",
+    "NetworkPolicyOutcome",
+    "NetworkPolicyPhase",
+    "NetworkPolicyReason",
+    "NetworkPolicyRequest",
+    "NetworkResolution",
+    "NetworkResolver",
+    "NormalizedHttpUrl",
     "OutboundHttpBinding",
     "OutboundHttpCancelled",
     "OutboundHttpDenied",
@@ -49,7 +98,16 @@ __all__ = [
     "OutboundHttpLimitExceeded",
     "OutboundHttpRequest",
     "OutboundHttpRequestInvalid",
+    "OutboundHttpResolutionFailed",
     "OutboundHttpResponse",
+    "OutboundHttpResponseInvalid",
     "OutboundHttpTimeout",
+    "OutboundHttpTransportFailed",
     "OutboundHttpUnavailable",
+    "ResolvedHttpAddress",
+    "StaticNetworkPolicy",
+    "StaticNetworkPolicyEngine",
+    "SystemNetworkResolver",
+    "classify_ip_address",
+    "normalize_http_url",
 ]

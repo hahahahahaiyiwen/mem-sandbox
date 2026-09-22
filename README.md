@@ -194,23 +194,25 @@ in process without sandbox-owned network access or arbitrary code execution. Liv
 samples still call a hosted inference provider outside the workspace, so they require
 network access and may incur provider charges.
 
-An explicit connected-profile gateway contract now exists for bounded HTTP, but its only
-implementation is a deterministic fake. Separately gated work must still add
-[controlled network transport](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/docs/components/network-egress/README.md),
-application-selected external tools, and
+An explicit connected-profile gateway contract and
+[destination-safe bounded HTTP transport](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/docs/components/network-egress/README.md)
+now exist for host composition. Separately gated work must still add destination-bound
+credentials, cumulative accounting and network audit, application-selected external
+tools, and
 [isolated execution backends](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/docs/components/external-execution/README.md).
-Those capabilities are not part of the current profile.
+None of those later capabilities is part of the default virtual profile.
 
 The historical
 [workflow-blocker assessment](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/docs/product-validation/workflow-blocker-assessment.md)
 deferred new capability and second-SDK work. The subsequent
 [current-source verification evidence](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/docs/product-validation/current-source-verification-evidence.md)
-records a reproducible unsupported interaction and selects controlled HTTP. Milestone 9A
-ships the framework-neutral grant/gateway contract, explicit connected profile, typed
-session seam, and fake conformance support. No real networking transport has shipped:
-the default profile remains network-free, and downstream issues must still satisfy the
-documented destination, accounting, credential, adapter, security, validation, and
-review gates. A second SDK remains deferred.
+records a reproducible unsupported interaction and selects controlled HTTP. Milestones
+9A and 9B ship the framework-neutral grant/gateway contract, explicit connected profile,
+typed session seam, deterministic fake, two-phase destination admission, controlled
+resolution, and one direct asyncio HTTP/1.1 transport. The default profile remains
+network-free, and downstream issues must still satisfy the documented accounting,
+credential, adapter, full-security-conformance, validation, and review gates. A second
+SDK remains deferred.
 
 The [Milestone 7 evidence index](https://github.com/hahahahahaiyiwen/mem-sandbox/blob/main/docs/product-validation/milestone-7-exit-evidence.md)
 links the maintained workflows, installed-package checks, retained live observations,

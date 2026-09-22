@@ -51,8 +51,11 @@ from mem_sandbox.network import (
     OutboundHttpLimitExceeded,
     OutboundHttpRequest,
     OutboundHttpRequestInvalid,
+    OutboundHttpResolutionFailed,
     OutboundHttpResponse,
+    OutboundHttpResponseInvalid,
     OutboundHttpTimeout,
+    OutboundHttpTransportFailed,
     OutboundHttpUnavailable,
 )
 from mem_sandbox.policy import (
@@ -234,8 +237,14 @@ def _sanitize_outbound_http_failure(error: SandboxError) -> SandboxError:
         return OutboundHttpLimitExceeded("outbound HTTP gateway reported a limit violation")
     if isinstance(error, OutboundHttpRequestInvalid):
         return OutboundHttpRequestInvalid("outbound HTTP gateway rejected the request")
+    if isinstance(error, OutboundHttpResolutionFailed):
+        return OutboundHttpResolutionFailed("outbound HTTP destination resolution failed")
+    if isinstance(error, OutboundHttpResponseInvalid):
+        return OutboundHttpResponseInvalid("outbound HTTP response was invalid")
     if isinstance(error, OutboundHttpTimeout):
         return OutboundHttpTimeout("outbound HTTP gateway timed out")
+    if isinstance(error, OutboundHttpTransportFailed):
+        return OutboundHttpTransportFailed("outbound HTTP transport failed")
     return OutboundHttpGatewayFailed("outbound HTTP gateway failed unexpectedly")
 
 

@@ -130,6 +130,12 @@ def test_http_request_rejects_unsupported_or_over_limit_input(
         request_factory()  # type: ignore[operator]
 
 
+@pytest.mark.parametrize("value", ["before\x00after", "before\x1fafter", "before\x7fafter"])
+def test_http_header_rejects_non_tab_control_characters(value: str) -> None:
+    with pytest.raises(OutboundHttpRequestInvalid):
+        HttpHeader("X-Test", value)
+
+
 @pytest.mark.parametrize(
     "invalid_factory",
     [

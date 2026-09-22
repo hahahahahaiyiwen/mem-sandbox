@@ -126,12 +126,16 @@ Issue #104 adds typed `send_http()` over a constructor-injected
 `OutboundHttpBinding`. The operation first requires an effective grant, then uses the
 normal gate, high-level policy, deadline, cancellation, terminal event, and metadata
 sequence. Method, scheme, transfer-limit, and credential-route requests outside the
-grant fail before gateway use. URL/destination admission and real transport remain
-network-module work.
+grant fail before gateway use. Issue #107 supplies optional network-module URL
+normalization, two-phase destination admission, controlled resolution, peer pinning,
+redirect handling, and a bounded direct HTTP/TLS transport without moving those
+responsibilities into the session.
 
 Provider failures, including a task-raised `GeneratorExit` and nested exception groups,
 become context-free `OutboundHttpGatewayFailed` values at the session boundary. During
 cancellation settlement, provider-task failures remain protected secondary failures.
+Safe destination-resolution, malformed-response, and transport/TLS categories retain
+their stable domain types with provider details removed.
 `GeneratorExit` delivered directly into a session-owned coroutine, plus bare
 `KeyboardInterrupt` and `SystemExit`, pass through unchanged; if one escapes after
 `operation.started`, the session does not manufacture a terminal event.

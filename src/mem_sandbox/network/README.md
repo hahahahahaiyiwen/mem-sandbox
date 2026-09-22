@@ -2,8 +2,11 @@
 
 `mem_sandbox.network` owns the framework-neutral boundary for bounded outbound HTTP.
 Milestone 9A implements the immutable contract, host authority binding, stable errors,
-deterministic fake, and conformance driver. It does not implement DNS, sockets, TLS,
-redirects, proxies, credentials, or a real HTTP client.
+deterministic fake, and conformance driver. Milestone 9B adds strict URL normalization,
+two-phase destination policy, controlled resolution, non-overridable IP safety,
+redirect orchestration, and one direct bounded asyncio HTTP/1.1 transport. Credentials,
+cumulative accounting, network-specific audit, commands, and framework tools remain
+separate work.
 
 ## Boundary ownership
 
@@ -12,19 +15,23 @@ The module owns:
 - HTTP/HTTPS and `GET`/`HEAD` domain values;
 - immutable request, response, transfer-limit, usage, grant, and operation-context
   models;
-- the async `OutboundHttpGateway` interface;
+- async gateway, destination-policy, resolver, and single-attempt transport interfaces;
 - stable network-specific errors;
 - the host-scoped `OutboundHttpBinding` and its fail-closed grant-narrowing rule;
+- normalized IDNA host/origin-form URL values, exact/subdomain destination rules, and
+  IPv4/IPv6 classification;
+- `BoundedOutboundHttpGateway`, `SystemNetworkResolver`, and `AsyncioHttpTransport`;
 - deterministic fake and conformance support in `mem_sandbox.network.testing`.
 
 The sandbox service owns profile selection and construction. `SandboxSession` owns
-operation serialization, lifecycle, policy admission, deadlines, cancellation, and
-operation events. Later network work owns URL canonicalization, destination admission,
-resolution, transport, credentials, resource accounting, and network-specific audit
-events.
+operation serialization, lifecycle, high-level policy admission, deadlines,
+cancellation, and operation events. Later network work owns credentials, cumulative
+resource accounting, and network-specific audit events.
 
-No agent SDK, concrete HTTP client, resolver, socket, environment proxy, cookie jar,
-cache, or TLS configuration is imported by this module.
+No agent SDK or third-party HTTP client is imported by this module. The concrete
+transport uses direct asyncio streams, a verifying standard-library TLS context, and
+one connection per admitted attempt. It never consults ambient proxy variables or owns
+a cookie jar, cache, authentication retry, or model-selected TLS configuration.
 
 ## Host authority
 
@@ -68,12 +75,61 @@ self-cancellation cannot impersonate orchestration cancellation. Settlement trac
 installed before the bounded wait so repeated native cancellation cannot leave an
 unfinished task unobserved. The gateway is borrowed and is never closed by the session.
 
-## Fake and conformance support
+## Destination-safe gateway
+
+`BoundedOutboundHttpGateway` executes the following sequence for the initial target and
+every redirect:
+
+1. normalize one HTTP/HTTPS URL to an ASCII IDNA hostname, effective port, canonical
+   origin, and origin-form target; reject user information, fragments, legacy numeric
+   host forms (including mixed dotted hexadecimal forms), malformed escapes, scope
+   identifiers, malformed header controls, and controlled or sensitive request headers;
+2. evaluate the selected focused policy before DNS;
+3. classify an IP literal directly or invoke the injected resolver, require an
+   explicitly allowed final canonical hostname when one is reported, and classify every
+   unique final address;
+4. deny the whole answer if any address is loopback, private, link-local, unspecified,
+   multicast, reserved/non-global, transition/translation/mapped, or known metadata
+   space;
+5. evaluate post-resolution facts, then pass exactly the first admitted numeric address
+   and the original hostname to the transport;
+6. enforce attempt, redirect, encoded-body, decompressed-body, transferred-byte, header,
+   cancellation, and deadline limits before publishing a complete response.
+
+GET and HEAD retain their method across 301, 302, 303, 307, and 308 in this slice. A
+redirect repeats normalization, policy, resolution, classification, and pinning.
+Failure does not fall back to another resolved address: that would be an unaccounted
+retry. Credential routes fail before policy or resolution until the destination-bound
+credential slice is implemented.
+
+## Resolver and transport
+
+`SystemNetworkResolver` invokes only the host's stream-address resolver after
+pre-resolution admission. It exposes the final canonical hostname when the platform
+provides one and returns immutable typed addresses; it opens no connection.
+
+`AsyncioHttpTransport` accepts only an `AdmittedHttpDestination`. It opens one direct
+connection to the numeric address with `AI_NUMERICHOST`, sends HTTP/1.1 with
+`Connection: close`, and preserves the original hostname in `Host`, TLS SNI, and normal
+certificate hostname verification. It performs no address fallback, implicit retry,
+redirect, proxy lookup, cookie/cache operation, or authentication negotiation.
+
+The transport strictly parses response status, headers, content length, and chunk
+framing, cumulatively bounds raw informational/final/trailer header bytes, bounds
+encoded body bytes before allocation, and closes the stream after each attempt. The
+gateway supports identity, gzip, and deflate decoding with a separate decompressed
+limit. Framing and sensitive response headers such as `Set-Cookie` and authentication
+challenges are not published.
+
+## Fake, conformance, and local evidence
 
 `FakeOutboundHttpGateway` returns scripted responses or failures, records exact calls,
 and can block for timeout and cancellation tests. It opens no network connection.
 `OutboundHttpGatewayConformanceDriver` provides reusable round-trip and stable-failure
-probes; real transports added later must satisfy the same boundary.
+probes. Destination and orchestration tests substitute deterministic policy, resolver,
+and transport collaborators. Concrete HTTP/TLS tests use only controlled loopback
+servers and a public test-only certificate; required tests never access the public
+internet.
 
 ## Security invariants
 
@@ -81,7 +137,15 @@ probes; real transports added later must satisfy the same boundary.
 - Models and grant ceilings are immutable.
 - Model-facing input cannot choose a destination policy or add a credential reference.
 - Request/context/response representations do not expose URLs, headers, bodies,
-  credential routes, or grant details.
+  hostnames, resolved addresses, credential routes, or grant details.
+- Pre-resolution denial performs no DNS request. A prohibited or mixed resolution
+  performs no transport access.
+- Resolver output cannot change the peer after admission; the transport receives one
+  numeric address and uses the original hostname only for HTTP/TLS identity.
+- Ambient proxy variables, cookies, caches, client authentication, insecure TLS, and
+  implicit retry are absent by construction.
+- Every redirect repeats the full destination pipeline and remains within the original
+  grant and request limits.
 - Gateway and protected-input failures retain no provider exception context, cause, or
   raw settlement note at the session boundary.
 - Provider failures, including a task-raised `GeneratorExit` and nested exception groups,
@@ -92,13 +156,15 @@ probes; real transports added later must satisfy the same boundary.
   operation start, the session does not manufacture a terminal event.
 - Gateway-raised session-domain errors cannot forge session classifications or operation
   identities; provider translation wraps a distinct child task at the session boundary.
-- Basic scheme recognition is not destination admission. Until the controlled resolver
-  and transport ship, the fake is the only provided gateway implementation.
+- Resolution, transport/TLS, and malformed-response failures retain distinct stable
+  domain codes while provider details are removed at the session boundary.
 - Library contracts do not contain arbitrary guest code.
 
 ## Maintenance
 
-Changes to methods, schemes, grant ordering, limits, context contents, error codes,
-profile binding, snapshot authority, lifecycle cancellation, or gateway conformance must
-update this README, the detailed controlled-egress design, and behavior tests in the
-same change.
+Changes to methods, schemes, normalization, destination rules, address classification,
+CNAME/canonical-host handling, resolver behavior, peer pinning, redirects, proxy/TLS
+behavior, framing/decoding, grant ordering, limits, context contents, error codes,
+profile binding, snapshot authority, lifecycle cancellation, or gateway conformance
+must update this README, the detailed controlled-egress design, and adversarial behavior
+tests in the same change.

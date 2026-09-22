@@ -31,8 +31,11 @@ from mem_sandbox.network import (
     OutboundHttpLimitExceeded,
     OutboundHttpRequest,
     OutboundHttpRequestInvalid,
+    OutboundHttpResolutionFailed,
     OutboundHttpResponse,
+    OutboundHttpResponseInvalid,
     OutboundHttpTimeout,
+    OutboundHttpTransportFailed,
     OutboundHttpUnavailable,
 )
 from mem_sandbox.network.testing import FakeOutboundHttpGateway
@@ -565,7 +568,10 @@ async def test_gateway_domain_cancellation_has_no_false_secondary_failure() -> N
         (OutboundHttpDenied("provider secret"), OutboundHttpDenied),
         (OutboundHttpLimitExceeded("provider secret"), OutboundHttpLimitExceeded),
         (OutboundHttpRequestInvalid("provider secret"), OutboundHttpRequestInvalid),
+        (OutboundHttpResolutionFailed("provider secret"), OutboundHttpResolutionFailed),
+        (OutboundHttpResponseInvalid("provider secret"), OutboundHttpResponseInvalid),
         (OutboundHttpTimeout("provider secret"), OutboundHttpTimeout),
+        (OutboundHttpTransportFailed("provider secret"), OutboundHttpTransportFailed),
         (OutboundHttpGatewayFailed("provider secret"), OutboundHttpGatewayFailed),
     ],
 )

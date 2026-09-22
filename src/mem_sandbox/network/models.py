@@ -77,8 +77,11 @@ class HttpHeader:
             raise OutboundHttpRequestInvalid("HTTP header name is invalid")
         if not isinstance(value, str):
             raise TypeError("HTTP header value must be a string")
-        if "\r" in value or "\n" in value:
-            raise OutboundHttpRequestInvalid("HTTP header value contains a line break")
+        if any(
+            (ord(character) < 32 and character != "\t") or ord(character) == 127
+            for character in value
+        ):
+            raise OutboundHttpRequestInvalid("HTTP header value contains a control character")
         try:
             size = len(value.encode("utf-8"))
         except UnicodeEncodeError:
@@ -226,8 +229,10 @@ class OutboundHttpGrant:
         limits = request.limits
         if _headers_size(response.headers) > limits.max_response_header_bytes:
             raise OutboundHttpLimitExceeded("HTTP response headers exceed the requested limit")
-        if len(response.body) > limits.max_response_body_bytes:
-            raise OutboundHttpLimitExceeded("HTTP response body exceeds the requested limit")
+        if len(response.body) > limits.max_decompressed_response_bytes:
+            raise OutboundHttpLimitExceeded(
+                "HTTP decompressed response body exceeds the requested limit"
+            )
         usage = response.usage
         if usage.request_count > limits.max_requests:
             raise OutboundHttpLimitExceeded("HTTP request count exceeds the requested limit")
@@ -235,6 +240,10 @@ class OutboundHttpGrant:
             raise OutboundHttpLimitExceeded("HTTP response usage exceeds the requested limit")
         if usage.decompressed_response_bytes > limits.max_decompressed_response_bytes:
             raise OutboundHttpLimitExceeded("HTTP decompressed usage exceeds the requested limit")
+        if usage.decompressed_response_bytes != len(response.body):
+            raise OutboundHttpLimitExceeded(
+                "HTTP decompressed usage does not match the published response body"
+            )
         if usage.redirect_count > limits.max_redirects:
             raise OutboundHttpLimitExceeded("HTTP redirect count exceeds the requested limit")
         if usage.request_bytes + usage.response_bytes > limits.max_transferred_bytes:
