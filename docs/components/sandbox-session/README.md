@@ -129,11 +129,12 @@ sequence. Method, scheme, transfer-limit, and credential-route requests outside 
 grant fail before gateway use. URL/destination admission and real transport remain
 network-module work.
 
-Provider failures outside cancellation and interpreter-control paths, including nested
-exception groups, become context-free `OutboundHttpGatewayFailed` values at the session
-boundary. Bare `GeneratorExit`, `KeyboardInterrupt`, and `SystemExit` pass through
-unchanged; if one escapes after `operation.started`, the session does not manufacture a
-terminal event.
+Provider failures, including a task-raised `GeneratorExit` and nested exception groups,
+become context-free `OutboundHttpGatewayFailed` values at the session boundary. During
+cancellation settlement, provider-task failures remain protected secondary failures.
+`GeneratorExit` delivered directly into a session-owned coroutine, plus bare
+`KeyboardInterrupt` and `SystemExit`, pass through unchanged; if one escapes after
+`operation.started`, the session does not manufacture a terminal event.
 
 A future typed adapter invokes `send_http()` rather than bypassing session coordination.
 A virtual HTTP command is already inside one admitted `execute` operation and must not

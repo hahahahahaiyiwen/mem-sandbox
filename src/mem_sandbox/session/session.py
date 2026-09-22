@@ -239,6 +239,13 @@ def _sanitize_outbound_http_failure(error: SandboxError) -> SandboxError:
     return OutboundHttpGatewayFailed("outbound HTTP gateway failed unexpectedly")
 
 
+def _task_exception_is[T](
+    task: asyncio.Future[T] | None,
+    error: BaseException,
+) -> bool:
+    return task is not None and task.done() and not task.cancelled() and task.exception() is error
+
+
 async def _send_outbound_http_safely(
     binding: OutboundHttpBinding,
     request: OutboundHttpRequest,
@@ -247,6 +254,7 @@ async def _send_outbound_http_safely(
     response: OutboundHttpResponse | None = None
     failure: SandboxError | None = None
     native_cancellation = False
+    gateway_task: asyncio.Future[OutboundHttpResponse] | None = None
     try:
         gateway_task = asyncio.ensure_future(binding.gateway.send(request, context))
         response = await gateway_task
@@ -274,7 +282,12 @@ async def _send_outbound_http_safely(
         failure = OutboundHttpGatewayFailed("outbound HTTP gateway failed unexpectedly")
     except Exception:
         failure = OutboundHttpGatewayFailed("outbound HTTP gateway failed unexpectedly")
-    except (GeneratorExit, KeyboardInterrupt, SystemExit):
+    except GeneratorExit as error:
+        if gateway_task is None or _task_exception_is(gateway_task, error):
+            failure = OutboundHttpGatewayFailed("outbound HTTP gateway failed unexpectedly")
+        else:
+            raise
+    except (KeyboardInterrupt, SystemExit):
         raise
     except BaseException:
         failure = OutboundHttpGatewayFailed("outbound HTTP gateway failed unexpectedly")
@@ -1904,7 +1917,11 @@ async def _settle_cancelled_task[T](
         await task
     except asyncio.CancelledError:
         return None
-    except (GeneratorExit, KeyboardInterrupt, SystemExit):
+    except GeneratorExit as error:
+        if _task_exception_is(task, error):
+            return error
+        raise
+    except (KeyboardInterrupt, SystemExit):
         raise
     except BaseException as error:
         return error

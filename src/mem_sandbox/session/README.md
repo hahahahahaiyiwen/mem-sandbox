@@ -39,7 +39,9 @@ settlement tracks the collaborator before its bounded wait; repeated native
 cancellation therefore cannot bypass fail-closed retention, and close can re-signal an
 unfinished collaborator without waiting indefinitely.
 
-Provider failures outside cancellation and interpreter-control paths, including nested
-exception groups, become context-free `OutboundHttpGatewayFailed` values.
-Bare `GeneratorExit`, `KeyboardInterrupt`, and `SystemExit` pass through unchanged; if one
-escapes after operation start, the session does not manufacture a terminal event.
+Provider failures, including a task-raised `GeneratorExit` and nested exception groups,
+become context-free `OutboundHttpGatewayFailed` values. During cancellation settlement,
+provider-task failures remain protected secondary failures.
+`GeneratorExit` delivered directly into a session-owned coroutine, plus bare
+`KeyboardInterrupt` and `SystemExit`, pass through unchanged; if one escapes after
+operation start, the session does not manufacture a terminal event.
