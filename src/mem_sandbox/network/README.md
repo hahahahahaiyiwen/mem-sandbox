@@ -18,8 +18,8 @@ The module owns:
 - async gateway, destination-policy, resolver, and single-attempt transport interfaces;
 - stable network-specific errors;
 - the host-scoped `OutboundHttpBinding` and its fail-closed grant-narrowing rule;
-- normalized IDNA host/origin-form URL values, exact/subdomain destination rules, and
-  IPv4/IPv6 classification;
+- normalized, round-trip-safe IDNA host/origin-form URL values, exact/subdomain
+  destination rules, and IPv4/IPv6 classification;
 - `BoundedOutboundHttpGateway`, `SystemNetworkResolver`, and `AsyncioHttpTransport`;
 - deterministic fake and conformance support in `mem_sandbox.network.testing`.
 
@@ -64,7 +64,10 @@ current request options; snapshots cannot enable networking or restore an old gr
 4. returns a complete bounded response with normal session result metadata.
 
 The gateway deadline is the earlier of the admitted session collaborator deadline and
-the request's host-bounded transfer timeout.
+the request's host-bounded transfer timeout. Policy, resolver, and transport calls run
+in independently timed child tasks. On timeout or cancellation, a child that suppresses
+cancellation remains retained and observed but cannot resume the request pipeline or
+publish a response after the deadline.
 
 Session close cooperatively cancels an active HTTP operation and then waits for the
 operation gate. Gateway cancellation settlement has a small bound within the remaining
@@ -81,21 +84,23 @@ unfinished task unobserved. The gateway is borrowed and is never closed by the s
 every redirect:
 
 1. normalize one HTTP/HTTPS URL to an ASCII IDNA hostname, effective port, canonical
-   origin, and origin-form target; reject user information, fragments, legacy numeric
-   host forms (including mixed dotted hexadecimal forms), malformed escapes, scope
-   identifiers, raw or canonical URLs above the byte limit, malformed header controls,
-   and controlled or sensitive request headers;
+   origin, and origin-form target; reject Unicode labels whose built-in IDNA conversion
+   performs compatibility or deletion mappings rather than an NFC/lowercase round trip,
+   plus user information, fragments, legacy numeric host forms (including mixed dotted
+   hexadecimal forms), malformed escapes, scope identifiers, raw or canonical URLs
+   above the byte limit, malformed header controls, and controlled or sensitive request
+   headers;
 2. evaluate the selected focused policy before DNS;
 3. classify an IP literal directly or invoke the injected resolver, require an
    explicitly allowed final canonical hostname when one is reported, and classify every
    unique final address;
 4. deny the whole answer if any address is loopback, private, link-local, unspecified,
-   multicast, reserved/non-global, transition/translation/mapped, or known metadata
-   space;
+   multicast, reserved/non-global, transition/translation/mapped (including standard
+   NAT64 and both ISATAP interface-identifier forms), or known metadata space;
 5. evaluate post-resolution facts, then pass exactly the first admitted numeric address
    and the original hostname to the transport;
-6. enforce attempt, redirect, encoded-body, decompressed-body, transferred-byte, header,
-   cancellation, and deadline limits before publishing a complete response.
+6. enforce attempt, redirect, encoded-body, decompressed-body, transferred-wire-byte,
+   header, cancellation, and deadline limits before publishing a complete response.
 
 GET and HEAD retain their method across 301, 302, 303, 307, and 308 in this slice. A
 redirect repeats normalization, policy, resolution, classification, and pinning.
@@ -114,16 +119,21 @@ connection to the numeric address with `AI_NUMERICHOST`, sends HTTP/1.1 with
 `Connection: close`, and preserves the original hostname in `Host`, TLS SNI, and normal
 certificate hostname verification. It owns an environment-independent TLS context that
 loads only system/compiled trust sources, exposes no custom trust or client-certificate
-configuration, and ignores `SSL_CERT_FILE`/`SSL_CERT_DIR`. It performs no address
-fallback, implicit retry, redirect, proxy lookup, cookie/cache operation, or
-authentication negotiation.
+configuration, ignores `SSL_CERT_FILE`/`SSL_CERT_DIR`, enables strict/partial-chain
+verification when supported, and accepts immutable Windows certificate-purpose
+collections when loading system roots. It performs no address fallback, implicit retry,
+redirect, proxy lookup, cookie/cache operation, or authentication negotiation.
 
 The transport strictly parses response status, headers, content length, and chunk
 framing, cumulatively bounds raw informational/final/trailer header bytes, bounds
-encoded body bytes before allocation, and closes the stream after each attempt. The
-gateway supports identity, gzip, and deflate decoding with a separate decompressed
-limit. Framing and sensitive response headers such as `Set-Cookie` and authentication
-challenges are not published. Error, timeout, and cancellation cleanup aborts the
+encoded body bytes before allocation, counts every consumed response-head, chunk-line,
+data, terminator, and trailer byte against the transferred-wire budget, and closes the
+stream after each attempt. Content lengths allow only HTTP SP/HTAB whitespace and a
+bounded ASCII decimal representation. The gateway supports identity, gzip, and deflate
+decoding with a separate decompressed limit. Framing and sensitive response headers
+such as `Set-Cookie` and authentication challenges are not published. Provisional
+responses may be consumed internally but cannot cross the transport, gateway, grant, or
+session boundary as a final result. Error, timeout, and cancellation cleanup aborts the
 stream immediately; successful graceful shutdown remains bounded by the operation
 deadline. HEAD and status-defined bodyless responses skip content decoding while
 retaining safe header filtering.
@@ -153,6 +163,9 @@ internet.
   implicit retry are absent by construction.
 - Every redirect repeats the full destination pipeline and remains within the original
   grant and request limits.
+- `HttpTransferUsage` reports encoded response-body bytes separately from exact consumed
+  response-wire bytes; transferred limits use request-body plus response-wire usage.
+- A public response always has a final status from 200 through 599.
 - Gateway and protected-input failures retain no provider exception context, cause, or
   raw settlement note at the session boundary.
 - Provider failures, including a task-raised `GeneratorExit` and nested exception groups,

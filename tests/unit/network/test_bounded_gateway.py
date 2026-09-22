@@ -76,6 +76,23 @@ class BlockingPolicy:
         raise AssertionError(request)
 
 
+class CancellationResistantPolicy:
+    def __init__(self) -> None:
+        self.entered = asyncio.Event()
+        self.cancelled = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def evaluate(self, request: NetworkPolicyRequest) -> NetworkPolicyDecision:
+        self.entered.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            self.cancelled.set()
+            await self.release.wait()
+            return NetworkPolicyDecision.allow()
+        raise AssertionError(request)
+
+
 class RecordingResolver:
     def __init__(
         self,
@@ -186,8 +203,14 @@ def transport_response(
     *,
     headers: tuple[HttpHeader, ...] = (),
     body: bytes = b"value",
+    wire_bytes: int | None = None,
 ) -> HttpTransportResponse:
-    return HttpTransportResponse(status_code=status, headers=headers, body=body)
+    return HttpTransportResponse(
+        status_code=status,
+        headers=headers,
+        body=body,
+        wire_bytes=len(body) if wire_bytes is None else wire_bytes,
+    )
 
 
 def gateway(
@@ -272,6 +295,24 @@ async def test_mixed_dns_answer_denies_every_address_before_transport() -> None:
 async def test_every_non_global_address_class_is_denied_before_transport(
     address: str,
 ) -> None:
+    resolver = RecordingResolver({"example.test": resolution("example.test", address)})
+    subject, _, _, transport = gateway(resolver=resolver)
+
+    with pytest.raises(OutboundHttpDenied):
+        await subject.send(request(), context())
+
+    assert transport.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "address",
+    [
+        "2001:4860:0:0:0:5efe:a00:1",
+        "2001:4860:0:0:200:5efe:a00:1",
+    ],
+)
+async def test_isatap_resolution_is_denied_before_transport(address: str) -> None:
     resolver = RecordingResolver({"example.test": resolution("example.test", address)})
     subject, _, _, transport = gateway(resolver=resolver)
 
@@ -749,6 +790,44 @@ async def test_gateway_rejects_non_decimal_content_length_from_injected_transpor
 
 
 @pytest.mark.asyncio
+async def test_gateway_rejects_pathological_content_length_without_exception_leak() -> None:
+    transfer_limits = limits(max_response_header_bytes=10_000)
+    subject, _, _, _ = gateway(
+        transport=RecordingTransport(
+            (
+                transport_response(
+                    headers=(HttpHeader("Content-Length", "1" * 5000),),
+                    body=b"",
+                ),
+            )
+        )
+    )
+
+    with pytest.raises(OutboundHttpResponseInvalid) as captured:
+        await subject.send(
+            request(transfer_limits=transfer_limits),
+            context(transfer_limits),
+        )
+
+    assert captured.value.__cause__ is None
+    assert captured.value.__context__ is None
+
+
+@pytest.mark.asyncio
+async def test_gateway_enforces_reported_response_wire_bytes() -> None:
+    transfer_limits = limits(max_transferred_bytes=5)
+    subject, _, _, _ = gateway(
+        transport=RecordingTransport((transport_response(body=b"x", wire_bytes=6),))
+    )
+
+    with pytest.raises(OutboundHttpLimitExceeded):
+        await subject.send(
+            request(transfer_limits=transfer_limits),
+            context(transfer_limits),
+        )
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("method", "status"),
     [
@@ -850,6 +929,27 @@ async def test_gateway_enforces_effective_deadline_and_removes_timeout_context()
     assert transport.calls == []
     assert captured.value.__cause__ is None
     assert captured.value.__context__ is None
+
+
+@pytest.mark.asyncio
+async def test_gateway_deadline_detaches_cancellation_resistant_policy() -> None:
+    policy = CancellationResistantPolicy()
+    deadline = asyncio.get_running_loop().time() + 0.02
+    subject, _, resolver, transport = gateway(policy=policy)
+    task = asyncio.create_task(subject.send(request(), context(deadline=deadline)))
+
+    await asyncio.sleep(0.08)
+    completed_by_deadline = task.done()
+    policy.release.set()
+    with pytest.raises(OutboundHttpTimeout):
+        await task
+    await asyncio.sleep(0)
+
+    assert completed_by_deadline
+    assert policy.entered.is_set()
+    assert policy.cancelled.is_set()
+    assert resolver.calls == []
+    assert transport.calls == []
 
 
 @pytest.mark.asyncio

@@ -273,6 +273,7 @@ class HttpTransferUsage:
     request_count: int
     request_bytes: int
     response_bytes: int
+    response_wire_bytes: int
     decompressed_response_bytes: int
     redirect_count: int
     duration_ms: float
@@ -317,6 +318,11 @@ Admission has three layers:
 3. After controlled resolution, the gateway performs post-resolution admission over
    every resolved address immediately before connection or credential access.
 
+Each asynchronous policy, resolver, and transport collaboration is independently raced
+against the absolute gateway deadline. A collaborator that suppresses cancellation is
+retained and observed after timeout, but cannot resume the pipeline, trigger a later
+side effect, or publish a response.
+
 The network module should own a focused policy contract such as:
 
 ```python
@@ -354,10 +360,12 @@ The first implementation defines and tests:
 - Only `http` and `https` schemes are recognized. HTTPS should be the normal production
   default.
 - URL user information and embedded credentials are rejected.
-- Hostnames use one canonical comparison form. Internationalized names require explicit
-  IDNA handling rather than display-string comparison. Legacy numeric forms, including
-  mixed dotted hexadecimal forms, over-limit raw/canonical URL representations, and
-  control-bearing header values are rejected.
+- Hostnames use one canonical comparison form. A non-ASCII label must round-trip through
+  built-in IDNA from its NFC/lowercase source form; compatibility or deletion mappings
+  that could collapse distinct exact-host authorities are rejected. Explicit ASCII
+  A-labels remain exact authorities. Legacy numeric forms, including mixed dotted
+  hexadecimal forms, over-limit raw/canonical URL representations, and control-bearing
+  header values are rejected.
 - Scheme, hostname, port, method, and request class pass a fail-closed pre-resolution
   policy before any DNS query, preventing arbitrary denied names from becoming a DNS
   exfiltration channel.
@@ -368,7 +376,8 @@ The first implementation defines and tests:
   is acceptable.
 - Loopback, unspecified, link-local, private, multicast, reserved, transition,
   translation, mapped, and cloud metadata destinations are denied by default for both
-  IPv4 and IPv6.
+  IPv4 and IPv6. Explicit transition checks include standard NAT64 ranges, 6to4, Teredo,
+  and both ISATAP interface-identifier forms.
 - The transport connects only to an address that was resolved and admitted for that
   request while preserving the original hostname for TLS verification.
 - Redirect targets repeat URL normalization, policy evaluation, DNS validation, and
@@ -379,15 +388,20 @@ The first implementation defines and tests:
   state-changing method without an approved idempotency contract.
 - TLS certificate validation cannot be disabled by model input.
 - The transport owns its TLS context, uses only system/compiled trust sources without
-  ambient CA-file/directory overrides, and exposes no custom trust-root or client
-  certificate injection.
+  ambient CA-file/directory overrides, accepts mutable or immutable Windows trust-purpose
+  collections, enables strict/partial-chain verification when supported, and exposes no
+  custom trust-root or client-certificate injection.
 - Proxy behavior is host-controlled. Ambient `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`,
   and `NO_PROXY` values are not consumed implicitly.
-- Request and response headers have count and byte limits; response accounting includes
-  raw informational, final, and trailer header fields cumulatively.
+- Request and response headers have count and byte limits. `response_bytes` counts
+  encoded response bodies, while `response_wire_bytes` counts every consumed
+  informational/final response head, encoded body byte, chunk-size line, data
+  terminator, zero chunk, and trailer. The transferred-byte limit uses request-body plus
+  response-wire usage across all attempts.
 - Response framing uses strict decimal content lengths and hexadecimal chunk sizes;
-  provisional responses never cross the one-attempt transport boundary as final
-  results.
+  content-length whitespace is limited to HTTP SP/HTAB and its decimal representation
+  is bounded before integer conversion. Provisional responses never cross the
+  transport, gateway, grant, or session boundary as final results.
 - Content encoding cannot bypass the decompressed-response limit.
 - HEAD and status-defined bodyless responses do not decode representation metadata.
 - Failed/cancelled attempts abort stream shutdown immediately; successful graceful
@@ -511,7 +525,7 @@ Candidate bounded attributes include:
 - method;
 - redirect depth;
 - response status;
-- request, response, and decompressed byte counts;
+- request, encoded-response, response-wire, and decompressed byte counts;
 - duration;
 - budget outcome;
 - credential-route identifier or secret-reference name, never its value.

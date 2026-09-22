@@ -264,11 +264,33 @@ def response(body: bytes = b"value") -> OutboundHttpResponse:
             request_count=1,
             request_bytes=0,
             response_bytes=len(body),
+            response_wire_bytes=len(body),
             decompressed_response_bytes=len(body),
             redirect_count=0,
             duration_ms=1,
         ),
     )
+
+
+def provisional_response() -> OutboundHttpResponse:
+    provisional = object.__new__(OutboundHttpResponse)
+    object.__setattr__(provisional, "status_code", 103)
+    object.__setattr__(provisional, "headers", ())
+    object.__setattr__(provisional, "body", b"")
+    object.__setattr__(
+        provisional,
+        "usage",
+        HttpTransferUsage(
+            request_count=1,
+            request_bytes=0,
+            response_bytes=0,
+            response_wire_bytes=0,
+            decompressed_response_bytes=0,
+            redirect_count=0,
+            duration_ms=1,
+        ),
+    )
+    return provisional
 
 
 def http_request(
@@ -381,6 +403,26 @@ async def test_virtual_profile_rejects_before_gateway_and_connected_profile_roun
     ] == [
         SandboxEventType.OPERATION_STARTED,
         SandboxEventType.OPERATION_COMPLETED,
+    ]
+    await configured.service.close()
+
+
+@pytest.mark.asyncio
+async def test_connected_profile_rejects_provisional_gateway_response() -> None:
+    configured = bundle((provisional_response(),))
+    connected = await connected_session(configured)
+
+    with pytest.raises(OutboundHttpResponseInvalid) as captured:
+        await connected.send_http(http_request())
+
+    assert captured.value.__cause__ is None
+    assert captured.value.__context__ is None
+    events = await configured.events.query(EventQuery(session_id=connected.session_id))
+    assert [
+        event.event_type for event in events if event.operation_kind is OperationKind.OUTBOUND_HTTP
+    ] == [
+        SandboxEventType.OPERATION_STARTED,
+        SandboxEventType.OPERATION_FAILED,
     ]
     await configured.service.close()
 

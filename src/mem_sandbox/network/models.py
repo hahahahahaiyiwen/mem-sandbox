@@ -14,6 +14,7 @@ from mem_sandbox.network.errors import (
     OutboundHttpDenied,
     OutboundHttpLimitExceeded,
     OutboundHttpRequestInvalid,
+    OutboundHttpResponseInvalid,
 )
 
 if TYPE_CHECKING:
@@ -226,6 +227,8 @@ class OutboundHttpGrant:
         self.require_request(request)
         if not isinstance(cast(object, response), OutboundHttpResponse):
             raise TypeError("response must be OutboundHttpResponse")
+        if response.status_code < 200:
+            raise OutboundHttpResponseInvalid("outbound HTTP response must be a final response")
         limits = request.limits
         if _headers_size(response.headers) > limits.max_response_header_bytes:
             raise OutboundHttpLimitExceeded("HTTP response headers exceed the requested limit")
@@ -246,7 +249,7 @@ class OutboundHttpGrant:
             )
         if usage.redirect_count > limits.max_redirects:
             raise OutboundHttpLimitExceeded("HTTP redirect count exceeds the requested limit")
-        if usage.request_bytes + usage.response_bytes > limits.max_transferred_bytes:
+        if usage.request_bytes + usage.response_wire_bytes > limits.max_transferred_bytes:
             raise OutboundHttpLimitExceeded("HTTP transferred bytes exceed the requested limit")
         if usage.duration_ms > limits.timeout_seconds * 1000:
             raise OutboundHttpLimitExceeded("HTTP duration exceeds the requested limit")
@@ -336,6 +339,7 @@ class HttpTransferUsage:
     request_count: int
     request_bytes: int
     response_bytes: int
+    response_wire_bytes: int
     decompressed_response_bytes: int
     redirect_count: int
     duration_ms: float
@@ -345,12 +349,15 @@ class HttpTransferUsage:
             "request_count",
             "request_bytes",
             "response_bytes",
+            "response_wire_bytes",
             "decompressed_response_bytes",
             "redirect_count",
         ):
             _require_non_negative_integer(name, getattr(self, name))
         if self.request_count == 0:
             raise ValueError("request_count must be positive")
+        if self.response_wire_bytes < self.response_bytes:
+            raise ValueError("response_wire_bytes must include response_bytes")
         _require_non_negative_finite("duration_ms", self.duration_ms)
 
 
@@ -365,8 +372,8 @@ class OutboundHttpResponse:
         status = cast(object, self.status_code)
         if isinstance(status, bool) or not isinstance(status, int):
             raise TypeError("status_code must be an integer")
-        if status < 100 or status > 599:
-            raise ValueError("status_code must be between 100 and 599")
+        if status < 200 or status > 599:
+            raise ValueError("status_code must be between 200 and 599")
         headers = cast(object, self.headers)
         if not isinstance(headers, tuple):
             raise TypeError("headers must be a tuple")

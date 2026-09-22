@@ -22,6 +22,7 @@ from mem_sandbox.network import (
     OutboundHttpRequest,
     OutboundHttpRequestInvalid,
     OutboundHttpResponse,
+    OutboundHttpResponseInvalid,
 )
 
 
@@ -81,6 +82,7 @@ def test_http_request_and_response_are_immutable_and_non_revealing() -> None:
         request_count=1,
         request_bytes=20,
         response_bytes=5,
+        response_wire_bytes=5,
         decompressed_response_bytes=5,
         redirect_count=0,
         duration_ms=1.5,
@@ -104,7 +106,34 @@ def test_http_request_and_response_are_immutable_and_non_revealing() -> None:
 
 def test_transport_response_rejects_provisional_status() -> None:
     with pytest.raises(ValueError):
-        HttpTransportResponse(status_code=103, headers=(), body=b"")
+        HttpTransportResponse(status_code=103, headers=(), body=b"", wire_bytes=0)
+
+
+def test_public_response_and_grant_reject_provisional_status() -> None:
+    usage = HttpTransferUsage(
+        request_count=1,
+        request_bytes=0,
+        response_bytes=0,
+        response_wire_bytes=0,
+        decompressed_response_bytes=0,
+        redirect_count=0,
+        duration_ms=1,
+    )
+    with pytest.raises(ValueError):
+        OutboundHttpResponse(status_code=103, headers=(), body=b"", usage=usage)
+
+    provisional = object.__new__(OutboundHttpResponse)
+    object.__setattr__(provisional, "status_code", 103)
+    object.__setattr__(provisional, "headers", ())
+    object.__setattr__(provisional, "body", b"")
+    object.__setattr__(provisional, "usage", usage)
+    outbound_request = OutboundHttpRequest(
+        method=HttpMethod.GET,
+        url="https://example.test",
+        limits=limits(),
+    )
+    with pytest.raises(OutboundHttpResponseInvalid):
+        grant().require_response(outbound_request, provisional)
 
 
 @pytest.mark.parametrize(
@@ -224,6 +253,7 @@ def test_request_and_response_accept_exact_limits_and_reject_one_over() -> None:
             request_count=1,
             request_bytes=0,
             response_bytes=4,
+            response_wire_bytes=4,
             decompressed_response_bytes=4,
             redirect_count=0,
             duration_ms=1000,
@@ -250,6 +280,7 @@ def test_request_and_response_accept_exact_limits_and_reject_one_over() -> None:
                     request_count=1,
                     request_bytes=0,
                     response_bytes=5,
+                    response_wire_bytes=5,
                     decompressed_response_bytes=5,
                     redirect_count=0,
                     duration_ms=1000,

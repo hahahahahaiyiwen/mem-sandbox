@@ -50,6 +50,7 @@ class HttpTransportRequest:
     headers: tuple[HttpHeader, ...]
     max_response_header_bytes: int
     max_response_body_bytes: int
+    max_response_wire_bytes: int
 
     def __post_init__(self) -> None:
         if not isinstance(cast(object, self.method), HttpMethod):
@@ -61,7 +62,11 @@ class HttpTransportRequest:
             raise TypeError("headers must be a tuple")
         if any(not isinstance(header, HttpHeader) for header in cast(tuple[object, ...], headers)):
             raise TypeError("headers must contain HttpHeader values")
-        for name in ("max_response_header_bytes", "max_response_body_bytes"):
+        for name in (
+            "max_response_header_bytes",
+            "max_response_body_bytes",
+            "max_response_wire_bytes",
+        ):
             value = cast(object, getattr(self, name))
             if isinstance(value, bool) or not isinstance(value, int):
                 raise TypeError(f"{name} must be an integer")
@@ -73,7 +78,8 @@ class HttpTransportRequest:
             f"{type(self).__name__}(method={self.method.value!r}, "
             "destination=<redacted>, headers=<redacted>, "
             f"max_response_header_bytes={self.max_response_header_bytes!r}, "
-            f"max_response_body_bytes={self.max_response_body_bytes!r})"
+            f"max_response_body_bytes={self.max_response_body_bytes!r}, "
+            f"max_response_wire_bytes={self.max_response_wire_bytes!r})"
         )
 
 
@@ -82,6 +88,7 @@ class HttpTransportResponse:
     status_code: int
     headers: tuple[HttpHeader, ...]
     body: bytes
+    wire_bytes: int
 
     def __post_init__(self) -> None:
         status = cast(object, self.status_code)
@@ -96,11 +103,16 @@ class HttpTransportResponse:
             raise TypeError("headers must contain HttpHeader values")
         if not isinstance(cast(object, self.body), bytes):
             raise TypeError("body must be bytes")
+        wire_bytes = cast(object, self.wire_bytes)
+        if isinstance(wire_bytes, bool) or not isinstance(wire_bytes, int):
+            raise TypeError("wire_bytes must be an integer")
+        if self.wire_bytes < len(self.body):
+            raise ValueError("wire_bytes must include the encoded body")
 
     def __repr__(self) -> str:
         return (
             f"{type(self).__name__}(status_code={self.status_code!r}, "
-            "headers=<redacted>, body=<redacted>)"
+            f"headers=<redacted>, body=<redacted>, wire_bytes={self.wire_bytes!r})"
         )
 
 
@@ -162,7 +174,13 @@ class AsyncioHttpTransport:
         family = socket.AF_INET if address.ip.version == 4 else socket.AF_INET6
         tls = self._ssl_context if url.scheme is HttpScheme.HTTPS else None
         server_hostname = url.hostname if tls is not None else None
-        reader_limit = max(request.max_response_header_bytes + 1028, 4096)
+        reader_limit = max(
+            min(
+                request.max_response_header_bytes + 1028,
+                request.max_response_wire_bytes + 1028,
+            ),
+            4096,
+        )
         writer: asyncio.StreamWriter | None = None
         try:
             reader, writer = await asyncio.open_connection(
@@ -177,19 +195,31 @@ class AsyncioHttpTransport:
             _require_not_cancelled(context)
             writer.write(_encode_request(request))
             await writer.drain()
-            status, headers, remaining_header_bytes = await _read_final_response_head(
+            (
+                status,
+                headers,
+                remaining_header_bytes,
+                response_head_wire_bytes,
+            ) = await _read_final_response_head(
                 reader,
                 request.max_response_header_bytes,
+                request.max_response_wire_bytes,
             )
-            body = await _read_response_body(
+            body, response_body_wire_bytes = await _read_response_body(
                 reader,
                 request,
                 status,
                 headers,
                 remaining_header_bytes,
+                request.max_response_wire_bytes - response_head_wire_bytes,
             )
             _require_not_cancelled(context)
-            return HttpTransportResponse(status_code=status, headers=headers, body=body)
+            return HttpTransportResponse(
+                status_code=status,
+                headers=headers,
+                body=body,
+                wire_bytes=response_head_wire_bytes + response_body_wire_bytes,
+            )
         finally:
             active_error = sys.exception()
             if writer is not None:
@@ -214,15 +244,19 @@ def _encode_request(request: HttpTransportRequest) -> bytes:
 async def _read_final_response_head(
     reader: asyncio.StreamReader,
     maximum_header_bytes: int,
-) -> tuple[int, tuple[HttpHeader, ...], int]:
+    maximum_wire_bytes: int,
+) -> tuple[int, tuple[HttpHeader, ...], int, int]:
     informational_count = 0
     remaining_header_bytes = maximum_header_bytes
+    remaining_wire_bytes = maximum_wire_bytes
     while True:
-        status, headers, consumed_header_bytes = await _read_response_head(
+        status, headers, consumed_header_bytes, consumed_wire_bytes = await _read_response_head(
             reader,
             remaining_header_bytes,
+            remaining_wire_bytes,
         )
         remaining_header_bytes -= consumed_header_bytes
+        remaining_wire_bytes -= consumed_wire_bytes
         if status == 101:
             raise OutboundHttpResponseInvalid("HTTP protocol upgrades are not supported")
         if status < 200:
@@ -232,13 +266,19 @@ async def _read_final_response_head(
                     "HTTP response contains too many informational messages"
                 )
             continue
-        return status, headers, remaining_header_bytes
+        return (
+            status,
+            headers,
+            remaining_header_bytes,
+            maximum_wire_bytes - remaining_wire_bytes,
+        )
 
 
 async def _read_response_head(
     reader: asyncio.StreamReader,
     maximum_header_bytes: int,
-) -> tuple[int, tuple[HttpHeader, ...], int]:
+    maximum_wire_bytes: int,
+) -> tuple[int, tuple[HttpHeader, ...], int, int]:
     too_large = False
     incomplete = False
     raw = b""
@@ -252,6 +292,8 @@ async def _read_response_head(
         raise OutboundHttpLimitExceeded("HTTP response headers exceed the requested limit")
     if incomplete:
         raise OutboundHttpResponseInvalid("HTTP response headers are incomplete")
+    if len(raw) > maximum_wire_bytes:
+        raise OutboundHttpLimitExceeded("HTTP response wire bytes exceed the requested limit")
     lines = raw[:-4].split(b"\r\n")
     if not lines or not lines[0] or len(lines[0]) > 1024:
         raise OutboundHttpResponseInvalid("HTTP response status line is invalid")
@@ -261,7 +303,7 @@ async def _read_response_head(
     accounted_header_bytes = max(wire_header_bytes, _headers_size(headers))
     if accounted_header_bytes > maximum_header_bytes:
         raise OutboundHttpLimitExceeded("HTTP response headers exceed the requested limit")
-    return status, headers, accounted_header_bytes
+    return status, headers, accounted_header_bytes, len(raw)
 
 
 def _parse_status_line(line: bytes) -> int:
@@ -305,15 +347,16 @@ async def _read_response_body(
     status: int,
     headers: tuple[HttpHeader, ...],
     remaining_header_bytes: int,
-) -> bytes:
+    remaining_wire_bytes: int,
+) -> tuple[bytes, int]:
     transfer_encoding = _single_header(headers, "transfer-encoding")
     content_length = _single_header(headers, "content-length")
     if transfer_encoding is not None and content_length is not None:
         raise OutboundHttpResponseInvalid("HTTP response contains conflicting body framing")
     if request.method is HttpMethod.HEAD or status in (204, 205, 304):
-        return b""
+        return b"", 0
     if status in (301, 302, 303, 307, 308) and _single_header(headers, "location"):
-        return b""
+        return b"", 0
     if transfer_encoding is not None:
         if [token.strip().lower() for token in transfer_encoding.split(",")] != ["chunked"]:
             raise OutboundHttpResponseInvalid("HTTP response transfer encoding is unsupported")
@@ -321,37 +364,57 @@ async def _read_response_body(
             reader,
             request.max_response_body_bytes,
             remaining_header_bytes,
+            remaining_wire_bytes,
         )
     if content_length is not None:
-        if not content_length or not content_length.isascii() or not content_length.isdigit():
-            raise OutboundHttpResponseInvalid("HTTP response content length is invalid")
-        length = int(content_length, 10)
+        length = parse_http_content_length(content_length)
         if length > request.max_response_body_bytes:
             raise OutboundHttpLimitExceeded("HTTP response body exceeds the requested limit")
-        return await _read_exactly(reader, length)
-    return await _read_to_eof(reader, request.max_response_body_bytes)
+        if length > remaining_wire_bytes:
+            raise OutboundHttpLimitExceeded("HTTP response wire bytes exceed the requested limit")
+        return await _read_exactly(reader, length), length
+    return await _read_to_eof(
+        reader,
+        request.max_response_body_bytes,
+        remaining_wire_bytes,
+    )
 
 
 async def _read_chunked_body(
     reader: asyncio.StreamReader,
     maximum_body_bytes: int,
     maximum_trailer_bytes: int,
-) -> bytes:
+    maximum_wire_bytes: int,
+) -> tuple[bytes, int]:
     body = bytearray()
+    wire_bytes = 0
     while True:
         line = await _read_line(reader, 4096)
+        wire_bytes += len(line) + 2
+        if wire_bytes > maximum_wire_bytes:
+            raise OutboundHttpLimitExceeded("HTTP response wire bytes exceed the requested limit")
         if b";" in line:
             raise OutboundHttpResponseInvalid("HTTP chunk extensions are unsupported")
         size_value = line
         if not size_value or any(byte not in b"0123456789abcdefABCDEF" for byte in size_value):
             raise OutboundHttpResponseInvalid("HTTP chunk size is invalid")
-        size = int(size_value, 16)
+        significant_size = size_value.lstrip(b"0") or b"0"
+        if len(significant_size) > 16:
+            raise OutboundHttpLimitExceeded("HTTP response body exceeds the requested limit")
+        size = int(significant_size, 16)
         if size == 0:
-            await _read_trailers(reader, maximum_trailer_bytes)
-            return bytes(body)
+            trailer_wire_bytes = await _read_trailers(
+                reader,
+                maximum_trailer_bytes,
+                maximum_wire_bytes - wire_bytes,
+            )
+            return bytes(body), wire_bytes + trailer_wire_bytes
         if size > maximum_body_bytes - len(body):
             raise OutboundHttpLimitExceeded("HTTP response body exceeds the requested limit")
+        if size + 2 > maximum_wire_bytes - wire_bytes:
+            raise OutboundHttpLimitExceeded("HTTP response wire bytes exceed the requested limit")
         chunk = await _read_exactly(reader, size + 2)
+        wire_bytes += size + 2
         if chunk[-2:] != b"\r\n":
             raise OutboundHttpResponseInvalid("HTTP chunk terminator is invalid")
         body.extend(chunk[:-2])
@@ -360,12 +423,17 @@ async def _read_chunked_body(
 async def _read_trailers(
     reader: asyncio.StreamReader,
     maximum_bytes: int,
-) -> None:
+    maximum_wire_bytes: int,
+) -> int:
     consumed = 0
+    wire_bytes = 0
     while True:
         line = await _read_line(reader, maximum_bytes + 2)
+        wire_bytes += len(line) + 2
+        if wire_bytes > maximum_wire_bytes:
+            raise OutboundHttpLimitExceeded("HTTP response wire bytes exceed the requested limit")
         if not line:
-            return
+            return wire_bytes
         consumed += len(line) + 2
         if consumed > maximum_bytes:
             raise OutboundHttpLimitExceeded(
@@ -406,25 +474,48 @@ async def _read_exactly(reader: asyncio.StreamReader, length: int) -> bytes:
 async def _read_to_eof(
     reader: asyncio.StreamReader,
     maximum: int,
-) -> bytes:
+    maximum_wire_bytes: int,
+) -> tuple[bytes, int]:
     body = bytearray()
     while True:
-        chunk = await reader.read(min(64 * 1024, maximum - len(body) + 1))
+        chunk = await reader.read(
+            min(
+                64 * 1024,
+                maximum - len(body) + 1,
+                maximum_wire_bytes - len(body) + 1,
+            )
+        )
         if not chunk:
-            return bytes(body)
+            return bytes(body), len(body)
         body.extend(chunk)
         if len(body) > maximum:
             raise OutboundHttpLimitExceeded("HTTP response body exceeds the requested limit")
+        if len(body) > maximum_wire_bytes:
+            raise OutboundHttpLimitExceeded("HTTP response wire bytes exceed the requested limit")
 
 
 def _single_header(
     headers: tuple[HttpHeader, ...],
     name: str,
 ) -> str | None:
-    values = [header.value.strip() for header in headers if header.name.lower() == name]
+    values = [header.value.strip(" \t") for header in headers if header.name.lower() == name]
     if len(values) > 1:
         raise OutboundHttpResponseInvalid(f"HTTP response has multiple {name} headers")
     return values[0] if values else None
+
+
+def parse_http_content_length(value: str) -> int:
+    normalized = value.strip(" \t")
+    maximum = str((1 << 63) - 1)
+    if (
+        not normalized
+        or len(normalized) > len(maximum)
+        or not normalized.isascii()
+        or not normalized.isdigit()
+        or (len(normalized) == len(maximum) and normalized > maximum)
+    ):
+        raise OutboundHttpResponseInvalid("HTTP response content length is invalid")
+    return int(normalized, 10)
 
 
 def _headers_size(headers: tuple[HttpHeader, ...]) -> int:
@@ -443,7 +534,7 @@ def _create_system_ssl_context() -> ssl.SSLContext:
                     if encoding != "x509_asn":
                         continue
                     trusted_for_server = trust is True or (
-                        isinstance(trust, set) and ssl.Purpose.SERVER_AUTH.oid in trust
+                        isinstance(trust, set | frozenset) and ssl.Purpose.SERVER_AUTH.oid in trust
                     )
                     if not trusted_for_server:
                         continue
@@ -471,6 +562,7 @@ def _create_system_ssl_context() -> ssl.SSLContext:
         )
     context.check_hostname = True
     context.verify_mode = ssl.CERT_REQUIRED
+    context.verify_flags |= ssl.VERIFY_X509_STRICT | ssl.VERIFY_X509_PARTIAL_CHAIN
     return context
 
 

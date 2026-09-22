@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import zlib
+from collections.abc import Coroutine
 from dataclasses import replace
-from typing import cast
+from typing import Any, cast
 from urllib.parse import urljoin
 
 from mem_sandbox.network.destination import (
@@ -43,6 +44,7 @@ from mem_sandbox.network.transport import (
     AdmittedHttpDestination,
     HttpTransportRequest,
     HttpTransportResponse,
+    parse_http_content_length,
 )
 
 _REDIRECT_STATUSES = frozenset((301, 302, 303, 307, 308))
@@ -97,6 +99,7 @@ class BoundedOutboundHttpGateway:
         self._policy = policy
         self._resolver = resolver
         self._transport = transport
+        self._settling_tasks: set[asyncio.Task[object]] = set()
 
     async def send(
         self,
@@ -109,27 +112,16 @@ class BoundedOutboundHttpGateway:
             raise TypeError("context must be NetworkOperationContext")
         context.grant.require_request(request)
         _require_supported_request(request)
-        _require_not_cancelled(context)
+        _require_active(context)
         loop = asyncio.get_running_loop()
         deadline = min(
             context.deadline_monotonic,
             loop.time() + request.limits.timeout_seconds,
         )
         effective_context = replace(context, deadline_monotonic=deadline)
+        _require_active(effective_context)
         started = loop.time()
-        timed_out = False
-        response: OutboundHttpResponse | None = None
-        try:
-            response = await asyncio.wait_for(
-                self._send_bounded(request, effective_context, started),
-                timeout=max(0.0, deadline - loop.time()),
-            )
-        except TimeoutError:
-            timed_out = True
-        if timed_out:
-            raise OutboundHttpTimeout("outbound HTTP operation exceeded its deadline")
-        assert response is not None
-        return response
+        return await self._send_bounded(request, effective_context, started)
 
     async def _send_bounded(
         self,
@@ -142,9 +134,10 @@ class BoundedOutboundHttpGateway:
         method = request.method
         request_count = 0
         redirect_count = 0
-        transferred_response_bytes = 0
+        encoded_response_bytes = 0
+        response_wire_bytes = 0
         while True:
-            _require_not_cancelled(context)
+            _require_active(context)
             if request_count >= limits.max_requests:
                 raise OutboundHttpLimitExceeded("HTTP request count exceeds the requested limit")
             if current.scheme not in context.grant.schemes:
@@ -158,7 +151,9 @@ class BoundedOutboundHttpGateway:
                 NetworkPolicyPhase.PRE_RESOLUTION,
                 context,
             )
+            _require_active(context)
             resolution = await self._resolve(current, context)
+            _require_active(context)
             if not resolution.addresses:
                 raise OutboundHttpResolutionFailed("controlled resolution returned no addresses")
             if any(
@@ -175,11 +170,13 @@ class BoundedOutboundHttpGateway:
                 NetworkPolicyPhase.POST_RESOLUTION,
                 context,
             )
-            _require_not_cancelled(context)
-            remaining_transfer = limits.max_transferred_bytes - transferred_response_bytes
+            _require_active(context)
+            remaining_transfer = (
+                limits.max_transferred_bytes - len(request.body) - response_wire_bytes
+            )
             if remaining_transfer < 0:
                 raise OutboundHttpLimitExceeded("HTTP transferred bytes exceed the requested limit")
-            remaining_response = limits.max_response_body_bytes - transferred_response_bytes
+            remaining_response = limits.max_response_body_bytes - encoded_response_bytes
             if remaining_response < 0:
                 raise OutboundHttpLimitExceeded("HTTP response body exceeds the requested limit")
             headers = _transport_headers(current, request.headers)
@@ -197,12 +194,15 @@ class BoundedOutboundHttpGateway:
                     remaining_response,
                     remaining_transfer,
                 ),
+                max_response_wire_bytes=remaining_transfer,
             )
             raw_response = await self._send_attempt(attempt, context)
+            _require_active(context)
             request_count += 1
             _require_transport_response(raw_response, attempt)
-            transferred_response_bytes += len(raw_response.body)
-            if transferred_response_bytes > limits.max_transferred_bytes:
+            encoded_response_bytes += len(raw_response.body)
+            response_wire_bytes += raw_response.wire_bytes
+            if len(request.body) + response_wire_bytes > limits.max_transferred_bytes:
                 raise OutboundHttpLimitExceeded("HTTP transferred bytes exceed the requested limit")
             location = _redirect_location(raw_response)
             if raw_response.status_code in _REDIRECT_STATUSES and location is not None:
@@ -223,6 +223,7 @@ class BoundedOutboundHttpGateway:
                     raw_response,
                     limits.max_decompressed_response_bytes,
                 )
+            _require_active(context)
             duration_ms = (asyncio.get_running_loop().time() - started) * 1000
             response = OutboundHttpResponse(
                 status_code=raw_response.status_code,
@@ -231,7 +232,8 @@ class BoundedOutboundHttpGateway:
                 usage=HttpTransferUsage(
                     request_count=request_count,
                     request_bytes=len(request.body),
-                    response_bytes=transferred_response_bytes,
+                    response_bytes=encoded_response_bytes,
+                    response_wire_bytes=response_wire_bytes,
                     decompressed_response_bytes=len(body),
                     redirect_count=redirect_count,
                     duration_ms=duration_ms,
@@ -239,6 +241,41 @@ class BoundedOutboundHttpGateway:
             )
             context.grant.require_response(request, response)
             return response
+
+    async def _await_collaborator[ResultT](
+        self,
+        operation: Coroutine[Any, Any, ResultT],
+        context: NetworkOperationContext,
+    ) -> ResultT:
+        _require_active(context)
+        remaining = context.deadline_monotonic - asyncio.get_running_loop().time()
+        if remaining <= 0:
+            operation.close()
+            raise OutboundHttpTimeout("outbound HTTP operation exceeded its deadline")
+        task = asyncio.create_task(operation)
+        try:
+            done, _pending = await asyncio.wait((task,), timeout=remaining)
+        except asyncio.CancelledError:
+            task.cancel()
+            self._retain_settling_task(task)
+            raise
+        if task not in done or asyncio.get_running_loop().time() >= context.deadline_monotonic:
+            task.cancel()
+            self._retain_settling_task(task)
+            raise OutboundHttpTimeout("outbound HTTP operation exceeded its deadline")
+        result = task.result()
+        _require_active(context)
+        return result
+
+    def _retain_settling_task[ResultT](self, task: asyncio.Task[ResultT]) -> None:
+        retained = cast(asyncio.Task[object], task)
+        self._settling_tasks.add(retained)
+        retained.add_done_callback(self._settling_task_done)
+
+    def _settling_task_done(self, task: asyncio.Task[object]) -> None:
+        self._settling_tasks.discard(task)
+        if not task.cancelled():
+            task.exception()
 
     async def _require_policy(
         self,
@@ -267,18 +304,23 @@ class BoundedOutboundHttpGateway:
         failed = False
         decision: object = None
         try:
-            decision = await self._policy.evaluate(facts)
+            decision = await self._await_collaborator(
+                self._policy.evaluate(facts),
+                context,
+            )
         except asyncio.CancelledError:
             if _caller_is_cancelling():
                 raise
             failed = True
+        except OutboundHttpTimeout:
+            raise
         except Exception:
             failed = True
         if failed or not isinstance(decision, NetworkPolicyDecision):
             raise OutboundHttpDenied("network policy evaluation failed closed")
         if decision.outcome is not NetworkPolicyOutcome.ALLOW:
             raise OutboundHttpDenied("network policy denied the destination")
-        _require_not_cancelled(context)
+        _require_active(context)
 
     async def _resolve(
         self,
@@ -292,7 +334,10 @@ class BoundedOutboundHttpGateway:
         stable_failure: type[Exception] | None = None
         resolution: object = None
         try:
-            resolution = await self._resolver.resolve(url.hostname, url.port, context)
+            resolution = await self._await_collaborator(
+                self._resolver.resolve(url.hostname, url.port, context),
+                context,
+            )
         except asyncio.CancelledError:
             if _caller_is_cancelling():
                 raise
@@ -317,7 +362,7 @@ class BoundedOutboundHttpGateway:
             or resolution.hostname != url.hostname
         ):
             raise OutboundHttpResolutionFailed("controlled destination resolution failed")
-        _require_not_cancelled(context)
+        _require_active(context)
         return resolution
 
     async def _send_attempt(
@@ -329,7 +374,10 @@ class BoundedOutboundHttpGateway:
         stable_failure: type[Exception] | None = None
         response: object = None
         try:
-            response = await self._transport.send(request, context)
+            response = await self._await_collaborator(
+                self._transport.send(request, context),
+                context,
+            )
         except asyncio.CancelledError:
             if _caller_is_cancelling():
                 raise
@@ -358,7 +406,7 @@ class BoundedOutboundHttpGateway:
             raise OutboundHttpResponseInvalid(
                 "outbound HTTP transport returned an invalid response"
             )
-        _require_not_cancelled(context)
+        _require_active(context)
         return response
 
 
@@ -397,18 +445,15 @@ def _require_transport_response(
         raise OutboundHttpLimitExceeded("HTTP response headers exceed the requested limit")
     if len(response.body) > request.max_response_body_bytes:
         raise OutboundHttpLimitExceeded("HTTP response body exceeds the requested limit")
+    if response.wire_bytes > request.max_response_wire_bytes:
+        raise OutboundHttpLimitExceeded("HTTP response wire bytes exceed the requested limit")
     content_lengths = [
-        header.value.strip()
-        for header in response.headers
-        if header.name.lower() == "content-length"
+        header.value for header in response.headers if header.name.lower() == "content-length"
     ]
     if len(content_lengths) > 1:
         raise OutboundHttpResponseInvalid("HTTP response has ambiguous content length")
     if content_lengths:
-        value = content_lengths[0]
-        if not value or not value.isascii() or not value.isdigit():
-            raise OutboundHttpResponseInvalid("HTTP response content length is invalid")
-        declared = int(value, 10)
+        declared = parse_http_content_length(content_lengths[0])
         body_omitted = _response_omits_body(request.method, response.status_code) or (
             response.status_code in _REDIRECT_STATUSES and _redirect_location(response) is not None
         )
@@ -520,10 +565,12 @@ def _headers_size(headers: tuple[HttpHeader, ...]) -> int:
     )
 
 
-def _require_not_cancelled(context: NetworkOperationContext) -> None:
+def _require_active(context: NetworkOperationContext) -> None:
     cancellation = context.cancellation
     if cancellation is not None and cancellation.is_set():
         raise OutboundHttpCancelled("outbound HTTP operation was cancelled")
+    if asyncio.get_running_loop().time() >= context.deadline_monotonic:
+        raise OutboundHttpTimeout("outbound HTTP operation exceeded its deadline")
 
 
 def _caller_is_cancelling() -> bool:

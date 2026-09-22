@@ -13,6 +13,7 @@ from ipaddress import (
     ip_address,
 )
 from typing import cast
+from unicodedata import normalize
 from urllib.parse import quote, urlsplit
 
 from mem_sandbox.core import OperationId, SessionId
@@ -43,9 +44,12 @@ _METADATA_NETWORKS = (
     IPv6Network("fe80::a9fe:a9fe/128"),
 )
 _TRANSITION_NETWORKS = (
+    IPv6Network("64:ff9b::/96"),
+    IPv6Network("64:ff9b:1::/48"),
     IPv6Network("2001::/32"),
     IPv6Network("2002::/16"),
 )
+_ISATAP_INTERFACE_PREFIXES = frozenset((0x00005EFE, 0x02005EFE))
 
 
 class HttpRequestClass(StrEnum):
@@ -470,6 +474,10 @@ def classify_ip_address(address: IPv4Address | IPv6Address) -> IpAddressClass:
         address in network for network in _TRANSITION_NETWORKS
     ):
         return IpAddressClass.RESERVED
+    if isinstance(address, IPv6Address):
+        interface_prefix = (int(address) & ((1 << 64) - 1)) >> 32
+        if interface_prefix in _ISATAP_INTERFACE_PREFIXES:
+            return IpAddressClass.RESERVED
     if address.is_reserved or not address.is_global:
         return IpAddressClass.RESERVED
     return IpAddressClass.GLOBAL
@@ -491,9 +499,18 @@ def _normalize_hostname(hostname: object) -> str:
     ):
         raise OutboundHttpRequestInvalid("HTTP hostname form is ambiguous")
     try:
-        labels = tuple(
-            label.encode("idna").decode("ascii").lower() for label in candidate.split(".")
-        )
+        labels: list[str] = []
+        for label in candidate.split("."):
+            normalized_label = normalize("NFC", label).lower()
+            encoded_label = normalized_label.encode("idna").decode("ascii").lower()
+            if not label.isascii():
+                round_trip = normalize(
+                    "NFC",
+                    encoded_label.encode("ascii").decode("idna"),
+                ).lower()
+                if round_trip != normalized_label:
+                    raise UnicodeError
+            labels.append(encoded_label)
     except UnicodeError:
         raise OutboundHttpRequestInvalid("HTTP hostname IDNA encoding failed") from None
     if any(

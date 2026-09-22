@@ -1,6 +1,7 @@
 import asyncio
 import inspect
 import ssl
+import sys
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import cast
@@ -74,6 +75,7 @@ def transport_request(
     *,
     maximum_body: int = 1024,
     maximum_headers: int = 1024,
+    maximum_wire: int = 2048,
     scheme: HttpScheme = HttpScheme.HTTP,
     hostname: str = "example.test",
 ) -> HttpTransportRequest:
@@ -91,6 +93,7 @@ def transport_request(
         ),
         max_response_header_bytes=maximum_headers,
         max_response_body_bytes=maximum_body,
+        max_response_wire_bytes=maximum_wire,
     )
 
 
@@ -118,6 +121,33 @@ def transport_with_test_trust(
 
 def test_transport_does_not_accept_external_tls_configuration() -> None:
     assert tuple(inspect.signature(AsyncioHttpTransport).parameters) == ()
+
+
+def test_system_tls_context_loads_immutable_purpose_sets_and_secure_flags(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture_root = Path(__file__).parents[2] / "fixtures" / "network"
+    certificate = fixture_root / "example-test-cert.pem"
+    certificate_der = ssl.PEM_cert_to_DER_cert(certificate.read_text(encoding="ascii"))
+
+    def enum_certificates(_store: str) -> list[tuple[bytes, str, frozenset[str]]]:
+        return [
+            (
+                certificate_der,
+                "x509_asn",
+                frozenset((ssl.Purpose.SERVER_AUTH.oid,)),
+            )
+        ]
+
+    with monkeypatch.context() as scoped:
+        scoped.setattr(sys, "platform", "win32")
+        scoped.setattr(ssl, "enum_certificates", enum_certificates)
+        subject = AsyncioHttpTransport()
+
+    owned_context = cast(ssl.SSLContext, vars(subject)["_ssl_context"])
+    assert certificate_der in owned_context.get_ca_certs(binary_form=True)
+    secure_flags = ssl.VERIFY_X509_STRICT | ssl.VERIFY_X509_PARTIAL_CHAIN
+    assert owned_context.verify_flags & secure_flags == secure_flags
 
 
 @pytest.mark.asyncio
@@ -293,21 +323,23 @@ async def test_https_ignores_ambient_custom_trust_roots(
 
 @pytest.mark.asyncio
 async def test_transport_decodes_chunk_framing_without_publishing_trailers() -> None:
+    response_bytes = (
+        b"HTTP/1.1 200 OK\r\n"
+        b"Transfer-Encoding: chunked\r\n"
+        b"Connection: close\r\n"
+        b"\r\n"
+        b"3\r\nabc\r\n"
+        b"2\r\nde\r\n"
+        b"0\r\nX-Trailer: ignored\r\n\r\n"
+    )
+
     async def handler(
         reader: asyncio.StreamReader,
         writer: asyncio.StreamWriter,
     ) -> None:
         try:
             await reader.readuntil(b"\r\n\r\n")
-            writer.write(
-                b"HTTP/1.1 200 OK\r\n"
-                b"Transfer-Encoding: chunked\r\n"
-                b"Connection: close\r\n"
-                b"\r\n"
-                b"3\r\nabc\r\n"
-                b"2\r\nde\r\n"
-                b"0\r\nX-Trailer: ignored\r\n\r\n"
-            )
+            writer.write(response_bytes)
             await writer.drain()
         finally:
             writer.close()
@@ -324,6 +356,7 @@ async def test_transport_decodes_chunk_framing_without_publishing_trailers() -> 
         await server.wait_closed()
 
     assert response.body == b"abcde"
+    assert response.wire_bytes == len(response_bytes)
     assert response.headers == (
         HttpHeader("Transfer-Encoding", "chunked"),
         HttpHeader("Connection", "close"),
@@ -432,6 +465,7 @@ async def test_transport_rejects_declared_body_over_limit_before_reading_it() ->
         b"HTTP/1.1 200 OK\r\nBad Header: value\r\nContent-Length: 0\r\n\r\n",
         b"HTTP/1.1 200\r\nContent-Length: 0\r\n\r\n",
         b"HTTP/1.1 200 bad\x00reason\r\nContent-Length: 0\r\n\r\n",
+        b"HTTP/1.1 200 OK\r\nContent-Length: \xa01\xa0\r\n\r\nx",
     ],
     ids=[
         "signed-content-length",
@@ -442,6 +476,7 @@ async def test_transport_rejects_declared_body_over_limit_before_reading_it() ->
         "invalid-header-name",
         "missing-reason-separator",
         "invalid-reason-control",
+        "non-http-content-length-whitespace",
     ],
 )
 async def test_transport_rejects_non_strict_response_framing(
@@ -464,6 +499,73 @@ async def test_transport_rejects_non_strict_response_framing(
         with pytest.raises(OutboundHttpResponseInvalid):
             await AsyncioHttpTransport().send(
                 transport_request(port),
+                context(),
+            )
+    finally:
+        server.close()
+        await server.wait_closed()
+
+
+@pytest.mark.asyncio
+async def test_transport_rejects_pathological_content_length_stably() -> None:
+    response_bytes = (
+        b"HTTP/1.1 200 OK\r\nContent-Length: " + (b"1" * 5000) + b"\r\nConnection: close\r\n\r\n"
+    )
+
+    async def handler(
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+    ) -> None:
+        try:
+            await reader.readuntil(b"\r\n\r\n")
+            writer.write(response_bytes)
+            await writer.drain()
+        finally:
+            writer.close()
+            await writer.wait_closed()
+
+    server, port = await run_server(handler)
+    try:
+        with pytest.raises(OutboundHttpResponseInvalid) as captured:
+            await AsyncioHttpTransport().send(
+                transport_request(port, maximum_headers=6000, maximum_wire=7000),
+                context(),
+            )
+    finally:
+        server.close()
+        await server.wait_closed()
+
+    assert captured.value.__cause__ is None
+    assert captured.value.__context__ is None
+
+
+@pytest.mark.asyncio
+async def test_chunk_framing_counts_against_response_wire_limit() -> None:
+    response_head = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n"
+    size_line = (b"0" * 4093) + b"1\r\n"
+    response_bytes = response_head + size_line + b"a\r\n" + size_line + b"b\r\n" + b"0\r\n\r\n"
+
+    async def handler(
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+    ) -> None:
+        try:
+            await reader.readuntil(b"\r\n\r\n")
+            writer.write(response_bytes)
+            await writer.drain()
+        finally:
+            writer.close()
+            await writer.wait_closed()
+
+    server, port = await run_server(handler)
+    try:
+        with pytest.raises(OutboundHttpLimitExceeded):
+            await AsyncioHttpTransport().send(
+                transport_request(
+                    port,
+                    maximum_body=10,
+                    maximum_wire=len(response_head) + 100,
+                ),
                 context(),
             )
     finally:

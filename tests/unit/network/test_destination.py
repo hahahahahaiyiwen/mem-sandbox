@@ -53,6 +53,14 @@ from mem_sandbox.network.errors import OutboundHttpRequestInvalid
             "/",
             "https://example.test/",
         ),
+        (
+            "https://xn--fa-hia.de/value",
+            HttpScheme.HTTPS,
+            "xn--fa-hia.de",
+            443,
+            "/value",
+            "https://xn--fa-hia.de/value",
+        ),
     ],
 )
 def test_url_normalization_produces_one_comparison_and_transport_form(
@@ -94,6 +102,8 @@ def test_url_normalization_produces_one_comparison_and_transport_form(
         "https://0x7f.0.0.1/value",
         "https://0x7f.0x0.0x0.0x1/value",
         "https://127.0.0x0.1/value",
+        "https://faß.de/value",
+        "https://ab\u200dcd.example/value",
         "https:///value",
     ],
 )
@@ -149,6 +159,8 @@ def test_ipv4_mapped_ipv6_cannot_bypass_private_or_metadata_classification() -> 
         "2002:0808:0808::1",
         "64:ff9b::808:808",
         "64:ff9b:1::808:808",
+        "2001:4860:0:0:0:5efe:a00:1",
+        "2001:4860:0:0:200:5efe:a00:1",
     ],
 )
 def test_ipv6_transition_and_translation_ranges_are_denied(value: str) -> None:
