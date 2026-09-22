@@ -84,6 +84,10 @@ probes; real transports added later must satisfy the same boundary.
   credential routes, or grant details.
 - Gateway and protected-input failures retain no provider exception context, cause, or
   raw settlement note at the session boundary.
+- Provider failures outside cancellation and interpreter-control paths, including nested
+  exception groups, become context-free `OutboundHttpGatewayFailed` values.
+- Bare `GeneratorExit`, `KeyboardInterrupt`, and `SystemExit` pass through unchanged. If
+  one escapes after operation start, the session does not manufacture a terminal event.
 - Gateway-raised session-domain errors cannot forge session classifications or operation
   identities; provider translation wraps a distinct child task at the session boundary.
 - Basic scheme recognition is not destination admission. Until the controlled resolver

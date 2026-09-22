@@ -37,6 +37,12 @@ bounded wait; repeated native cancellation cannot bypass retention. A non-cooper
 gateway makes the session fail closed while its task remains retained and observed, and
 cannot hold session close indefinitely.
 
+Provider failures outside cancellation and interpreter-control paths, including nested
+exception groups, become context-free `OutboundHttpGatewayFailed` values at the session
+boundary. Bare `GeneratorExit`, `KeyboardInterrupt`, and `SystemExit` pass through
+unchanged; if one escapes after `operation.started`, the session does not manufacture a
+terminal event.
+
 The only gateway implementation is deterministic and fake. It opens no network
 connection. Basic scheme recognition and grant checks are implemented, but URL
 canonicalization, hostname/IP admission, DNS, TLS, redirect handling, ambient-proxy

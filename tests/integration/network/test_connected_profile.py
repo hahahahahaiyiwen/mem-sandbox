@@ -452,6 +452,23 @@ async def test_unexpected_gateway_failure_is_translated_by_session_boundary(
 
 
 @pytest.mark.asyncio
+async def test_gateway_generator_exit_is_not_translated_by_session_boundary() -> None:
+    provider_exit = GeneratorExit("provider coroutine closed")
+    configured = bundle((provider_exit,))
+    connected = await connected_session(configured)
+
+    with pytest.raises(GeneratorExit) as captured:
+        await connected.send_http(http_request())
+
+    assert captured.value is provider_exit
+    events = await configured.events.query(EventQuery(session_id=connected.session_id))
+    assert [
+        event.event_type for event in events if event.operation_kind is OperationKind.OUTBOUND_HTTP
+    ] == [SandboxEventType.OPERATION_STARTED]
+    await configured.service.close()
+
+
+@pytest.mark.asyncio
 async def test_gateway_task_group_base_exception_is_translated_by_session_boundary() -> None:
     gateway = BaseExceptionGroupGateway("provider group secret")
     configured = bundle((), gateway_override=gateway)
@@ -591,14 +608,15 @@ async def test_gateway_fatal_cleanup_is_hidden_during_timeout_settlement(
         await connected.send_http(
             http_request(
                 operation_limits=OperationLimits(
-                    timeout_seconds=0.05,
-                    terminal_event_reserve_seconds=0.01,
+                    timeout_seconds=0.2,
+                    terminal_event_reserve_seconds=0.1,
                 )
             )
         )
 
     _assert_exception_graph_hides(captured.value, canary)
     assert "collaborator also failed during timeout" in _exception_graph_notes(captured.value)
+    assert connected.state is SandboxSessionState.RUNNING
     events = await configured.events.query(EventQuery(session_id=connected.session_id))
     assert [
         event.event_type for event in events if event.operation_kind is OperationKind.OUTBOUND_HTTP
@@ -606,6 +624,32 @@ async def test_gateway_fatal_cleanup_is_hidden_during_timeout_settlement(
         SandboxEventType.OPERATION_STARTED,
         SandboxEventType.OPERATION_TIMED_OUT,
     ]
+    await configured.service.close()
+
+
+@pytest.mark.asyncio
+async def test_gateway_generator_exit_is_not_retained_during_timeout_settlement() -> None:
+    provider_exit = GeneratorExit("provider coroutine closed")
+    gateway = FatalCancellationCleanupGateway(provider_exit)
+    configured = bundle((), gateway_override=gateway)
+    connected = await connected_session(configured)
+
+    with pytest.raises(GeneratorExit) as captured:
+        await connected.send_http(
+            http_request(
+                operation_limits=OperationLimits(
+                    timeout_seconds=0.2,
+                    terminal_event_reserve_seconds=0.1,
+                )
+            )
+        )
+
+    assert captured.value is provider_exit
+    assert connected.state is SandboxSessionState.RUNNING
+    events = await configured.events.query(EventQuery(session_id=connected.session_id))
+    assert [
+        event.event_type for event in events if event.operation_kind is OperationKind.OUTBOUND_HTTP
+    ] == [SandboxEventType.OPERATION_STARTED]
     await configured.service.close()
 
 

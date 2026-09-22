@@ -129,6 +129,12 @@ sequence. Method, scheme, transfer-limit, and credential-route requests outside 
 grant fail before gateway use. URL/destination admission and real transport remain
 network-module work.
 
+Provider failures outside cancellation and interpreter-control paths, including nested
+exception groups, become context-free `OutboundHttpGatewayFailed` values at the session
+boundary. Bare `GeneratorExit`, `KeyboardInterrupt`, and `SystemExit` pass through
+unchanged; if one escapes after `operation.started`, the session does not manufacture a
+terminal event.
+
 A future typed adapter invokes `send_http()` rather than bypassing session coordination.
 A virtual HTTP command is already inside one admitted `execute` operation and must not
 call back into the public method; its command context will carry narrow gateway access in

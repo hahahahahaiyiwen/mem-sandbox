@@ -274,7 +274,7 @@ async def _send_outbound_http_safely(
         failure = OutboundHttpGatewayFailed("outbound HTTP gateway failed unexpectedly")
     except Exception:
         failure = OutboundHttpGatewayFailed("outbound HTTP gateway failed unexpectedly")
-    except (KeyboardInterrupt, SystemExit):
+    except (GeneratorExit, KeyboardInterrupt, SystemExit):
         raise
     except BaseException:
         failure = OutboundHttpGatewayFailed("outbound HTTP gateway failed unexpectedly")
@@ -1904,7 +1904,7 @@ async def _settle_cancelled_task[T](
         await task
     except asyncio.CancelledError:
         return None
-    except (KeyboardInterrupt, SystemExit):
+    except (GeneratorExit, KeyboardInterrupt, SystemExit):
         raise
     except BaseException as error:
         return error

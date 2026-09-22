@@ -38,3 +38,8 @@ stable gateway failure rather than impersonating caller cancellation. Cancellati
 settlement tracks the collaborator before its bounded wait; repeated native
 cancellation therefore cannot bypass fail-closed retention, and close can re-signal an
 unfinished collaborator without waiting indefinitely.
+
+Provider failures outside cancellation and interpreter-control paths, including nested
+exception groups, become context-free `OutboundHttpGatewayFailed` values.
+Bare `GeneratorExit`, `KeyboardInterrupt`, and `SystemExit` pass through unchanged; if one
+escapes after operation start, the session does not manufacture a terminal event.
