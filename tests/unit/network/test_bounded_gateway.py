@@ -455,6 +455,43 @@ async def test_redirect_body_omission_does_not_trust_or_read_declared_length() -
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "location",
+    [
+        "/" + ("a" * 9000),
+        "/" + ("é" * 1400),
+        "https://[::1",
+    ],
+    ids=["raw-limit", "canonical-expansion-limit", "malformed-authority"],
+)
+async def test_invalid_redirect_location_is_stable_before_another_attempt(
+    location: str,
+) -> None:
+    transfer_limits = limits(max_response_header_bytes=20_000)
+    transport = RecordingTransport(
+        (
+            transport_response(
+                302,
+                headers=(HttpHeader("Location", location),),
+                body=b"",
+            ),
+        )
+    )
+    subject, _, resolver, _ = gateway(transport=transport)
+
+    with pytest.raises(OutboundHttpResponseInvalid) as captured:
+        await subject.send(
+            request(transfer_limits=transfer_limits),
+            context(transfer_limits),
+        )
+
+    assert len(resolver.calls) == 1
+    assert len(transport.calls) == 1
+    assert captured.value.__cause__ is None
+    assert captured.value.__context__ is None
+
+
+@pytest.mark.asyncio
 async def test_gateway_uses_first_admitted_address_without_failure_retry() -> None:
     resolver = RecordingResolver({"example.test": resolution("example.test", "8.8.8.8", "1.1.1.1")})
     transport = RecordingTransport((OSError("provider detail"), transport_response()))
@@ -692,6 +729,72 @@ async def test_malformed_content_encoding_is_a_stable_response_failure() -> None
 
     assert captured.value.__cause__ is None
     assert captured.value.__context__ is None
+
+
+@pytest.mark.asyncio
+async def test_gateway_rejects_non_decimal_content_length_from_injected_transport() -> None:
+    subject, _, _, _ = gateway(
+        transport=RecordingTransport(
+            (
+                transport_response(
+                    headers=(HttpHeader("Content-Length", "+2"),),
+                    body=b"ok",
+                ),
+            )
+        )
+    )
+
+    with pytest.raises(OutboundHttpResponseInvalid):
+        await subject.send(request(), context())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("method", "status"),
+    [
+        (HttpMethod.HEAD, 200),
+        (HttpMethod.GET, 204),
+        (HttpMethod.GET, 205),
+        (HttpMethod.GET, 304),
+    ],
+)
+async def test_bodyless_response_skips_content_decoding(
+    method: HttpMethod,
+    status: int,
+) -> None:
+    subject, _, _, _ = gateway(
+        transport=RecordingTransport(
+            (
+                transport_response(
+                    status,
+                    headers=(
+                        HttpHeader("Content-Encoding", "gzip"),
+                        HttpHeader("Content-Length", "100"),
+                    ),
+                    body=b"",
+                ),
+            )
+        )
+    )
+
+    response = await subject.send(request(method=method), context())
+
+    assert response.status_code == status
+    assert response.headers == ()
+    assert response.body == b""
+    assert response.usage.decompressed_response_bytes == 0
+
+
+@pytest.mark.asyncio
+async def test_gateway_rejects_provisional_response_from_injected_transport() -> None:
+    provisional = object.__new__(HttpTransportResponse)
+    object.__setattr__(provisional, "status_code", 103)
+    object.__setattr__(provisional, "headers", ())
+    object.__setattr__(provisional, "body", b"")
+    subject, _, _, _ = gateway(transport=RecordingTransport((provisional,)))
+
+    with pytest.raises(OutboundHttpResponseInvalid):
+        await subject.send(request(), context())
 
 
 @pytest.mark.asyncio

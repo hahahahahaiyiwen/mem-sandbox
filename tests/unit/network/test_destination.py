@@ -102,6 +102,11 @@ def test_url_normalization_rejects_ambiguous_or_unsupported_forms(url: str) -> N
         normalize_http_url(url)
 
 
+def test_url_normalization_rejects_canonical_percent_expansion_over_limit() -> None:
+    with pytest.raises(OutboundHttpRequestInvalid):
+        normalize_http_url(f"https://example.test/{'é' * 1400}")
+
+
 @pytest.mark.parametrize(
     ("value", "expected"),
     [

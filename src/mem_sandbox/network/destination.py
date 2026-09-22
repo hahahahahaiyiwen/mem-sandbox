@@ -26,6 +26,7 @@ _AMBIGUOUS_NUMERIC_HOST = re.compile(
 )
 _HOST_LABEL = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\Z")
 _MAX_HOSTNAME_BYTES = 253
+_MAX_URL_BYTES = 8192
 
 _PRIVATE_V4 = (
     IPv4Network("10.0.0.0/8"),
@@ -394,7 +395,17 @@ def normalize_http_url(url: str) -> NormalizedHttpUrl:
     value = cast(object, url)
     if not isinstance(value, str):
         raise TypeError("url must be a string")
-    if not url or "\\" in url or "#" in url or any(char.isspace() for char in url):
+    try:
+        url_size = len(url.encode("utf-8"))
+    except UnicodeEncodeError:
+        raise OutboundHttpRequestInvalid("HTTP URL is not valid Unicode") from None
+    if (
+        not url
+        or url_size > _MAX_URL_BYTES
+        or "\\" in url
+        or "#" in url
+        or any(char.isspace() for char in url)
+    ):
         raise OutboundHttpRequestInvalid("HTTP URL contains an unsupported character")
     try:
         split = urlsplit(url)
@@ -423,12 +434,15 @@ def normalize_http_url(url: str) -> NormalizedHttpUrl:
     host = f"[{hostname}]" if ":" in hostname else hostname
     default_port = 443 if scheme is HttpScheme.HTTPS else 80
     authority = host if port == default_port else f"{host}:{port}"
+    canonical_url = f"{scheme.value}://{authority}{target}"
+    if len(canonical_url.encode("ascii")) > _MAX_URL_BYTES:
+        raise OutboundHttpRequestInvalid("HTTP URL exceeds its canonical byte limit")
     return NormalizedHttpUrl(
         scheme=scheme,
         hostname=hostname,
         port=port,
         target=target,
-        canonical_url=f"{scheme.value}://{authority}{target}",
+        canonical_url=canonical_url,
     )
 
 

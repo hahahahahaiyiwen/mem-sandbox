@@ -1,7 +1,9 @@
 import asyncio
+import inspect
 import ssl
 from collections.abc import Awaitable, Callable
 from pathlib import Path
+from typing import cast
 from uuid import UUID
 
 import pytest
@@ -103,6 +105,21 @@ async def run_server(
     return server, int(socket.getsockname()[1])
 
 
+def transport_with_test_trust(
+    monkeypatch: pytest.MonkeyPatch,
+    context: ssl.SSLContext,
+) -> AsyncioHttpTransport:
+    monkeypatch.setattr(
+        "mem_sandbox.network.transport._create_system_ssl_context",
+        lambda: context,
+    )
+    return AsyncioHttpTransport()
+
+
+def test_transport_does_not_accept_external_tls_configuration() -> None:
+    assert tuple(inspect.signature(AsyncioHttpTransport).parameters) == ()
+
+
 @pytest.mark.asyncio
 async def test_transport_connects_to_admitted_ip_and_ignores_proxy_environment(
     monkeypatch: pytest.MonkeyPatch,
@@ -152,7 +169,9 @@ async def test_transport_connects_to_admitted_ip_and_ignores_proxy_environment(
 
 
 @pytest.mark.asyncio
-async def test_https_uses_original_hostname_for_sni_and_certificate_validation() -> None:
+async def test_https_uses_original_hostname_for_sni_and_certificate_validation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     fixture_root = Path(__file__).parents[2] / "fixtures" / "network"
     certificate = fixture_root / "example-test-cert.pem"
     private_key = fixture_root / "example-test-key.pem"
@@ -184,9 +203,7 @@ async def test_https_uses_original_hostname_for_sni_and_certificate_validation()
     )
     port = int(server.sockets[0].getsockname()[1])
     try:
-        response = await AsyncioHttpTransport(
-            ssl_context=client_context,
-        ).send(
+        response = await transport_with_test_trust(monkeypatch, client_context).send(
             transport_request(port, scheme=HttpScheme.HTTPS),
             context(),
         )
@@ -199,7 +216,9 @@ async def test_https_uses_original_hostname_for_sni_and_certificate_validation()
 
 
 @pytest.mark.asyncio
-async def test_https_rejects_certificate_for_a_different_original_hostname() -> None:
+async def test_https_rejects_certificate_for_a_different_original_hostname(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     fixture_root = Path(__file__).parents[2] / "fixtures" / "network"
     certificate = fixture_root / "example-test-cert.pem"
     private_key = fixture_root / "example-test-key.pem"
@@ -223,14 +242,48 @@ async def test_https_rejects_certificate_for_a_different_original_hostname() -> 
     port = int(server.sockets[0].getsockname()[1])
     try:
         with pytest.raises(OutboundHttpTransportFailed):
-            await AsyncioHttpTransport(
-                ssl_context=client_context,
-            ).send(
+            await transport_with_test_trust(monkeypatch, client_context).send(
                 transport_request(
                     port,
                     scheme=HttpScheme.HTTPS,
                     hostname="other.test",
                 ),
+                context(),
+            )
+    finally:
+        server.close()
+        await server.wait_closed()
+
+
+@pytest.mark.asyncio
+async def test_https_ignores_ambient_custom_trust_roots(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture_root = Path(__file__).parents[2] / "fixtures" / "network"
+    certificate = fixture_root / "example-test-cert.pem"
+    private_key = fixture_root / "example-test-key.pem"
+    server_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    server_context.load_cert_chain(certificate, private_key)
+
+    async def handler(
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+    ) -> None:
+        writer.close()
+        await writer.wait_closed()
+
+    server = await asyncio.start_server(
+        handler,
+        "127.0.0.1",
+        0,
+        ssl=server_context,
+    )
+    port = int(server.sockets[0].getsockname()[1])
+    monkeypatch.setenv("SSL_CERT_FILE", str(certificate))
+    try:
+        with pytest.raises(OutboundHttpTransportFailed):
+            await AsyncioHttpTransport().send(
+                transport_request(port, scheme=HttpScheme.HTTPS),
                 context(),
             )
     finally:
@@ -362,6 +415,120 @@ async def test_transport_rejects_declared_body_over_limit_before_reading_it() ->
     finally:
         server.close()
         await server.wait_closed()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "response_bytes",
+    [
+        b"HTTP/1.1 200 OK\r\nContent-Length: +2\r\nConnection: close\r\n\r\nok",
+        b"HTTP/1.1 200 OK\r\nContent-Length: 2_0\r\nConnection: close\r\n\r\n" + (b"x" * 20),
+        b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n"
+        b"0x2\r\nok\r\n0\r\n\r\n",
+        b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n"
+        b" 2\r\nok\r\n0\r\n\r\n",
+        b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n"
+        b"2;name=value\r\nok\r\n0\r\n\r\n",
+        b"HTTP/1.1 200 OK\r\nBad Header: value\r\nContent-Length: 0\r\n\r\n",
+        b"HTTP/1.1 200\r\nContent-Length: 0\r\n\r\n",
+        b"HTTP/1.1 200 bad\x00reason\r\nContent-Length: 0\r\n\r\n",
+    ],
+    ids=[
+        "signed-content-length",
+        "underscored-content-length",
+        "prefixed-chunk-size",
+        "space-prefixed-chunk-size",
+        "unsupported-chunk-extension",
+        "invalid-header-name",
+        "missing-reason-separator",
+        "invalid-reason-control",
+    ],
+)
+async def test_transport_rejects_non_strict_response_framing(
+    response_bytes: bytes,
+) -> None:
+    async def handler(
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+    ) -> None:
+        try:
+            await reader.readuntil(b"\r\n\r\n")
+            writer.write(response_bytes)
+            await writer.drain()
+        finally:
+            writer.close()
+            await writer.wait_closed()
+
+    server, port = await run_server(handler)
+    try:
+        with pytest.raises(OutboundHttpResponseInvalid):
+            await AsyncioHttpTransport().send(
+                transport_request(port),
+                context(),
+            )
+    finally:
+        server.close()
+        await server.wait_closed()
+
+
+class StalledCloseTransport:
+    def __init__(self) -> None:
+        self.aborted = False
+
+    def abort(self) -> None:
+        self.aborted = True
+
+
+class StalledCloseWriter:
+    def __init__(self, release: asyncio.Event) -> None:
+        self.transport = StalledCloseTransport()
+        self.closed = False
+        self._release = release
+
+    def write(self, _data: bytes) -> None:
+        return None
+
+    async def drain(self) -> None:
+        return None
+
+    def close(self) -> None:
+        self.closed = True
+
+    async def wait_closed(self) -> None:
+        await self._release.wait()
+
+
+@pytest.mark.asyncio
+async def test_transport_deadline_does_not_wait_for_graceful_stream_shutdown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reader = asyncio.StreamReader()
+    release = asyncio.Event()
+    writer = StalledCloseWriter(release)
+
+    async def open_connection(
+        **_kwargs: object,
+    ) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
+        return reader, cast(asyncio.StreamWriter, writer)
+
+    monkeypatch.setattr(asyncio, "open_connection", open_connection)
+    deadline = asyncio.get_running_loop().time() + 0.02
+    task = asyncio.create_task(
+        AsyncioHttpTransport().send(
+            transport_request(443),
+            context(deadline=deadline),
+        )
+    )
+
+    await asyncio.sleep(0.08)
+    completed_by_deadline = task.done()
+    release.set()
+    with pytest.raises(OutboundHttpTimeout):
+        await task
+
+    assert completed_by_deadline
+    assert writer.closed
+    assert writer.transport.aborted
 
 
 @pytest.mark.asyncio

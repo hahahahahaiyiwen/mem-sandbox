@@ -24,6 +24,7 @@ from mem_sandbox.network.errors import (
     OutboundHttpCancelled,
     OutboundHttpDenied,
     OutboundHttpLimitExceeded,
+    OutboundHttpRequestInvalid,
     OutboundHttpResolutionFailed,
     OutboundHttpResponseInvalid,
     OutboundHttpTimeout,
@@ -210,11 +211,18 @@ class BoundedOutboundHttpGateway:
                         "HTTP redirect count exceeds the requested limit"
                     )
                 redirect_count += 1
-                current = normalize_http_url(urljoin(current.canonical_url, location))
+                current = _normalize_redirect(current, location)
                 continue
-            if method is HttpMethod.HEAD and raw_response.body:
-                raise OutboundHttpResponseInvalid("HEAD transport response contains a body")
-            body, headers = _decode_response(raw_response, limits.max_decompressed_response_bytes)
+            if _response_omits_body(method, raw_response.status_code):
+                if raw_response.body:
+                    raise OutboundHttpResponseInvalid("bodyless transport response contains a body")
+                body = b""
+                headers = _published_headers(raw_response.headers)
+            else:
+                body, headers = _decode_response(
+                    raw_response,
+                    limits.max_decompressed_response_bytes,
+                )
             duration_ms = (asyncio.get_running_loop().time() - started) * 1000
             response = OutboundHttpResponse(
                 status_code=raw_response.status_code,
@@ -383,6 +391,8 @@ def _require_transport_response(
     response: HttpTransportResponse,
     request: HttpTransportRequest,
 ) -> None:
+    if response.status_code < 200:
+        raise OutboundHttpResponseInvalid("HTTP transport returned a provisional response")
     if _headers_size(response.headers) > request.max_response_header_bytes:
         raise OutboundHttpLimitExceeded("HTTP response headers exceed the requested limit")
     if len(response.body) > request.max_response_body_bytes:
@@ -395,19 +405,14 @@ def _require_transport_response(
     if len(content_lengths) > 1:
         raise OutboundHttpResponseInvalid("HTTP response has ambiguous content length")
     if content_lengths:
-        try:
-            declared = int(content_lengths[0], 10)
-        except ValueError:
-            raise OutboundHttpResponseInvalid("HTTP response content length is invalid") from None
-        body_omitted = (
-            request.method is HttpMethod.HEAD
-            or response.status_code in (204, 205, 304)
-            or (
-                response.status_code in _REDIRECT_STATUSES
-                and _redirect_location(response) is not None
-            )
+        value = content_lengths[0]
+        if not value or not value.isascii() or not value.isdigit():
+            raise OutboundHttpResponseInvalid("HTTP response content length is invalid")
+        declared = int(value, 10)
+        body_omitted = _response_omits_body(request.method, response.status_code) or (
+            response.status_code in _REDIRECT_STATUSES and _redirect_location(response) is not None
         )
-        if declared < 0 or (not body_omitted and declared != len(response.body)):
+        if not body_omitted and declared != len(response.body):
             raise OutboundHttpResponseInvalid(
                 "HTTP response content length does not match its body"
             )
@@ -422,6 +427,26 @@ def _redirect_location(response: HttpTransportResponse) -> str | None:
     if not values[0]:
         raise OutboundHttpResponseInvalid("HTTP redirect location is empty")
     return values[0]
+
+
+def _normalize_redirect(
+    current: NormalizedHttpUrl,
+    location: str,
+) -> NormalizedHttpUrl:
+    invalid = False
+    normalized: NormalizedHttpUrl | None = None
+    try:
+        redirected = urljoin(current.canonical_url, location)
+        normalized = normalize_http_url(redirected)
+    except (OutboundHttpRequestInvalid, UnicodeError, ValueError):
+        invalid = True
+    if invalid or normalized is None:
+        raise OutboundHttpResponseInvalid("HTTP redirect location is invalid")
+    return normalized
+
+
+def _response_omits_body(method: HttpMethod, status_code: int) -> bool:
+    return method is HttpMethod.HEAD or status_code in (204, 205, 304)
 
 
 def _decode_response(
@@ -450,12 +475,15 @@ def _decode_response(
         raise OutboundHttpLimitExceeded(
             "HTTP decompressed response body exceeds the requested limit"
         )
-    headers = tuple(
+    return body, _published_headers(response.headers)
+
+
+def _published_headers(headers: tuple[HttpHeader, ...]) -> tuple[HttpHeader, ...]:
+    return tuple(
         header
-        for header in response.headers
+        for header in headers
         if header.name.lower() not in _FRAMING_RESPONSE_HEADERS | _SENSITIVE_RESPONSE_HEADERS
     )
-    return body, headers
 
 
 def _decompress(data: bytes, maximum: int, window_bits: tuple[int, ...]) -> bytes:

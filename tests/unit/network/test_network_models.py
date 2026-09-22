@@ -12,6 +12,7 @@ from mem_sandbox.network import (
     HttpScheme,
     HttpTransferLimits,
     HttpTransferUsage,
+    HttpTransportResponse,
     NetworkOperationContext,
     NetworkPolicyId,
     OutboundHttpBinding,
@@ -99,6 +100,11 @@ def test_http_request_and_response_are_immutable_and_non_revealing() -> None:
     assert "value" not in repr(response)
     with pytest.raises(FrozenInstanceError):
         request.url = "https://other.test"  # type: ignore[misc]
+
+
+def test_transport_response_rejects_provisional_status() -> None:
+    with pytest.raises(ValueError):
+        HttpTransportResponse(status_code=103, headers=(), body=b"")
 
 
 @pytest.mark.parametrize(

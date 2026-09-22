@@ -356,7 +356,8 @@ The first implementation defines and tests:
 - URL user information and embedded credentials are rejected.
 - Hostnames use one canonical comparison form. Internationalized names require explicit
   IDNA handling rather than display-string comparison. Legacy numeric forms, including
-  mixed dotted hexadecimal forms, and control-bearing header values are rejected.
+  mixed dotted hexadecimal forms, over-limit raw/canonical URL representations, and
+  control-bearing header values are rejected.
 - Scheme, hostname, port, method, and request class pass a fail-closed pre-resolution
   policy before any DNS query, preventing arbitrary denied names from becoming a DNS
   exfiltration channel.
@@ -377,11 +378,20 @@ The first implementation defines and tests:
   reserve, credential, and audit every attempt independently and must not retry a
   state-changing method without an approved idempotency contract.
 - TLS certificate validation cannot be disabled by model input.
+- The transport owns its TLS context, uses only system/compiled trust sources without
+  ambient CA-file/directory overrides, and exposes no custom trust-root or client
+  certificate injection.
 - Proxy behavior is host-controlled. Ambient `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`,
   and `NO_PROXY` values are not consumed implicitly.
 - Request and response headers have count and byte limits; response accounting includes
   raw informational, final, and trailer header fields cumulatively.
+- Response framing uses strict decimal content lengths and hexadecimal chunk sizes;
+  provisional responses never cross the one-attempt transport boundary as final
+  results.
 - Content encoding cannot bypass the decompressed-response limit.
+- HEAD and status-defined bodyless responses do not decode representation metadata.
+- Failed/cancelled attempts abort stream shutdown immediately; successful graceful
+  shutdown is bounded by the same operation deadline.
 - No implicit cookie jar, cache, authentication retry, or connection to a model-supplied
   Unix socket exists.
 

@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import socket
 import ssl
 import sys
+import warnings
 from dataclasses import dataclass
 from typing import cast
 
@@ -13,6 +15,7 @@ from mem_sandbox.network.destination import NormalizedHttpUrl, ResolvedHttpAddre
 from mem_sandbox.network.errors import (
     OutboundHttpCancelled,
     OutboundHttpLimitExceeded,
+    OutboundHttpRequestInvalid,
     OutboundHttpResponseInvalid,
     OutboundHttpTimeout,
     OutboundHttpTransportFailed,
@@ -84,8 +87,8 @@ class HttpTransportResponse:
         status = cast(object, self.status_code)
         if isinstance(status, bool) or not isinstance(status, int):
             raise TypeError("status_code must be an integer")
-        if status < 100 or status > 599:
-            raise ValueError("status_code must be between 100 and 599")
+        if status < 200 or status > 599:
+            raise ValueError("status_code must be between 200 and 599")
         headers = cast(object, self.headers)
         if not isinstance(headers, tuple):
             raise TypeError("headers must be a tuple")
@@ -104,13 +107,8 @@ class HttpTransportResponse:
 class AsyncioHttpTransport:
     """Perform one direct HTTP/1.1 attempt against an admitted numeric peer."""
 
-    def __init__(self, *, ssl_context: ssl.SSLContext | None = None) -> None:
-        context = ssl_context or ssl.create_default_context()
-        if not isinstance(cast(object, context), ssl.SSLContext):
-            raise TypeError("ssl_context must be SSLContext or None")
-        if not context.check_hostname or context.verify_mode is not ssl.CERT_REQUIRED:
-            raise ValueError("ssl_context must require certificate and hostname validation")
-        self._ssl_context = context
+    def __init__(self) -> None:
+        self._ssl_context = _create_system_ssl_context()
 
     async def send(
         self,
@@ -195,12 +193,11 @@ class AsyncioHttpTransport:
         finally:
             active_error = sys.exception()
             if writer is not None:
-                writer.close()
-                try:
-                    await writer.wait_closed()
-                except Exception:
-                    if active_error is None:
-                        raise
+                await _close_writer(
+                    writer,
+                    context.deadline_monotonic,
+                    abort=active_error is not None,
+                )
 
 
 def _encode_request(request: HttpTransportRequest) -> bytes:
@@ -270,10 +267,11 @@ async def _read_response_head(
 def _parse_status_line(line: bytes) -> int:
     parts = line.split(b" ", 2)
     if (
-        len(parts) < 2
+        len(parts) != 3
         or parts[0] not in (b"HTTP/1.0", b"HTTP/1.1")
         or len(parts[1]) != 3
         or not parts[1].isdigit()
+        or any((byte < 32 and byte != 9) or byte == 127 for byte in parts[2])
     ):
         raise OutboundHttpResponseInvalid("HTTP response status line is invalid")
     status = int(parts[1], 10)
@@ -295,7 +293,7 @@ def _parse_header_lines(lines: list[bytes]) -> tuple[HttpHeader, ...]:
                 raise ValueError
             value = value_bytes.decode("latin-1")
             header = HttpHeader(name, value)
-        except (UnicodeError, ValueError):
+        except (OutboundHttpRequestInvalid, UnicodeError, ValueError):
             raise OutboundHttpResponseInvalid("HTTP response header is invalid") from None
         parsed.append(header)
     return tuple(parsed)
@@ -325,12 +323,9 @@ async def _read_response_body(
             remaining_header_bytes,
         )
     if content_length is not None:
-        try:
-            length = int(content_length, 10)
-        except ValueError:
-            raise OutboundHttpResponseInvalid("HTTP response content length is invalid") from None
-        if length < 0:
+        if not content_length or not content_length.isascii() or not content_length.isdigit():
             raise OutboundHttpResponseInvalid("HTTP response content length is invalid")
+        length = int(content_length, 10)
         if length > request.max_response_body_bytes:
             raise OutboundHttpLimitExceeded("HTTP response body exceeds the requested limit")
         return await _read_exactly(reader, length)
@@ -345,15 +340,12 @@ async def _read_chunked_body(
     body = bytearray()
     while True:
         line = await _read_line(reader, 4096)
-        size_value = line.split(b";", 1)[0].strip()
-        if not size_value:
+        if b";" in line:
+            raise OutboundHttpResponseInvalid("HTTP chunk extensions are unsupported")
+        size_value = line
+        if not size_value or any(byte not in b"0123456789abcdefABCDEF" for byte in size_value):
             raise OutboundHttpResponseInvalid("HTTP chunk size is invalid")
-        try:
-            size = int(size_value, 16)
-        except ValueError:
-            raise OutboundHttpResponseInvalid("HTTP chunk size is invalid") from None
-        if size < 0:
-            raise OutboundHttpResponseInvalid("HTTP chunk size is invalid")
+        size = int(size_value, 16)
         if size == 0:
             await _read_trailers(reader, maximum_trailer_bytes)
             return bytes(body)
@@ -440,6 +432,78 @@ def _headers_size(headers: tuple[HttpHeader, ...]) -> int:
         len(header.name.encode("ascii")) + 2 + len(header.value.encode("utf-8")) + 2
         for header in headers
     )
+
+
+def _create_system_ssl_context() -> ssl.SSLContext:
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    if sys.platform == "win32":
+        try:
+            for store in ("CA", "ROOT"):
+                for certificate, encoding, trust in ssl.enum_certificates(store):
+                    if encoding != "x509_asn":
+                        continue
+                    trusted_for_server = trust is True or (
+                        isinstance(trust, set) and ssl.Purpose.SERVER_AUTH.oid in trust
+                    )
+                    if not trusted_for_server:
+                        continue
+                    try:
+                        context.load_verify_locations(cadata=certificate)
+                    except ssl.SSLError as error:
+                        warnings.warn(
+                            f"ignored invalid certificate in Windows {store} store: {error}",
+                            stacklevel=2,
+                        )
+        except PermissionError as error:
+            warnings.warn(
+                f"could not enumerate a Windows certificate store: {error}",
+                stacklevel=2,
+            )
+    defaults = ssl.get_default_verify_paths()
+    cafile = defaults.openssl_cafile
+    capath = defaults.openssl_capath
+    existing_cafile = cafile if cafile and os.path.isfile(cafile) else None
+    existing_capath = capath if capath and os.path.isdir(capath) else None
+    if existing_cafile is not None or existing_capath is not None:
+        context.load_verify_locations(
+            cafile=existing_cafile,
+            capath=existing_capath,
+        )
+    context.check_hostname = True
+    context.verify_mode = ssl.CERT_REQUIRED
+    return context
+
+
+async def _close_writer(
+    writer: asyncio.StreamWriter,
+    deadline: float,
+    *,
+    abort: bool,
+) -> None:
+    try:
+        writer.close()
+    except Exception:
+        if not abort:
+            raise
+        warnings.warn("failed to close outbound HTTP stream", stacklevel=2)
+        _abort_writer(writer)
+        return
+    if abort:
+        _abort_writer(writer)
+        return
+    try:
+        async with asyncio.timeout_at(deadline):
+            await writer.wait_closed()
+    except BaseException:
+        _abort_writer(writer)
+        raise
+
+
+def _abort_writer(writer: asyncio.StreamWriter) -> None:
+    try:
+        writer.transport.abort()
+    except Exception:
+        warnings.warn("failed to abort outbound HTTP stream", stacklevel=2)
 
 
 def _require_not_cancelled(context: NetworkOperationContext) -> None:

@@ -83,7 +83,8 @@ every redirect:
 1. normalize one HTTP/HTTPS URL to an ASCII IDNA hostname, effective port, canonical
    origin, and origin-form target; reject user information, fragments, legacy numeric
    host forms (including mixed dotted hexadecimal forms), malformed escapes, scope
-   identifiers, malformed header controls, and controlled or sensitive request headers;
+   identifiers, raw or canonical URLs above the byte limit, malformed header controls,
+   and controlled or sensitive request headers;
 2. evaluate the selected focused policy before DNS;
 3. classify an IP literal directly or invoke the injected resolver, require an
    explicitly allowed final canonical hostname when one is reported, and classify every
@@ -111,15 +112,21 @@ provides one and returns immutable typed addresses; it opens no connection.
 `AsyncioHttpTransport` accepts only an `AdmittedHttpDestination`. It opens one direct
 connection to the numeric address with `AI_NUMERICHOST`, sends HTTP/1.1 with
 `Connection: close`, and preserves the original hostname in `Host`, TLS SNI, and normal
-certificate hostname verification. It performs no address fallback, implicit retry,
-redirect, proxy lookup, cookie/cache operation, or authentication negotiation.
+certificate hostname verification. It owns an environment-independent TLS context that
+loads only system/compiled trust sources, exposes no custom trust or client-certificate
+configuration, and ignores `SSL_CERT_FILE`/`SSL_CERT_DIR`. It performs no address
+fallback, implicit retry, redirect, proxy lookup, cookie/cache operation, or
+authentication negotiation.
 
 The transport strictly parses response status, headers, content length, and chunk
 framing, cumulatively bounds raw informational/final/trailer header bytes, bounds
 encoded body bytes before allocation, and closes the stream after each attempt. The
 gateway supports identity, gzip, and deflate decoding with a separate decompressed
 limit. Framing and sensitive response headers such as `Set-Cookie` and authentication
-challenges are not published.
+challenges are not published. Error, timeout, and cancellation cleanup aborts the
+stream immediately; successful graceful shutdown remains bounded by the operation
+deadline. HEAD and status-defined bodyless responses skip content decoding while
+retaining safe header filtering.
 
 ## Fake, conformance, and local evidence
 
