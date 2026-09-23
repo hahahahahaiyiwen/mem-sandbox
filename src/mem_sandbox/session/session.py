@@ -41,6 +41,11 @@ from mem_sandbox.events import (
     SandboxEventType,
 )
 from mem_sandbox.network import (
+    CredentialRouteId,
+    HttpHeader,
+    HttpMethod,
+    HttpTransferLimits,
+    HttpTransferUsage,
     NetworkCancellationSignal,
     NetworkOperationContext,
     OutboundHttpBinding,
@@ -230,6 +235,80 @@ class _SessionNetworkCancellation:
         return self._session.is_set() or (self._request is not None and self._request.is_set())
 
 
+@dataclass(frozen=True, slots=True)
+class _NetworkCancellationView:
+    source: NetworkCancellationSignal
+
+    def is_set(self) -> bool:
+        return self.source.is_set()
+
+
+def _snapshot_outbound_http_request(request: OutboundHttpRequest) -> OutboundHttpRequest:
+    invalid = False
+    method: object | None = None
+    url: object | None = None
+    limits: object | None = None
+    headers: object | None = None
+    body: object | None = None
+    credential_route: object | None = None
+    try:
+        method = cast(object, request.method)
+        url = cast(object, request.url)
+        limits = cast(object, request.limits)
+        headers = cast(object, request.headers)
+        body = cast(object, request.body)
+        credential_route = cast(object, request.credential_route)
+    except AttributeError:
+        invalid = True
+    if (
+        invalid
+        or not isinstance(method, HttpMethod)
+        or not isinstance(url, str)
+        or type(limits) is not HttpTransferLimits
+        or type(headers) is not tuple
+        or not isinstance(body, bytes)
+    ):
+        raise OutboundHttpRequestInvalid("outbound HTTP request is invalid")
+    validated_headers = _try_snapshot_http_headers(cast(tuple[object, ...], headers))
+    if validated_headers is None:
+        raise OutboundHttpRequestInvalid("outbound HTTP request is invalid")
+    validated_route = None
+    if credential_route is not None:
+        if type(credential_route) is not CredentialRouteId:
+            raise OutboundHttpRequestInvalid("outbound HTTP request is invalid")
+        validated_route = replace(credential_route)
+    return OutboundHttpRequest(
+        method=method,
+        url=str.__str__(url),
+        limits=replace(limits),
+        headers=validated_headers,
+        body=bytes.__bytes__(body),
+        credential_route=validated_route,
+    )
+
+
+def _copy_network_operation_context(
+    context: NetworkOperationContext,
+) -> NetworkOperationContext:
+    cancellation = (
+        None if context.cancellation is None else _NetworkCancellationView(context.cancellation)
+    )
+    return NetworkOperationContext(
+        session_id=replace(context.session_id),
+        operation_id=replace(context.operation_id),
+        grant=replace(
+            context.grant,
+            policy_id=replace(context.grant.policy_id),
+            methods=tuple(context.grant.methods),
+            schemes=tuple(context.grant.schemes),
+            limits=replace(context.grant.limits),
+            credential_routes=tuple(replace(route) for route in context.grant.credential_routes),
+        ),
+        deadline_monotonic=float(context.deadline_monotonic),
+        cancellation=cancellation,
+    )
+
+
 def _sanitize_outbound_http_failure(error: SandboxError) -> SandboxError:
     if isinstance(error, OutboundHttpDenied):
         return OutboundHttpDenied("outbound HTTP gateway denied the request")
@@ -255,19 +334,119 @@ def _task_exception_is[T](
     return task is not None and task.done() and not task.cancelled() and task.exception() is error
 
 
+def _snapshot_outbound_http_response(
+    response: OutboundHttpResponse,
+) -> OutboundHttpResponse:
+    validated = _try_snapshot_outbound_http_response(response)
+    if validated is None:
+        raise OutboundHttpResponseInvalid("outbound HTTP response was invalid")
+    return validated
+
+
+def _try_snapshot_http_headers(headers: tuple[object, ...]) -> tuple[HttpHeader, ...] | None:
+    validated: list[HttpHeader] = []
+    for header in headers:
+        if type(header) is not HttpHeader:
+            return None
+        try:
+            name = cast(object, header.name)
+            value = cast(object, header.value)
+        except AttributeError:
+            return None
+        if not isinstance(name, str) or not isinstance(value, str):
+            return None
+        try:
+            validated.append(HttpHeader(str.__str__(name), str.__str__(value)))
+        except (OutboundHttpLimitExceeded, OutboundHttpRequestInvalid, TypeError):
+            return None
+    return tuple(validated)
+
+
+def _try_snapshot_outbound_http_response(
+    response: object,
+) -> OutboundHttpResponse | None:
+    if type(response) is not OutboundHttpResponse:
+        return None
+    try:
+        status_code = cast(object, response.status_code)
+        headers = cast(object, response.headers)
+        body = cast(object, response.body)
+        usage = cast(object, response.usage)
+    except AttributeError:
+        return None
+    if (
+        type(status_code) is not int
+        or type(headers) is not tuple
+        or not isinstance(body, bytes)
+        or type(usage) is not HttpTransferUsage
+    ):
+        return None
+    validated_headers = _try_snapshot_http_headers(cast(tuple[object, ...], headers))
+    if validated_headers is None:
+        return None
+    try:
+        request_count = cast(object, usage.request_count)
+        request_bytes = cast(object, usage.request_bytes)
+        response_bytes = cast(object, usage.response_bytes)
+        response_wire_bytes = cast(object, usage.response_wire_bytes)
+        decompressed_response_bytes = cast(object, usage.decompressed_response_bytes)
+        redirect_count = cast(object, usage.redirect_count)
+        duration_ms = cast(object, usage.duration_ms)
+    except AttributeError:
+        return None
+    counters = (
+        request_count,
+        request_bytes,
+        response_bytes,
+        response_wire_bytes,
+        decompressed_response_bytes,
+        redirect_count,
+    )
+    if any(type(value) is not int for value in counters) or type(duration_ms) not in (
+        int,
+        float,
+    ):
+        return None
+    try:
+        validated_usage = HttpTransferUsage(
+            request_count=cast(int, request_count),
+            request_bytes=cast(int, request_bytes),
+            response_bytes=cast(int, response_bytes),
+            response_wire_bytes=cast(int, response_wire_bytes),
+            decompressed_response_bytes=cast(int, decompressed_response_bytes),
+            redirect_count=cast(int, redirect_count),
+            duration_ms=float(cast(int | float, duration_ms)),
+        )
+        return OutboundHttpResponse(
+            status_code=status_code,
+            headers=validated_headers,
+            body=bytes.__bytes__(body),
+            usage=validated_usage,
+        )
+    except (TypeError, ValueError):
+        return None
+
+
 async def _send_outbound_http_safely(
     binding: OutboundHttpBinding,
     request: OutboundHttpRequest,
     context: NetworkOperationContext,
 ) -> OutboundHttpResponse:
+    authoritative_request = _snapshot_outbound_http_request(request)
+    authoritative_context = _copy_network_operation_context(context)
     response: OutboundHttpResponse | None = None
     failure: SandboxError | None = None
     native_cancellation = False
     gateway_task: asyncio.Future[OutboundHttpResponse] | None = None
     try:
-        gateway_task = asyncio.ensure_future(binding.gateway.send(request, context))
-        response = await gateway_task
-        binding.grant.require_response(request, response)
+        gateway_task = asyncio.ensure_future(
+            binding.gateway.send(
+                _snapshot_outbound_http_request(authoritative_request),
+                _copy_network_operation_context(authoritative_context),
+            )
+        )
+        response = _snapshot_outbound_http_response(await gateway_task)
+        binding.grant.require_response(authoritative_request, response)
     except asyncio.CancelledError:
         current_task = asyncio.current_task()
         if current_task is not None and current_task.cancelling():
@@ -277,7 +456,7 @@ async def _send_outbound_http_safely(
     except OutboundHttpCancelled:
         failure = SessionOperationCancelled(
             "outbound HTTP operation was cancelled",
-            operation_id=context.operation_id,
+            operation_id=authoritative_context.operation_id,
         )
     except (
         OutboundHttpDenied,

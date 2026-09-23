@@ -324,6 +324,13 @@ cancellation and deadline admission, and cancellation observed before or after e
 policy phase retains the cancellation category rather than becoming a policy denial. A
 collaborator that suppresses cancellation is retained and observed after timeout, but
 cannot resume the pipeline, trigger a later side effect, or publish a response.
+The session and gateway each retain their own authoritative snapshots. The configured
+gateway receives detached request/context values; policy, resolver, and transport
+collaborators receive separately reconstructed identifiers, grants, limits, facts, and
+attempt requests. Collaborator mutation therefore cannot widen the original grant,
+change redirect authority, or weaken later validation. Returned policy decisions,
+transport responses, and public gateway responses are reconstructed as complete exact
+models before they influence control flow, accounting, or publication.
 
 The network module should own a focused policy contract such as:
 
@@ -388,6 +395,10 @@ The first implementation defines and tests:
   interface-identifier forms.
 - The transport connects only to an address that was resolved and admitted for that
   request while preserving the original hostname for TLS verification.
+- Request header names and values are snapshotted as exact built-in strings before
+  controlled-header filtering. The transport receives a detached attempt request, while
+  response checks continue to use the unexposed gateway-owned attempt and its original
+  limits.
 - Redirect targets repeat URL normalization, policy evaluation, DNS validation, and
   attempt-limit enforcement. Credentials are currently unavailable rather than
   forwarded. GET and HEAD retain their method.
@@ -414,6 +425,9 @@ The first implementation defines and tests:
   nested header name/value invariants, final status, and wire-byte invariants before
   accounting or publication. Header fields are snapshotted as exact built-in strings
   before filtering, sizing, redirect handling, or publication.
+- The session independently reconstructs exact gateway response fields and the actual
+  bytes payload before applying the admitted grant. Gateway-owned request/context copies
+  are not reused as session authority after provider code has observed them.
 - Content encoding cannot bypass the decompressed-response limit.
 - HEAD and status-defined bodyless responses do not decode representation metadata.
 - Failed/cancelled attempts abort stream shutdown immediately; successful graceful

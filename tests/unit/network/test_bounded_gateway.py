@@ -166,6 +166,25 @@ class RecordingResolver:
         return outcome
 
 
+class GrantMutatingResolver(RecordingResolver):
+    def __init__(
+        self,
+        resolutions: dict[str, NetworkResolution | BaseException],
+        replacement: OutboundHttpGrant,
+    ) -> None:
+        super().__init__(resolutions)
+        self._replacement = replacement
+
+    async def resolve(
+        self,
+        hostname: str,
+        port: int,
+        context: NetworkOperationContext,
+    ) -> NetworkResolution:
+        object.__setattr__(context, "grant", self._replacement)
+        return await super().resolve(hostname, port, context)
+
+
 class SequencedResolver(RecordingResolver):
     def __init__(
         self,
@@ -226,6 +245,34 @@ class RecordingTransport:
         return cast(HttpTransportResponse, outcome)
 
 
+class GrantMutatingTransport(RecordingTransport):
+    def __init__(
+        self,
+        outcomes: tuple[HttpTransportResponse | BaseException | object, ...],
+        replacement: OutboundHttpGrant,
+    ) -> None:
+        super().__init__(outcomes)
+        self._replacement = replacement
+
+    async def send(
+        self,
+        request: HttpTransportRequest,
+        context: NetworkOperationContext,
+    ) -> HttpTransportResponse:
+        object.__setattr__(context, "grant", self._replacement)
+        return await super().send(request, context)
+
+
+class RequestMutatingTransport(RecordingTransport):
+    async def send(
+        self,
+        request: HttpTransportRequest,
+        context: NetworkOperationContext,
+    ) -> HttpTransportResponse:
+        object.__setattr__(request, "max_response_header_bytes", 1024)
+        return await super().send(request, context)
+
+
 class BlockingTransport(RecordingTransport):
     def __init__(self) -> None:
         super().__init__(())
@@ -282,6 +329,7 @@ def context(
     cancellation: Cancellation | None = None,
     deadline: float | None = None,
     routes: tuple[CredentialRouteId, ...] = (),
+    schemes: tuple[HttpScheme, ...] = (HttpScheme.HTTP, HttpScheme.HTTPS),
 ) -> NetworkOperationContext:
     effective_limits = transfer_limits or limits()
     return NetworkOperationContext(
@@ -290,7 +338,7 @@ def context(
         grant=OutboundHttpGrant(
             policy_id=NetworkPolicyId("docs"),
             methods=(HttpMethod.GET, HttpMethod.HEAD),
-            schemes=(HttpScheme.HTTP, HttpScheme.HTTPS),
+            schemes=schemes,
             limits=effective_limits,
             credential_routes=routes,
         ),
@@ -581,6 +629,57 @@ async def test_policy_cannot_mutate_the_gateway_owned_admitted_peer() -> None:
     admitted = transport.calls[0][0].destination.address
     assert admitted.value == "8.8.8.8"
     assert admitted.ip == ip_address("8.8.8.8")
+
+
+@pytest.mark.asyncio
+async def test_resolver_cannot_widen_authority_for_redirects() -> None:
+    original = context(schemes=(HttpScheme.HTTPS,))
+    replacement = context().grant
+    resolver = GrantMutatingResolver(
+        {"example.test": resolution("example.test", "8.8.8.8")},
+        replacement,
+    )
+    transport = RecordingTransport(
+        (
+            transport_response(
+                302,
+                headers=(HttpHeader("Location", "http://example.test/final"),),
+                body=b"",
+            ),
+            transport_response(),
+        )
+    )
+    subject, _, _, _ = gateway(resolver=resolver, transport=transport)
+
+    with pytest.raises(OutboundHttpDenied):
+        await subject.send(request(), original)
+
+    assert original.grant.schemes == (HttpScheme.HTTPS,)
+    assert len(transport.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_transport_cannot_widen_authority_for_redirects() -> None:
+    original = context(schemes=(HttpScheme.HTTPS,))
+    replacement = context().grant
+    transport = GrantMutatingTransport(
+        (
+            transport_response(
+                302,
+                headers=(HttpHeader("Location", "http://example.test/final"),),
+                body=b"",
+            ),
+            transport_response(),
+        ),
+        replacement,
+    )
+    subject, _, _, _ = gateway(transport=transport)
+
+    with pytest.raises(OutboundHttpDenied):
+        await subject.send(request(), original)
+
+    assert original.grant.schemes == (HttpScheme.HTTPS,)
+    assert len(transport.calls) == 1
 
 
 @pytest.mark.asyncio
@@ -1396,6 +1495,23 @@ async def test_gateway_canonicalizes_behavior_bearing_header_value() -> None:
 
 
 @pytest.mark.asyncio
+async def test_gateway_reconstructs_request_headers_before_filtering() -> None:
+    class MisleadingHeaderName(str):
+        def lower(self) -> str:
+            return "x-public"
+
+    header = object.__new__(HttpHeader)
+    object.__setattr__(header, "name", MisleadingHeaderName("Authorization"))
+    object.__setattr__(header, "value", "secret")
+    subject, _, _, transport = gateway()
+
+    with pytest.raises(OutboundHttpDenied):
+        await subject.send(request(headers=(header,)), context())
+
+    assert transport.calls == []
+
+
+@pytest.mark.asyncio
 async def test_sensitive_response_headers_are_not_published_or_reused() -> None:
     transport = RecordingTransport(
         (
@@ -1486,6 +1602,26 @@ async def test_gateway_preserves_cooperative_cancellation_during_resolution() ->
     assert transport.calls == []
     assert captured.value.__cause__ is None
     assert captured.value.__context__ is None
+
+
+@pytest.mark.asyncio
+async def test_transport_cannot_mutate_gateway_owned_response_limits() -> None:
+    transfer_limits = limits(max_response_header_bytes=16)
+    subject, _, _, _ = gateway(
+        transport=RequestMutatingTransport(
+            (
+                transport_response(
+                    headers=(HttpHeader("Set-Cookie", "x" * 64),),
+                ),
+            )
+        )
+    )
+
+    with pytest.raises(OutboundHttpLimitExceeded):
+        await subject.send(
+            request(transfer_limits=transfer_limits),
+            context(transfer_limits),
+        )
 
 
 @pytest.mark.asyncio
@@ -1593,9 +1729,11 @@ async def test_gateway_deadline_detaches_cancellation_resistant_policy() -> None
 
 @pytest.mark.asyncio
 async def test_policy_failure_and_invalid_decision_fail_closed_before_dns() -> None:
+    incomplete = object.__new__(NetworkPolicyDecision)
     for policy in (
         RecordingPolicy(RuntimeError("policy detail")),
         RecordingPolicy(lambda _: cast(NetworkPolicyDecision, object())),
+        RecordingPolicy(lambda _: incomplete),
     ):
         subject, _, resolver, transport = gateway(policy=policy)
 

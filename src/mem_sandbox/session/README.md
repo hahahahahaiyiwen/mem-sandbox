@@ -40,6 +40,12 @@ stable gateway failure rather than impersonating caller cancellation. Cancellati
 settlement tracks the collaborator before its bounded wait; repeated native
 cancellation therefore cannot bypass fail-closed retention, and close can re-signal an
 unfinished collaborator without waiting indefinitely.
+The session retains gateway-independent request and grant authority: it reconstructs
+the request and operation context before use, passes separate detached copies to the
+configured gateway, and never validates against provider-exposed objects. A returned
+response is reconstructed into exact session-owned headers, bytes, usage counters, and
+primitive fields before grant validation or publication, so behavior-bearing subclasses
+and provider mutations cannot hide limit violations.
 
 Provider failures, including a task-raised `GeneratorExit` and nested exception groups,
 become context-free `OutboundHttpGatewayFailed` values. During cancellation settlement,

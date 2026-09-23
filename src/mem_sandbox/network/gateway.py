@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import zlib
 from collections.abc import Callable, Coroutine
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import Any, cast
 from urllib.parse import urljoin
 
@@ -15,6 +15,7 @@ from mem_sandbox.network.destination import (
     NetworkPolicyDecision,
     NetworkPolicyOutcome,
     NetworkPolicyPhase,
+    NetworkPolicyReason,
     NetworkPolicyRequest,
     NetworkResolution,
     NormalizedHttpUrl,
@@ -32,14 +33,21 @@ from mem_sandbox.network.errors import (
     OutboundHttpTransportFailed,
 )
 from mem_sandbox.network.models import (
+    CredentialRouteId,
     HttpHeader,
     HttpMethod,
+    HttpTransferLimits,
     HttpTransferUsage,
     NetworkOperationContext,
     OutboundHttpRequest,
     OutboundHttpResponse,
 )
-from mem_sandbox.network.ports import HttpTransport, NetworkPolicyEngine, NetworkResolver
+from mem_sandbox.network.ports import (
+    HttpTransport,
+    NetworkCancellationSignal,
+    NetworkPolicyEngine,
+    NetworkResolver,
+)
 from mem_sandbox.network.transport import (
     AdmittedHttpDestination,
     HttpTransportRequest,
@@ -80,6 +88,14 @@ _SENSITIVE_RESPONSE_HEADERS = frozenset(
 )
 
 
+@dataclass(frozen=True, slots=True)
+class _CancellationView:
+    source: NetworkCancellationSignal
+
+    def is_set(self) -> bool:
+        return self.source.is_set()
+
+
 class BoundedOutboundHttpGateway:
     """Apply destination admission and limits around one-attempt transports."""
 
@@ -106,19 +122,21 @@ class BoundedOutboundHttpGateway:
         request: OutboundHttpRequest,
         context: NetworkOperationContext,
     ) -> OutboundHttpResponse:
-        if not isinstance(cast(object, request), OutboundHttpRequest):
+        if type(request) is not OutboundHttpRequest:
             raise TypeError("request must be OutboundHttpRequest")
-        if not isinstance(cast(object, context), NetworkOperationContext):
+        if type(context) is not NetworkOperationContext:
             raise TypeError("context must be NetworkOperationContext")
-        context.grant.require_request(request)
+        request = _snapshot_request(request)
+        authority = _copy_operation_context(context)
+        authority.grant.require_request(request)
         _require_supported_request(request)
-        _require_active(context)
+        _require_active(authority)
         loop = asyncio.get_running_loop()
         deadline = min(
-            context.deadline_monotonic,
+            authority.deadline_monotonic,
             loop.time() + request.limits.timeout_seconds,
         )
-        effective_context = replace(context, deadline_monotonic=deadline)
+        effective_context = replace(authority, deadline_monotonic=deadline)
         _require_active(effective_context)
         started = loop.time()
         return await self._send_bounded(request, effective_context, started)
@@ -292,9 +310,9 @@ class BoundedOutboundHttpGateway:
         context: NetworkOperationContext,
     ) -> None:
         facts = NetworkPolicyRequest(
-            policy_id=context.grant.policy_id,
-            session_id=context.session_id,
-            operation_id=context.operation_id,
+            policy_id=replace(context.grant.policy_id),
+            session_id=replace(context.session_id),
+            operation_id=replace(context.operation_id),
             phase=phase,
             method=method,
             request_class=HttpRequestClass.BASELINE,
@@ -330,9 +348,10 @@ class BoundedOutboundHttpGateway:
             raise OutboundHttpCancelled("network policy evaluation was cancelled")
         if stable_failure is OutboundHttpTimeout:
             raise OutboundHttpTimeout("network policy evaluation timed out")
-        if failed or not isinstance(decision, NetworkPolicyDecision):
+        validated = None if failed else _validated_policy_decision(decision)
+        if validated is None:
             raise OutboundHttpDenied("network policy evaluation failed closed")
-        if decision.outcome is not NetworkPolicyOutcome.ALLOW:
+        if validated.outcome is not NetworkPolicyOutcome.ALLOW:
             raise OutboundHttpDenied("network policy denied the destination")
         _require_active(context)
 
@@ -349,7 +368,11 @@ class BoundedOutboundHttpGateway:
         resolution: object = None
         try:
             resolution = await self._await_collaborator(
-                lambda: self._resolver.resolve(url.hostname, url.port, context),
+                lambda: self._resolver.resolve(
+                    url.hostname,
+                    url.port,
+                    _copy_operation_context(context),
+                ),
                 context,
             )
         except asyncio.CancelledError:
@@ -389,7 +412,10 @@ class BoundedOutboundHttpGateway:
         response: object = None
         try:
             response = await self._await_collaborator(
-                lambda: self._transport.send(request, context),
+                lambda: self._transport.send(
+                    _copy_transport_request(request),
+                    _copy_operation_context(context),
+                ),
                 context,
             )
         except asyncio.CancelledError:
@@ -438,6 +464,93 @@ def _require_supported_request(request: OutboundHttpRequest) -> None:
         seen.add(name)
         if name in _CONTROLLED_REQUEST_HEADERS or name.startswith("proxy-"):
             raise OutboundHttpDenied("HTTP request header is controlled by the gateway")
+
+
+def _snapshot_request(request: OutboundHttpRequest) -> OutboundHttpRequest:
+    invalid = False
+    method: object | None = None
+    url: object | None = None
+    limits: object | None = None
+    headers: object | None = None
+    body: object | None = None
+    credential_route: object | None = None
+    try:
+        method = cast(object, request.method)
+        url = cast(object, request.url)
+        limits = cast(object, request.limits)
+        headers = cast(object, request.headers)
+        body = cast(object, request.body)
+        credential_route = cast(object, request.credential_route)
+    except AttributeError:
+        invalid = True
+    if (
+        invalid
+        or not isinstance(method, HttpMethod)
+        or not isinstance(url, str)
+        or type(limits) is not HttpTransferLimits
+        or type(headers) is not tuple
+        or not isinstance(body, bytes)
+    ):
+        raise OutboundHttpRequestInvalid("outbound HTTP request is invalid")
+    validated_headers = _snapshot_request_headers(cast(tuple[object, ...], headers))
+    if validated_headers is None:
+        raise OutboundHttpRequestInvalid("outbound HTTP request is invalid")
+    validated_route = None
+    if credential_route is not None:
+        if type(credential_route) is not CredentialRouteId:
+            raise OutboundHttpRequestInvalid("outbound HTTP request is invalid")
+        validated_route = replace(credential_route)
+    return OutboundHttpRequest(
+        method=method,
+        url=str.__str__(url),
+        limits=replace(limits),
+        headers=validated_headers,
+        body=bytes.__bytes__(body),
+        credential_route=validated_route,
+    )
+
+
+def _snapshot_request_headers(headers: tuple[object, ...]) -> tuple[HttpHeader, ...] | None:
+    validated: list[HttpHeader] = []
+    for header in headers:
+        if type(header) is not HttpHeader:
+            return None
+        try:
+            name = cast(object, header.name)
+            value = cast(object, header.value)
+        except AttributeError:
+            return None
+        if not isinstance(name, str) or not isinstance(value, str):
+            return None
+        try:
+            validated.append(HttpHeader(str.__str__(name), str.__str__(value)))
+        except (OutboundHttpLimitExceeded, OutboundHttpRequestInvalid, TypeError):
+            return None
+    return tuple(validated)
+
+
+def _copy_transport_request(request: HttpTransportRequest) -> HttpTransportRequest:
+    url = request.destination.url
+    return HttpTransportRequest(
+        method=request.method,
+        destination=AdmittedHttpDestination(
+            url=NormalizedHttpUrl(
+                scheme=url.scheme,
+                hostname=str.__str__(url.hostname),
+                port=int(url.port),
+                target=str.__str__(url.target),
+                canonical_url=str.__str__(url.canonical_url),
+            ),
+            address=ResolvedHttpAddress(request.destination.address.value),
+        ),
+        headers=tuple(
+            HttpHeader(str.__str__(header.name), str.__str__(header.value))
+            for header in request.headers
+        ),
+        max_response_header_bytes=int(request.max_response_header_bytes),
+        max_response_body_bytes=int(request.max_response_body_bytes),
+        max_response_wire_bytes=int(request.max_response_wire_bytes),
+    )
 
 
 def _transport_headers(
@@ -584,10 +697,45 @@ def _validated_resolution(
     return validated
 
 
+def _validated_policy_decision(decision: object) -> NetworkPolicyDecision | None:
+    if type(decision) is not NetworkPolicyDecision:
+        return None
+    try:
+        outcome = cast(object, decision.outcome)
+        reason = cast(object, decision.reason)
+    except AttributeError:
+        return None
+    try:
+        return NetworkPolicyDecision(
+            outcome=cast(NetworkPolicyOutcome, outcome),
+            reason=cast(NetworkPolicyReason, reason),
+        )
+    except (TypeError, ValueError):
+        return None
+
+
 def _copy_resolved_addresses(
     addresses: tuple[ResolvedHttpAddress, ...],
 ) -> tuple[ResolvedHttpAddress, ...]:
     return tuple(ResolvedHttpAddress(address.value) for address in addresses)
+
+
+def _copy_operation_context(context: NetworkOperationContext) -> NetworkOperationContext:
+    cancellation = None if context.cancellation is None else _CancellationView(context.cancellation)
+    return NetworkOperationContext(
+        session_id=replace(context.session_id),
+        operation_id=replace(context.operation_id),
+        grant=replace(
+            context.grant,
+            policy_id=replace(context.grant.policy_id),
+            methods=tuple(context.grant.methods),
+            schemes=tuple(context.grant.schemes),
+            limits=replace(context.grant.limits),
+            credential_routes=tuple(replace(route) for route in context.grant.credential_routes),
+        ),
+        deadline_monotonic=float(context.deadline_monotonic),
+        cancellation=cancellation,
+    )
 
 
 def _redirect_location(response: HttpTransportResponse) -> str | None:

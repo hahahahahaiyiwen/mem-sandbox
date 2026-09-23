@@ -85,6 +85,12 @@ unfinished task unobserved. The gateway is borrowed and is never closed by the s
 `BoundedOutboundHttpGateway` executes the following sequence for the initial target and
 every redirect:
 
+Before the sequence starts, the gateway reconstructs the request and operation context
+into gateway-owned values. Policy, resolver, and transport collaborators receive only
+detached copies of identifiers, grants, limits, address facts, cancellation views, and
+single-attempt transport requests. Their mutations therefore cannot widen the
+authoritative grant, alter a later redirect decision, or weaken response validation.
+
 1. normalize one HTTP/HTTPS URL to an ASCII IDNA hostname, effective port, canonical
    origin, and origin-form target; reject Unicode labels whose built-in IDNA conversion
    performs compatibility or deletion mappings rather than an NFC/lowercase round trip,
@@ -171,6 +177,12 @@ internet.
   implicit retry are absent by construction.
 - Every redirect repeats the full destination pipeline and remains within the original
   grant and request limits.
+- Request headers are reconstructed from exact built-in strings before controlled-header
+  filtering. Policy decisions are reconstructed as complete exact models, and malformed
+  or behavior-bearing collaborator values fail closed without leaking provider errors.
+- Resolver and transport contexts, policy facts, and transport requests are detached
+  from gateway-owned authority. The gateway validates transport responses against its
+  unexposed attempt limits rather than an object that the transport can mutate.
 - `HttpTransferUsage` reports encoded response-body bytes separately from exact consumed
   response-wire bytes; transferred limits use request-body plus response-wire usage.
 - A public response always has a final status from 200 through 599.
