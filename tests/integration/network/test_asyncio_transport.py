@@ -361,6 +361,7 @@ async def test_transport_decodes_chunk_framing_without_publishing_trailers() -> 
     assert response.header_bytes == len(
         b"Transfer-Encoding: chunked\r\nConnection: close\r\nX-Trailer: ignored\r\n"
     )
+    assert response.header_wire_bytes == response.header_bytes
     assert response.metadata_wire_bytes == len(
         b"HTTP/1.1 200 OK\r\n"
         b"Transfer-Encoding: chunked\r\n"

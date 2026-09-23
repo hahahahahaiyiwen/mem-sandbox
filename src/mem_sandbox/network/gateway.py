@@ -576,6 +576,7 @@ def _require_transport_response(
     headers: object | None = None
     body: object | None = None
     header_bytes: object | None = None
+    header_wire_bytes: object | None = None
     metadata_wire_bytes: object | None = None
     body_wire_bytes: object | None = None
     wire_bytes: object | None = None
@@ -584,6 +585,7 @@ def _require_transport_response(
         headers = cast(object, response.headers)
         body = cast(object, response.body)
         header_bytes = cast(object, response.header_bytes)
+        header_wire_bytes = cast(object, response.header_wire_bytes)
         metadata_wire_bytes = cast(object, response.metadata_wire_bytes)
         body_wire_bytes = cast(object, response.body_wire_bytes)
         wire_bytes = cast(object, response.wire_bytes)
@@ -598,6 +600,7 @@ def _require_transport_response(
         raise OutboundHttpResponseInvalid("HTTP transport returned an invalid response")
     counters = (
         header_bytes,
+        header_wire_bytes,
         metadata_wire_bytes,
         body_wire_bytes,
         wire_bytes,
@@ -610,6 +613,7 @@ def _require_transport_response(
             headers=validated_headers,
             body=body,
             header_bytes=cast(int, header_bytes),
+            header_wire_bytes=cast(int, header_wire_bytes),
             metadata_wire_bytes=cast(int, metadata_wire_bytes),
             body_wire_bytes=cast(int, body_wire_bytes),
             wire_bytes=cast(int, wire_bytes),

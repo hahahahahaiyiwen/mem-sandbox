@@ -49,7 +49,12 @@ class NetworkPolicyId:
     value: str
 
     def __post_init__(self) -> None:
-        _require_identifier("network policy identifier", self.value)
+        value = cast(object, self.value)
+        if not isinstance(value, str):
+            raise TypeError("network policy identifier must be a string")
+        value = str.__str__(value)
+        _require_identifier("network policy identifier", value)
+        object.__setattr__(self, "value", value)
 
     def __str__(self) -> str:
         return self.value
@@ -60,7 +65,12 @@ class CredentialRouteId:
     value: str
 
     def __post_init__(self) -> None:
-        _require_identifier("credential route identifier", self.value)
+        value = cast(object, self.value)
+        if not isinstance(value, str):
+            raise TypeError("credential route identifier must be a string")
+        value = str.__str__(value)
+        _require_identifier("credential route identifier", value)
+        object.__setattr__(self, "value", value)
 
     def __str__(self) -> str:
         return self.value
@@ -115,7 +125,14 @@ class HttpTransferLimits:
     max_transferred_bytes: int = 1024 * 1024
 
     def __post_init__(self) -> None:
-        _require_positive_finite("timeout_seconds", self.timeout_seconds)
+        timeout = cast(object, self.timeout_seconds)
+        if isinstance(timeout, bool) or not isinstance(timeout, int | float):
+            raise TypeError("timeout_seconds must be a number")
+        canonical_timeout = (
+            float(timeout) if type(timeout) is int else float.__float__(cast(float, timeout))
+        )
+        object.__setattr__(self, "timeout_seconds", canonical_timeout)
+        _require_positive_finite("timeout_seconds", canonical_timeout)
         for name in (
             "max_request_header_bytes",
             "max_request_body_bytes",
@@ -125,8 +142,18 @@ class HttpTransferLimits:
             "max_redirects",
             "max_transferred_bytes",
         ):
-            _require_non_negative_integer(name, getattr(self, name))
-        _require_positive_integer("max_requests", self.max_requests)
+            value = cast(object, getattr(self, name))
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise TypeError(f"{name} must be an integer")
+            canonical = int.__int__(value)
+            object.__setattr__(self, name, canonical)
+            _require_non_negative_integer(name, canonical)
+        max_requests = cast(object, self.max_requests)
+        if isinstance(max_requests, bool) or not isinstance(max_requests, int):
+            raise TypeError("max_requests must be an integer")
+        canonical_requests = int.__int__(max_requests)
+        object.__setattr__(self, "max_requests", canonical_requests)
+        _require_positive_integer("max_requests", canonical_requests)
         if self.max_decompressed_response_bytes < self.max_response_body_bytes:
             raise ValueError(
                 "max_decompressed_response_bytes must not be less than max_response_body_bytes"

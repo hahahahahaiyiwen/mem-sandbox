@@ -331,6 +331,9 @@ attempt requests. Collaborator mutation therefore cannot widen the original gran
 change redirect authority, or weaken later validation. Returned policy decisions,
 transport responses, and public gateway responses are reconstructed as complete exact
 models before they influence control flow, accounting, or publication.
+Authority identifiers and all numeric transfer limits are canonicalized to exact
+built-in primitives before comparisons, dictionary lookup, deadline arithmetic, or
+transport construction.
 
 The network module should own a focused policy contract such as:
 
@@ -417,10 +420,12 @@ The first implementation defines and tests:
   informational/final response head, encoded body byte, chunk-size line, data
   terminator, zero chunk, and trailer. The transferred-byte limit uses request-body plus
   response-wire usage across all attempts.
-- The single-attempt result reports cumulative header-field bytes, response
-  head/trailer wire bytes, and encoded-body/framing wire bytes separately. The gateway
-  reconstructs exact counters, requires plausible final-response structure and exact
-  total equality, and enforces raw metadata limits even when fields are not published.
+- The single-attempt result reports cumulative logical header-budget bytes, raw
+  header-field wire bytes, response head/trailer wire bytes, and encoded-body/framing
+  wire bytes separately. The gateway reconstructs exact counters, requires consistent
+  cross-counter relationships, supported unambiguous framing, plausible final-response
+  structure, and exact total equality, and enforces raw metadata limits even when fields
+  are not published.
 - Response framing uses strict decimal content lengths and hexadecimal chunk sizes;
   content-length whitespace is limited to HTTP SP/HTAB and its decimal representation
   is bounded before integer conversion. Provisional responses never cross the

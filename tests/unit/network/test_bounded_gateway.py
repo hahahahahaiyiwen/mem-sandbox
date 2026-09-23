@@ -360,6 +360,7 @@ def transport_response(
     headers: tuple[HttpHeader, ...] = (),
     body: bytes = b"value",
     header_bytes: int | None = None,
+    header_wire_bytes: int | None = None,
     metadata_wire_bytes: int | None = None,
     body_wire_bytes: int | None = None,
     wire_bytes: int | None = None,
@@ -384,12 +385,16 @@ def transport_response(
         if metadata_wire_bytes is None
         else metadata_wire_bytes
     )
+    effective_header_wire_bytes = (
+        effective_metadata_wire_bytes - 17 if header_wire_bytes is None else header_wire_bytes
+    )
     effective_body_wire_bytes = len(body) if body_wire_bytes is None else body_wire_bytes
     return HttpTransportResponse(
         status_code=status,
         headers=headers,
         body=body,
         header_bytes=effective_header_bytes,
+        header_wire_bytes=effective_header_wire_bytes,
         metadata_wire_bytes=effective_metadata_wire_bytes,
         body_wire_bytes=effective_body_wire_bytes,
         wire_bytes=(
@@ -1289,6 +1294,7 @@ async def test_gateway_rejects_impossible_zero_wire_success() -> None:
     object.__setattr__(invalid, "headers", ())
     object.__setattr__(invalid, "body", b"")
     object.__setattr__(invalid, "header_bytes", 0)
+    object.__setattr__(invalid, "header_wire_bytes", 0)
     object.__setattr__(invalid, "metadata_wire_bytes", 0)
     object.__setattr__(invalid, "body_wire_bytes", 0)
     object.__setattr__(invalid, "wire_bytes", 0)
@@ -1318,6 +1324,53 @@ async def test_gateway_enforces_reported_hidden_response_metadata() -> None:
             request(transfer_limits=transfer_limits),
             context(transfer_limits),
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "case",
+    ["hidden-header-underreport", "chunk-framing-underreport", "ambiguous-framing"],
+    ids=["hidden-header-underreport", "chunk-framing-underreport", "ambiguous-framing"],
+)
+async def test_gateway_rejects_impossible_structural_accounting(
+    case: str,
+) -> None:
+    if case == "hidden-header-underreport":
+        response = transport_response(body=b"")
+        object.__setattr__(response, "header_bytes", 64)
+        object.__setattr__(response, "header_wire_bytes", 64)
+        object.__setattr__(response, "metadata_wire_bytes", 17)
+        object.__setattr__(response, "wire_bytes", 17)
+    elif case == "chunk-framing-underreport":
+        response = transport_response(
+            headers=(HttpHeader("Transfer-Encoding", "chunked"),),
+            body=b"x",
+            body_wire_bytes=11,
+        )
+        object.__setattr__(response, "body_wire_bytes", 1)
+        object.__setattr__(
+            response,
+            "wire_bytes",
+            response.metadata_wire_bytes + 1,
+        )
+    else:
+        response = transport_response(
+            headers=(HttpHeader("Transfer-Encoding", "chunked"),),
+            body=b"x",
+            body_wire_bytes=11,
+        )
+        object.__setattr__(
+            response,
+            "headers",
+            (
+                HttpHeader("Transfer-Encoding", "chunked"),
+                HttpHeader("Content-Length", "1"),
+            ),
+        )
+    subject, _, _, _ = gateway(transport=RecordingTransport((response,)))
+
+    with pytest.raises(OutboundHttpResponseInvalid):
+        await subject.send(request(), context())
 
 
 @pytest.mark.asyncio

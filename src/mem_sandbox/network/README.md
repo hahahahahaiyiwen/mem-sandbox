@@ -90,6 +90,9 @@ into gateway-owned values. Policy, resolver, and transport collaborators receive
 detached copies of identifiers, grants, limits, address facts, cancellation views, and
 single-attempt transport requests. Their mutations therefore cannot widen the
 authoritative grant, alter a later redirect decision, or weaken response validation.
+Identifier strings and every numeric transfer limit are canonicalized to exact built-in
+primitives during model construction, so overloaded equality, hashing, arithmetic, or
+comparison behavior cannot influence grant narrowing or policy lookup.
 
 1. normalize one HTTP/HTTPS URL to an ASCII IDNA hostname, effective port, canonical
    origin, and origin-form target; reject Unicode labels whose built-in IDNA conversion
@@ -145,8 +148,9 @@ decoding with a separate decompressed limit. Framing and sensitive response head
 such as `Set-Cookie` and authentication challenges are not published. Provisional
 responses may be consumed internally but cannot cross the transport, gateway, grant, or
 session boundary as a final result. Each transport result separates cumulative
-header-field bytes, response-head/trailer wire bytes, and encoded-body/framing wire
-bytes. The gateway revalidates their exact types, minimum visible structure, total
+logical header-budget bytes, raw header-field wire bytes, response-head/trailer wire
+bytes, and encoded-body/framing wire bytes. The gateway revalidates their exact types,
+cross-counter relationships, supported framing, minimum visible structure, total
 equality, and per-attempt limits, including metadata absent from published headers.
 Error, timeout, and cancellation cleanup aborts the stream immediately; successful
 graceful shutdown remains bounded by the operation

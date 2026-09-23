@@ -111,6 +111,7 @@ def test_transport_response_rejects_provisional_status() -> None:
             headers=(),
             body=b"",
             header_bytes=0,
+            header_wire_bytes=0,
             metadata_wire_bytes=17,
             body_wire_bytes=0,
             wire_bytes=17,
@@ -124,6 +125,7 @@ def test_transport_response_rejects_negative_wire_bytes() -> None:
             headers=(),
             body=b"",
             header_bytes=0,
+            header_wire_bytes=0,
             metadata_wire_bytes=17,
             body_wire_bytes=0,
             wire_bytes=-1,
@@ -137,10 +139,51 @@ def test_transport_response_requires_structural_wire_accounting() -> None:
             headers=(),
             body=b"",
             header_bytes=0,
+            header_wire_bytes=0,
             metadata_wire_bytes=17,
             body_wire_bytes=0,
             wire_bytes=18,
         )
+
+
+def test_transfer_limits_canonicalize_behavior_bearing_numbers() -> None:
+    class LiarInt(int):
+        def __le__(self, other: object) -> bool:
+            return True
+
+    class LiarFloat(float):
+        def __le__(self, other: object) -> bool:
+            return True
+
+    requested = HttpTransferLimits(
+        timeout_seconds=LiarFloat(1000),
+        max_response_header_bytes=LiarInt(1_000_000),
+    )
+    ceiling = HttpTransferLimits(
+        timeout_seconds=1,
+        max_response_header_bytes=1024,
+    )
+
+    assert type(requested.timeout_seconds) is float
+    assert type(requested.max_response_header_bytes) is int
+    assert not requested.is_within(ceiling)
+
+
+def test_authority_identifiers_canonicalize_behavior_bearing_strings() -> None:
+    class PolicyAlias(str):
+        def __eq__(self, other: object) -> bool:
+            return True
+
+        def __hash__(self) -> int:
+            return hash("broad")
+
+    policy_id = NetworkPolicyId(PolicyAlias("restricted"))
+    route_id = CredentialRouteId(PolicyAlias("route"))
+
+    assert type(policy_id.value) is str
+    assert policy_id == NetworkPolicyId("restricted")
+    assert hash(policy_id) != hash(NetworkPolicyId("broad"))
+    assert type(route_id.value) is str
 
 
 def test_public_response_and_grant_reject_provisional_status() -> None:

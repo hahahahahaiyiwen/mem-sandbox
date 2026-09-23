@@ -27,6 +27,8 @@ from mem_sandbox.network.models import (
     NetworkOperationContext,
 )
 
+_MINIMUM_STATUS_FRAMING_BYTES = 17
+
 
 @dataclass(frozen=True, slots=True, kw_only=True, repr=False)
 class AdmittedHttpDestination:
@@ -89,6 +91,7 @@ class HttpTransportResponse:
     headers: tuple[HttpHeader, ...]
     body: bytes
     header_bytes: int
+    header_wire_bytes: int
     metadata_wire_bytes: int
     body_wire_bytes: int
     wire_bytes: int
@@ -108,6 +111,7 @@ class HttpTransportResponse:
             raise TypeError("body must be bytes")
         for name in (
             "header_bytes",
+            "header_wire_bytes",
             "metadata_wire_bytes",
             "body_wire_bytes",
             "wire_bytes",
@@ -119,13 +123,19 @@ class HttpTransportResponse:
                 raise ValueError(f"{name} must not be negative")
         if self.header_bytes < _headers_size(self.headers):
             raise ValueError("header_bytes must include the response headers")
-        if self.metadata_wire_bytes < _minimum_response_metadata_bytes(
-            self.status_code,
-            self.headers,
-        ):
+        if self.header_wire_bytes < _headers_wire_size(self.headers):
+            raise ValueError("header_wire_bytes must include the response headers")
+        if self.header_bytes < self.header_wire_bytes:
+            raise ValueError("header_bytes must include raw header wire bytes")
+        if self.metadata_wire_bytes < self.header_wire_bytes + _MINIMUM_STATUS_FRAMING_BYTES:
             raise ValueError("metadata_wire_bytes must include the final response head")
         if self.body_wire_bytes < len(self.body):
             raise ValueError("body_wire_bytes must include the encoded body")
+        _require_supported_response_framing(
+            self.headers,
+            len(self.body),
+            self.body_wire_bytes,
+        )
         if self.wire_bytes != self.metadata_wire_bytes + self.body_wire_bytes:
             raise ValueError("wire_bytes must equal metadata and body wire bytes")
 
@@ -134,6 +144,7 @@ class HttpTransportResponse:
             f"{type(self).__name__}(status_code={self.status_code!r}, "
             "headers=<redacted>, body=<redacted>, "
             f"header_bytes={self.header_bytes!r}, "
+            f"header_wire_bytes={self.header_wire_bytes!r}, "
             f"metadata_wire_bytes={self.metadata_wire_bytes!r}, "
             f"body_wire_bytes={self.body_wire_bytes!r}, "
             f"wire_bytes={self.wire_bytes!r})"
@@ -224,6 +235,7 @@ class AsyncioHttpTransport:
                 headers,
                 remaining_header_bytes,
                 response_header_bytes,
+                response_header_wire_bytes,
                 response_head_wire_bytes,
             ) = await _read_final_response_head(
                 reader,
@@ -249,6 +261,7 @@ class AsyncioHttpTransport:
                 headers=headers,
                 body=body,
                 header_bytes=response_header_bytes + trailer_header_bytes,
+                header_wire_bytes=response_header_wire_bytes + trailer_header_bytes,
                 metadata_wire_bytes=response_head_wire_bytes + trailer_wire_bytes,
                 body_wire_bytes=response_body_wire_bytes,
                 wire_bytes=(
@@ -280,18 +293,26 @@ async def _read_final_response_head(
     reader: asyncio.StreamReader,
     maximum_header_bytes: int,
     maximum_wire_bytes: int,
-) -> tuple[int, tuple[HttpHeader, ...], int, int, int]:
+) -> tuple[int, tuple[HttpHeader, ...], int, int, int, int]:
     informational_count = 0
     remaining_header_bytes = maximum_header_bytes
     remaining_wire_bytes = maximum_wire_bytes
+    header_wire_bytes = 0
     while True:
-        status, headers, consumed_header_bytes, consumed_wire_bytes = await _read_response_head(
+        (
+            status,
+            headers,
+            consumed_header_bytes,
+            consumed_header_wire_bytes,
+            consumed_wire_bytes,
+        ) = await _read_response_head(
             reader,
             remaining_header_bytes,
             remaining_wire_bytes,
         )
         remaining_header_bytes -= consumed_header_bytes
         remaining_wire_bytes -= consumed_wire_bytes
+        header_wire_bytes += consumed_header_wire_bytes
         if status == 101:
             raise OutboundHttpResponseInvalid("HTTP protocol upgrades are not supported")
         if status < 200:
@@ -306,6 +327,7 @@ async def _read_final_response_head(
             headers,
             remaining_header_bytes,
             maximum_header_bytes - remaining_header_bytes,
+            header_wire_bytes,
             maximum_wire_bytes - remaining_wire_bytes,
         )
 
@@ -314,7 +336,7 @@ async def _read_response_head(
     reader: asyncio.StreamReader,
     maximum_header_bytes: int,
     maximum_wire_bytes: int,
-) -> tuple[int, tuple[HttpHeader, ...], int, int]:
+) -> tuple[int, tuple[HttpHeader, ...], int, int, int]:
     too_large = False
     incomplete = False
     raw = b""
@@ -339,7 +361,7 @@ async def _read_response_head(
     accounted_header_bytes = max(wire_header_bytes, _headers_size(headers))
     if accounted_header_bytes > maximum_header_bytes:
         raise OutboundHttpLimitExceeded("HTTP response headers exceed the requested limit")
-    return status, headers, accounted_header_bytes, len(raw)
+    return status, headers, accounted_header_bytes, wire_header_bytes, len(raw)
 
 
 def _parse_status_line(line: bytes) -> int:
@@ -565,16 +587,35 @@ def _headers_size(headers: tuple[HttpHeader, ...]) -> int:
     )
 
 
-def _minimum_response_metadata_bytes(
-    status_code: int,
+def _headers_wire_size(headers: tuple[HttpHeader, ...]) -> int:
+    try:
+        return sum(
+            len(str.__str__(header.name).encode("ascii"))
+            + 2
+            + len(str.__str__(header.value).encode("latin-1"))
+            + 2
+            for header in headers
+        )
+    except UnicodeEncodeError:
+        raise ValueError("response headers must be representable on the HTTP wire") from None
+
+
+def _require_supported_response_framing(
     headers: tuple[HttpHeader, ...],
-) -> int:
-    status_line = len("HTTP/1.0 ") + len(str(status_code)) + len(" \r\n")
-    header_lines = sum(
-        len(str.__str__(header.name).encode("ascii")) + 2 + len(str.__str__(header.value)) + 2
-        for header in headers
-    )
-    return status_line + header_lines + 2
+    body_bytes: int,
+    body_wire_bytes: int,
+) -> None:
+    transfer_encoding = _single_header(headers, "transfer-encoding")
+    content_length = _single_header(headers, "content-length")
+    if transfer_encoding is not None and content_length is not None:
+        raise ValueError("response framing must not be ambiguous")
+    if transfer_encoding is None:
+        return
+    if [token.strip().lower() for token in transfer_encoding.split(",")] != ["chunked"]:
+        raise ValueError("response transfer encoding must be supported")
+    minimum = 5 if body_bytes == 0 else body_bytes + len(f"{body_bytes:x}") + 9
+    if body_wire_bytes < minimum:
+        raise ValueError("body_wire_bytes must include chunk framing")
 
 
 def _create_system_ssl_context() -> ssl.SSLContext:
