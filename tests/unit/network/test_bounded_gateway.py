@@ -1,7 +1,7 @@
 import asyncio
 import gzip
-from collections.abc import Callable
-from typing import cast
+from collections.abc import Callable, Coroutine
+from typing import Any, cast
 from uuid import UUID
 
 import pytest
@@ -46,6 +46,17 @@ class Cancellation:
         return self.cancelled
 
 
+class CheckCountCancellation(Cancellation):
+    def __init__(self, cancel_on_check: int) -> None:
+        super().__init__()
+        self._cancel_on_check = cancel_on_check
+        self.check_count = 0
+
+    def is_set(self) -> bool:
+        self.check_count += 1
+        return self.check_count >= self._cancel_on_check
+
+
 class RecordingPolicy:
     def __init__(
         self,
@@ -74,6 +85,39 @@ class BlockingPolicy:
         self.entered.set()
         await asyncio.Event().wait()
         raise AssertionError(request)
+
+
+class PhaseBlockingPolicy:
+    def __init__(self, phase: NetworkPolicyPhase) -> None:
+        self._phase = phase
+        self.calls: list[NetworkPolicyRequest] = []
+        self.entered = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def evaluate(self, request: NetworkPolicyRequest) -> NetworkPolicyDecision:
+        self.calls.append(request)
+        if request.phase is self._phase:
+            self.entered.set()
+            await self.release.wait()
+        return NetworkPolicyDecision.allow()
+
+
+class CoroutineTrackingPolicy:
+    def __init__(self) -> None:
+        self.calls = 0
+        self.operation: Coroutine[Any, Any, NetworkPolicyDecision] | None = None
+
+    def evaluate(
+        self,
+        request: NetworkPolicyRequest,
+    ) -> Coroutine[Any, Any, NetworkPolicyDecision]:
+        self.calls += 1
+
+        async def decide() -> NetworkPolicyDecision:
+            raise AssertionError(request)
+
+        self.operation = decide()
+        return self.operation
 
 
 class CancellationResistantPolicy:
@@ -911,6 +955,60 @@ async def test_gateway_honors_cooperative_cancellation_before_collaborator_use()
 
     assert isinstance(policy, RecordingPolicy)
     assert policy.calls == []
+    assert resolver.calls == []
+    assert transport.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "phase",
+    [NetworkPolicyPhase.PRE_RESOLUTION, NetworkPolicyPhase.POST_RESOLUTION],
+)
+async def test_gateway_preserves_cooperative_cancellation_during_policy_evaluation(
+    phase: NetworkPolicyPhase,
+) -> None:
+    cancellation = Cancellation()
+    policy = PhaseBlockingPolicy(phase)
+    subject, _, resolver, transport = gateway(policy=policy)
+    sending = asyncio.create_task(subject.send(request(), context(cancellation=cancellation)))
+    await asyncio.wait_for(policy.entered.wait(), timeout=1)
+
+    cancellation.cancelled = True
+    policy.release.set()
+
+    with pytest.raises(OutboundHttpCancelled) as captured:
+        await sending
+
+    expected_phases = (
+        (NetworkPolicyPhase.PRE_RESOLUTION,)
+        if phase is NetworkPolicyPhase.PRE_RESOLUTION
+        else (
+            NetworkPolicyPhase.PRE_RESOLUTION,
+            NetworkPolicyPhase.POST_RESOLUTION,
+        )
+    )
+    assert tuple(call.phase for call in policy.calls) == expected_phases
+    assert len(resolver.calls) == (0 if phase is NetworkPolicyPhase.PRE_RESOLUTION else 1)
+    assert transport.calls == []
+    assert captured.value.__cause__ is None
+    assert captured.value.__context__ is None
+
+
+@pytest.mark.asyncio
+async def test_gateway_does_not_create_collaborator_after_entry_cancellation() -> None:
+    cancellation = CheckCountCancellation(cancel_on_check=4)
+    policy = CoroutineTrackingPolicy()
+    subject, _, resolver, transport = gateway(policy=policy)
+
+    with pytest.raises(OutboundHttpCancelled):
+        await subject.send(
+            request(),
+            context(cancellation=cancellation),
+        )
+
+    assert cancellation.check_count == 4
+    assert policy.calls == 0
+    assert policy.operation is None
     assert resolver.calls == []
     assert transport.calls == []
 

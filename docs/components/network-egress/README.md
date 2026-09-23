@@ -319,9 +319,11 @@ Admission has three layers:
    every resolved address immediately before connection or credential access.
 
 Each asynchronous policy, resolver, and transport collaboration is independently raced
-against the absolute gateway deadline. A collaborator that suppresses cancellation is
-retained and observed after timeout, but cannot resume the pipeline, trigger a later
-side effect, or publish a response.
+against the absolute gateway deadline. Its coroutine is created only after current
+cancellation and deadline admission, and cancellation observed before or after either
+policy phase retains the cancellation category rather than becoming a policy denial. A
+collaborator that suppresses cancellation is retained and observed after timeout, but
+cannot resume the pipeline, trigger a later side effect, or publish a response.
 
 The network module should own a focused policy contract such as:
 

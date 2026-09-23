@@ -65,9 +65,11 @@ current request options; snapshots cannot enable networking or restore an old gr
 
 The gateway deadline is the earlier of the admitted session collaborator deadline and
 the request's host-bounded transfer timeout. Policy, resolver, and transport calls run
-in independently timed child tasks. On timeout or cancellation, a child that suppresses
-cancellation remains retained and observed but cannot resume the request pipeline or
-publish a response after the deadline.
+in independently timed child tasks created only after the current cancellation and
+deadline checks pass. Cooperative cancellation observed before or after either policy
+phase remains a cancellation rather than being reported as a policy denial. On timeout
+or cancellation, a child that suppresses cancellation remains retained and observed but
+cannot resume the request pipeline or publish a response after the deadline.
 
 Session close cooperatively cancels an active HTTP operation and then waits for the
 operation gate. Gateway cancellation settlement has a small bound within the remaining

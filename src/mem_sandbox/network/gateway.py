@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import zlib
-from collections.abc import Coroutine
+from collections.abc import Callable, Coroutine
 from dataclasses import replace
 from typing import Any, cast
 from urllib.parse import urljoin
@@ -244,15 +244,14 @@ class BoundedOutboundHttpGateway:
 
     async def _await_collaborator[ResultT](
         self,
-        operation: Coroutine[Any, Any, ResultT],
+        operation: Callable[[], Coroutine[Any, Any, ResultT]],
         context: NetworkOperationContext,
     ) -> ResultT:
         _require_active(context)
         remaining = context.deadline_monotonic - asyncio.get_running_loop().time()
         if remaining <= 0:
-            operation.close()
             raise OutboundHttpTimeout("outbound HTTP operation exceeded its deadline")
-        task = asyncio.create_task(operation)
+        task = asyncio.create_task(operation())
         try:
             done, _pending = await asyncio.wait((task,), timeout=remaining)
         except asyncio.CancelledError:
@@ -302,20 +301,25 @@ class BoundedOutboundHttpGateway:
             canonical_hostname=canonical_hostname,
         )
         failed = False
+        cancelled = False
         decision: object = None
         try:
             decision = await self._await_collaborator(
-                self._policy.evaluate(facts),
+                lambda: self._policy.evaluate(facts),
                 context,
             )
         except asyncio.CancelledError:
             if _caller_is_cancelling():
                 raise
             failed = True
+        except OutboundHttpCancelled:
+            cancelled = True
         except OutboundHttpTimeout:
             raise
         except Exception:
             failed = True
+        if cancelled:
+            raise OutboundHttpCancelled("network policy evaluation was cancelled")
         if failed or not isinstance(decision, NetworkPolicyDecision):
             raise OutboundHttpDenied("network policy evaluation failed closed")
         if decision.outcome is not NetworkPolicyOutcome.ALLOW:
@@ -335,7 +339,7 @@ class BoundedOutboundHttpGateway:
         resolution: object = None
         try:
             resolution = await self._await_collaborator(
-                self._resolver.resolve(url.hostname, url.port, context),
+                lambda: self._resolver.resolve(url.hostname, url.port, context),
                 context,
             )
         except asyncio.CancelledError:
@@ -375,7 +379,7 @@ class BoundedOutboundHttpGateway:
         response: object = None
         try:
             response = await self._await_collaborator(
-                self._transport.send(request, context),
+                lambda: self._transport.send(request, context),
                 context,
             )
         except asyncio.CancelledError:
