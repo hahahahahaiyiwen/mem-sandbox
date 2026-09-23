@@ -170,6 +170,23 @@ def test_ipv6_transition_and_translation_ranges_are_denied(value: str) -> None:
     assert classify_ip_address(ip_address(value)) is IpAddressClass.RESERVED
 
 
+@pytest.mark.parametrize(
+    "value",
+    [
+        "192.0.0.9",
+        "192.0.0.10",
+        "2001:1::1",
+        "2001:1::2",
+        "2001:3::1",
+        "2001:4:112::1",
+        "2001:20::1",
+        "2001:30::1",
+    ],
+)
+def test_ietf_protocol_assignment_exceptions_are_denied(value: str) -> None:
+    assert classify_ip_address(ip_address(value)) is IpAddressClass.RESERVED
+
+
 def _policy_request(
     hostname: str,
     *,

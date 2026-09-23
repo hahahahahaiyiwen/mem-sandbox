@@ -251,7 +251,12 @@ class BoundedOutboundHttpGateway:
         remaining = context.deadline_monotonic - asyncio.get_running_loop().time()
         if remaining <= 0:
             raise OutboundHttpTimeout("outbound HTTP operation exceeded its deadline")
-        task = asyncio.create_task(operation())
+        coroutine = operation()
+        try:
+            task = asyncio.create_task(coroutine)
+        except BaseException:
+            coroutine.close()
+            raise
         try:
             done, _pending = await asyncio.wait((task,), timeout=remaining)
         except asyncio.CancelledError:
@@ -313,8 +318,7 @@ class BoundedOutboundHttpGateway:
                 raise
             failed = True
         except OutboundHttpCancelled:
-            cancellation = context.cancellation
-            if cancellation is not None and cancellation.is_set():
+            if _cancellation_is_active(context):
                 stable_failure = OutboundHttpCancelled
             else:
                 failed = True
@@ -353,7 +357,10 @@ class BoundedOutboundHttpGateway:
                 raise
             failed = True
         except OutboundHttpCancelled:
-            stable_failure = OutboundHttpCancelled
+            if _cancellation_is_active(context):
+                stable_failure = OutboundHttpCancelled
+            else:
+                failed = True
         except OutboundHttpTimeout:
             stable_failure = OutboundHttpTimeout
         except OutboundHttpResolutionFailed:
@@ -393,7 +400,10 @@ class BoundedOutboundHttpGateway:
                 raise
             failed = True
         except OutboundHttpCancelled:
-            stable_failure = OutboundHttpCancelled
+            if _cancellation_is_active(context):
+                stable_failure = OutboundHttpCancelled
+            else:
+                failed = True
         except OutboundHttpTimeout:
             stable_failure = OutboundHttpTimeout
         except OutboundHttpLimitExceeded:
@@ -576,11 +586,15 @@ def _headers_size(headers: tuple[HttpHeader, ...]) -> int:
 
 
 def _require_active(context: NetworkOperationContext) -> None:
-    cancellation = context.cancellation
-    if cancellation is not None and cancellation.is_set():
+    if _cancellation_is_active(context):
         raise OutboundHttpCancelled("outbound HTTP operation was cancelled")
     if asyncio.get_running_loop().time() >= context.deadline_monotonic:
         raise OutboundHttpTimeout("outbound HTTP operation exceeded its deadline")
+
+
+def _cancellation_is_active(context: NetworkOperationContext) -> bool:
+    cancellation = context.cancellation
+    return cancellation is not None and cancellation.is_set()
 
 
 def _caller_is_cancelling() -> bool:

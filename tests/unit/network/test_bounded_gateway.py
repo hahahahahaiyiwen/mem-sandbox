@@ -1,5 +1,6 @@
 import asyncio
 import gzip
+import inspect
 from collections.abc import Callable, Coroutine
 from typing import Any, cast
 from uuid import UUID
@@ -44,17 +45,6 @@ class Cancellation:
 
     def is_set(self) -> bool:
         return self.cancelled
-
-
-class CheckCountCancellation(Cancellation):
-    def __init__(self, cancel_on_check: int) -> None:
-        super().__init__()
-        self._cancel_on_check = cancel_on_check
-        self.check_count = 0
-
-    def is_set(self) -> bool:
-        self.check_count += 1
-        return self.check_count >= self._cancel_on_check
 
 
 class RecordingPolicy:
@@ -158,6 +148,24 @@ class RecordingResolver:
         return outcome
 
 
+class BlockingResolver(RecordingResolver):
+    def __init__(self) -> None:
+        super().__init__({})
+        self.entered = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def resolve(
+        self,
+        hostname: str,
+        port: int,
+        context: NetworkOperationContext,
+    ) -> NetworkResolution:
+        self.calls.append((hostname, port, context))
+        self.entered.set()
+        await self.release.wait()
+        return resolution(hostname, "8.8.8.8")
+
+
 class RecordingTransport:
     def __init__(
         self,
@@ -177,6 +185,23 @@ class RecordingTransport:
         if isinstance(outcome, BaseException):
             raise outcome
         return cast(HttpTransportResponse, outcome)
+
+
+class BlockingTransport(RecordingTransport):
+    def __init__(self) -> None:
+        super().__init__(())
+        self.entered = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def send(
+        self,
+        request: HttpTransportRequest,
+        context: NetworkOperationContext,
+    ) -> HttpTransportResponse:
+        self.calls.append((request, context))
+        self.entered.set()
+        await self.release.wait()
+        return transport_response()
 
 
 def limits(**changes: int | float) -> HttpTransferLimits:
@@ -326,6 +351,7 @@ async def test_mixed_dns_answer_denies_every_address_before_transport() -> None:
         "169.254.1.1",
         "224.0.0.1",
         "240.0.0.1",
+        "192.0.0.9",
         "192.88.99.1",
         "169.254.169.254",
         "::",
@@ -333,6 +359,7 @@ async def test_mixed_dns_answer_denies_every_address_before_transport() -> None:
         "fc00::1",
         "fec0::1",
         "fec0:0:0:ffff::1",
+        "2001:1::1",
         "fe80::1",
         "ff02::1",
         "100::1",
@@ -614,7 +641,6 @@ async def test_resolver_failure_is_stable_and_performs_no_transport() -> None:
 @pytest.mark.parametrize(
     ("failure", "expected"),
     [
-        (OutboundHttpCancelled("resolver detail"), OutboundHttpCancelled),
         (OutboundHttpTimeout("resolver detail"), OutboundHttpTimeout),
         (OutboundHttpResolutionFailed("resolver detail"), OutboundHttpResolutionFailed),
     ],
@@ -631,6 +657,33 @@ async def test_resolver_stable_failures_preserve_category_without_details(
 
     assert transport.calls == []
     assert "resolver detail" not in str(captured.value)
+    assert captured.value.__cause__ is None
+    assert captured.value.__context__ is None
+
+
+@pytest.mark.asyncio
+async def test_resolver_supplied_cancellation_fails_closed_without_signal() -> None:
+    resolver = RecordingResolver({"example.test": OutboundHttpCancelled("resolver detail")})
+    subject, _, _, transport = gateway(resolver=resolver)
+
+    with pytest.raises(OutboundHttpResolutionFailed) as captured:
+        await subject.send(request(), context())
+
+    assert "resolver detail" not in str(captured.value)
+    assert captured.value.__cause__ is None
+    assert captured.value.__context__ is None
+    assert transport.calls == []
+
+
+@pytest.mark.asyncio
+async def test_transport_supplied_cancellation_fails_closed_without_signal() -> None:
+    transport = RecordingTransport((OutboundHttpCancelled("transport detail"),))
+    subject, _, _, _ = gateway(transport=transport)
+
+    with pytest.raises(OutboundHttpTransportFailed) as captured:
+        await subject.send(request(), context())
+
+    assert "transport detail" not in str(captured.value)
     assert captured.value.__cause__ is None
     assert captured.value.__context__ is None
 
@@ -998,19 +1051,86 @@ async def test_gateway_preserves_cooperative_cancellation_during_policy_evaluati
 
 
 @pytest.mark.asyncio
+async def test_gateway_preserves_cooperative_cancellation_during_resolution() -> None:
+    cancellation = Cancellation()
+    resolver = BlockingResolver()
+    subject, _, _, transport = gateway(resolver=resolver)
+    sending = asyncio.create_task(subject.send(request(), context(cancellation=cancellation)))
+    await asyncio.wait_for(resolver.entered.wait(), timeout=1)
+
+    cancellation.cancelled = True
+    resolver.release.set()
+
+    with pytest.raises(OutboundHttpCancelled) as captured:
+        await sending
+
+    assert transport.calls == []
+    assert captured.value.__cause__ is None
+    assert captured.value.__context__ is None
+
+
+@pytest.mark.asyncio
+async def test_gateway_preserves_cooperative_cancellation_during_transport() -> None:
+    cancellation = Cancellation()
+    transport = BlockingTransport()
+    subject, _, _, _ = gateway(transport=transport)
+    sending = asyncio.create_task(subject.send(request(), context(cancellation=cancellation)))
+    await asyncio.wait_for(transport.entered.wait(), timeout=1)
+
+    cancellation.cancelled = True
+    transport.release.set()
+
+    with pytest.raises(OutboundHttpCancelled) as captured:
+        await sending
+
+    assert captured.value.__cause__ is None
+    assert captured.value.__context__ is None
+
+
+@pytest.mark.asyncio
 async def test_gateway_does_not_create_collaborator_after_entry_cancellation() -> None:
-    cancellation = CheckCountCancellation(cancel_on_check=4)
+    subject, _, _, _ = gateway()
+    created = False
+
+    async def operation() -> NetworkPolicyDecision:
+        return NetworkPolicyDecision.allow()
+
+    def create_operation() -> Coroutine[Any, Any, NetworkPolicyDecision]:
+        nonlocal created
+        created = True
+        return operation()
+
+    with pytest.raises(OutboundHttpCancelled):
+        await subject._await_collaborator(  # pyright: ignore[reportPrivateUsage]
+            create_operation,
+            context(cancellation=Cancellation(cancelled=True)),
+        )
+
+    assert not created
+
+
+@pytest.mark.asyncio
+async def test_gateway_closes_collaborator_when_task_creation_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     policy = CoroutineTrackingPolicy()
     subject, _, resolver, transport = gateway(policy=policy)
 
-    with pytest.raises(OutboundHttpCancelled):
-        await subject.send(
-            request(),
-            context(cancellation=cancellation),
-        )
+    def fail_create_task(
+        operation: Coroutine[Any, Any, object],
+    ) -> asyncio.Task[object]:
+        raise RuntimeError("task creation detail")
 
-    assert policy.calls == 0
-    assert policy.operation is None
+    with monkeypatch.context() as scoped:
+        scoped.setattr(asyncio, "create_task", fail_create_task)
+        with pytest.raises(OutboundHttpDenied) as captured:
+            await subject.send(request(), context())
+
+    assert policy.operation is not None
+    assert inspect.getcoroutinestate(policy.operation) == inspect.CORO_CLOSED
+    assert "task creation detail" not in str(captured.value)
+    assert captured.value.__cause__ is None
+    assert captured.value.__context__ is None
     assert resolver.calls == []
     assert transport.calls == []
 

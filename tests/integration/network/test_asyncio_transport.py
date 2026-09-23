@@ -141,7 +141,8 @@ def test_system_tls_context_loads_immutable_purpose_sets_and_secure_flags(
 
     with monkeypatch.context() as scoped:
         scoped.setattr(sys, "platform", "win32")
-        scoped.setattr(ssl, "enum_certificates", enum_certificates)
+        scoped.delattr(ssl, "enum_certificates", raising=False)
+        scoped.setattr(ssl, "enum_certificates", enum_certificates, raising=False)
         subject = AsyncioHttpTransport()
 
     owned_context = cast(ssl.SSLContext, vars(subject)["_ssl_context"])

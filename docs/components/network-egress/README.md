@@ -378,9 +378,9 @@ The first implementation defines and tests:
   is acceptable.
 - Loopback, unspecified, link-local, private, multicast, reserved, transition,
   translation, mapped, and cloud metadata destinations are denied by default for both
-  IPv4 and IPv6. Explicit checks include deprecated IPv6 site-local space, 6to4 relay
-  anycast, standard NAT64 ranges, 6to4, Teredo, and both ISATAP
-  interface-identifier forms.
+  IPv4 and IPv6. Explicit checks include IETF protocol-assignment blocks, deprecated
+  IPv6 site-local space, 6to4 relay anycast, standard NAT64 ranges, 6to4, Teredo, and
+  both ISATAP interface-identifier forms.
 - The transport connects only to an address that was resolved and admitted for that
   request while preserving the original hostname for TLS verification.
 - Redirect targets repeat URL normalization, policy evaluation, DNS validation, and
@@ -409,6 +409,9 @@ The first implementation defines and tests:
 - HEAD and status-defined bodyless responses do not decode representation metadata.
 - Failed/cancelled attempts abort stream shutdown immediately; successful graceful
   shutdown is bounded by the same operation deadline.
+- A provider-supplied cancellation value is treated as cancellation only while the
+  operation's cooperative cancellation signal is active; otherwise policy, resolution,
+  and transport fail closed in their own stable categories.
 - No implicit cookie jar, cache, authentication retry, or connection to a model-supplied
   Unix socket exists.
 

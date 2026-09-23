@@ -46,11 +46,12 @@ _METADATA_NETWORKS = (
     IPv6Network("fd00:ec2::254/128"),
     IPv6Network("fe80::a9fe:a9fe/128"),
 )
-_TRANSITION_NETWORKS = (
+_SPECIAL_PURPOSE_NETWORKS = (
+    IPv4Network("192.0.0.0/24"),
     IPv4Network("192.88.99.0/24"),
     IPv6Network("64:ff9b::/96"),
     IPv6Network("64:ff9b:1::/48"),
-    IPv6Network("2001::/32"),
+    IPv6Network("2001::/23"),
     IPv6Network("2002::/16"),
 )
 _ISATAP_INTERFACE_PREFIXES = frozenset((0x00005EFE, 0x02005EFE))
@@ -474,7 +475,7 @@ def classify_ip_address(address: IPv4Address | IPv6Address) -> IpAddressClass:
         return IpAddressClass.PRIVATE
     if isinstance(address, IPv6Address) and any(address in network for network in _PRIVATE_V6):
         return IpAddressClass.PRIVATE
-    if any(address in network for network in _TRANSITION_NETWORKS):
+    if any(address in network for network in _SPECIAL_PURPOSE_NETWORKS):
         return IpAddressClass.RESERVED
     if isinstance(address, IPv6Address):
         interface_prefix = (int(address) & ((1 << 64) - 1)) >> 32

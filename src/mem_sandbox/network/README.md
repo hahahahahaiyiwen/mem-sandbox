@@ -98,8 +98,8 @@ every redirect:
    unique final address;
 4. deny the whole answer if any address is loopback, private, link-local, unspecified,
    multicast, reserved/non-global, deprecated site-local, transition/translation/mapped
-   (including 6to4 relay anycast, standard NAT64, and both ISATAP
-   interface-identifier forms), or known metadata space;
+   (including IETF protocol-assignment blocks, 6to4 relay anycast, standard NAT64, and
+   both ISATAP interface-identifier forms), or known metadata space;
 5. evaluate post-resolution facts, then pass exactly the first admitted numeric address
    and the original hostname to the transport;
 6. enforce attempt, redirect, encoded-body, decompressed-body, transferred-wire-byte,
@@ -171,6 +171,9 @@ internet.
 - A public response always has a final status from 200 through 599.
 - Gateway and protected-input failures retain no provider exception context, cause, or
   raw settlement note at the session boundary.
+- Collaborator-supplied cancellation values are accepted only while the operation's
+  cooperative cancellation signal is active; otherwise policy, resolution, and
+  transport fail closed in their own stable categories.
 - Provider failures, including a task-raised `GeneratorExit` and nested exception groups,
   become context-free `OutboundHttpGatewayFailed` values. During cancellation settlement,
   provider-task failures remain protected secondary failures.
