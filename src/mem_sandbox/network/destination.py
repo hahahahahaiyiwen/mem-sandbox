@@ -39,6 +39,7 @@ _PRIVATE_V6 = (
     IPv6Network("fec0::/10"),
 )
 _METADATA_NETWORKS = (
+    IPv4Network("168.63.129.16/32"),
     IPv4Network("169.254.169.254/32"),
     IPv4Network("169.254.170.2/32"),
     IPv4Network("100.100.100.200/32"),
@@ -48,11 +49,16 @@ _METADATA_NETWORKS = (
 )
 _SPECIAL_PURPOSE_NETWORKS = (
     IPv4Network("192.0.0.0/24"),
+    IPv4Network("192.31.196.0/24"),
+    IPv4Network("192.52.193.0/24"),
+    IPv4Network("192.175.48.0/24"),
     IPv4Network("192.88.99.0/24"),
     IPv6Network("64:ff9b::/96"),
     IPv6Network("64:ff9b:1::/48"),
     IPv6Network("2001::/23"),
     IPv6Network("2002::/16"),
+    IPv6Network("2620:4f:8000::/48"),
+    IPv6Network("3ffe::/16"),
 )
 _ISATAP_INTERFACE_PREFIXES = frozenset((0x00005EFE, 0x02005EFE))
 

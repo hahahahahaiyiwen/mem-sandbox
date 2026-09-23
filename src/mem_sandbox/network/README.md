@@ -98,8 +98,9 @@ every redirect:
    unique final address;
 4. deny the whole answer if any address is loopback, private, link-local, unspecified,
    multicast, reserved/non-global, deprecated site-local, transition/translation/mapped
-   (including IETF protocol-assignment blocks, 6to4 relay anycast, standard NAT64, and
-   both ISATAP interface-identifier forms), or known metadata space;
+   (including IETF protocol-assignment, AS112/AMT service, deprecated 6bone, 6to4 relay
+   anycast, standard NAT64, and both ISATAP interface-identifier ranges), or known
+   metadata space including Azure WireServer;
 5. evaluate post-resolution facts, then pass exactly the first admitted numeric address
    and the original hostname to the transport;
 6. enforce attempt, redirect, encoded-body, decompressed-body, transferred-wire-byte,

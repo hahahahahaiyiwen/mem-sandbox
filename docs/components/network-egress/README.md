@@ -378,9 +378,10 @@ The first implementation defines and tests:
   is acceptable.
 - Loopback, unspecified, link-local, private, multicast, reserved, transition,
   translation, mapped, and cloud metadata destinations are denied by default for both
-  IPv4 and IPv6. Explicit checks include IETF protocol-assignment blocks, deprecated
-  IPv6 site-local space, 6to4 relay anycast, standard NAT64 ranges, 6to4, Teredo, and
-  both ISATAP interface-identifier forms.
+  IPv4 and IPv6. Explicit checks include Azure WireServer, IETF protocol-assignment and
+  AS112/AMT service prefixes, deprecated IPv6 site-local and 6bone space, 6to4 relay
+  anycast, standard NAT64 ranges, 6to4, Teredo, and both ISATAP interface-identifier
+  forms.
 - The transport connects only to an address that was resolved and admitted for that
   request while preserving the original hostname for TLS verification.
 - Redirect targets repeat URL normalization, policy evaluation, DNS validation, and

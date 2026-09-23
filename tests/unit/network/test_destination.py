@@ -128,6 +128,7 @@ def test_url_normalization_rejects_canonical_percent_expansion_over_limit() -> N
         ("224.0.0.1", IpAddressClass.MULTICAST),
         ("240.0.0.1", IpAddressClass.RESERVED),
         ("192.88.99.1", IpAddressClass.RESERVED),
+        ("168.63.129.16", IpAddressClass.METADATA),
         ("169.254.169.254", IpAddressClass.METADATA),
         ("2001:4860:4860::8888", IpAddressClass.GLOBAL),
         ("::", IpAddressClass.UNSPECIFIED),
@@ -151,6 +152,7 @@ def test_address_classification_is_exact_for_ipv4_and_ipv6(
 
 def test_ipv4_mapped_ipv6_cannot_bypass_private_or_metadata_classification() -> None:
     assert classify_ip_address(ip_address("::ffff:127.0.0.1")) is IpAddressClass.LOOPBACK
+    assert classify_ip_address(ip_address("::ffff:168.63.129.16")) is IpAddressClass.METADATA
     assert classify_ip_address(ip_address("::ffff:169.254.169.254")) is IpAddressClass.METADATA
     assert classify_ip_address(ip_address("::ffff:8.8.8.8")) is IpAddressClass.RESERVED
 
@@ -181,6 +183,11 @@ def test_ipv6_transition_and_translation_ranges_are_denied(value: str) -> None:
         "2001:4:112::1",
         "2001:20::1",
         "2001:30::1",
+        "192.31.196.1",
+        "192.52.193.1",
+        "192.175.48.1",
+        "2620:4f:8000::1",
+        "3ffe::1",
     ],
 )
 def test_ietf_protocol_assignment_exceptions_are_denied(value: str) -> None:

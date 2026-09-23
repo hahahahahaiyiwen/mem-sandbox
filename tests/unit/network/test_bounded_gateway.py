@@ -148,6 +148,27 @@ class RecordingResolver:
         return outcome
 
 
+class SequencedResolver(RecordingResolver):
+    def __init__(
+        self,
+        resolutions: dict[str, list[NetworkResolution | BaseException]],
+    ) -> None:
+        super().__init__({})
+        self._sequence = resolutions
+
+    async def resolve(
+        self,
+        hostname: str,
+        port: int,
+        context: NetworkOperationContext,
+    ) -> NetworkResolution:
+        self.calls.append((hostname, port, context))
+        outcome = self._sequence[hostname].pop(0)
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return outcome
+
+
 class BlockingResolver(RecordingResolver):
     def __init__(self) -> None:
         super().__init__({})
@@ -342,6 +363,22 @@ async def test_mixed_dns_answer_denies_every_address_before_transport() -> None:
 
 
 @pytest.mark.asyncio
+async def test_wireserver_mixed_dns_answer_denies_whole_answer_before_transport() -> None:
+    resolver = RecordingResolver(
+        {"example.test": resolution("example.test", "8.8.8.8", "168.63.129.16")}
+    )
+    subject, policy, _, transport = gateway(resolver=resolver)
+
+    with pytest.raises(OutboundHttpDenied):
+        await subject.send(request(), context())
+
+    assert isinstance(policy, RecordingPolicy)
+    assert [call.phase for call in policy.calls] == [NetworkPolicyPhase.PRE_RESOLUTION]
+    assert len(resolver.calls) == 1
+    assert transport.calls == []
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "address",
     [
@@ -353,7 +390,11 @@ async def test_mixed_dns_answer_denies_every_address_before_transport() -> None:
         "240.0.0.1",
         "192.0.0.9",
         "192.88.99.1",
+        "168.63.129.16",
         "169.254.169.254",
+        "192.31.196.1",
+        "192.52.193.1",
+        "192.175.48.1",
         "::",
         "::1",
         "fc00::1",
@@ -363,6 +404,8 @@ async def test_mixed_dns_answer_denies_every_address_before_transport() -> None:
         "fe80::1",
         "ff02::1",
         "100::1",
+        "2620:4f:8000::1",
+        "3ffe::1",
         "fd00:ec2::254",
     ],
 )
@@ -393,6 +436,19 @@ async def test_isatap_resolution_is_denied_before_transport(address: str) -> Non
     with pytest.raises(OutboundHttpDenied):
         await subject.send(request(), context())
 
+    assert transport.calls == []
+
+
+@pytest.mark.asyncio
+async def test_wireserver_literal_is_denied_without_dns_or_transport() -> None:
+    subject, policy, resolver, transport = gateway()
+
+    with pytest.raises(OutboundHttpDenied):
+        await subject.send(request("http://168.63.129.16/metadata"), context())
+
+    assert isinstance(policy, RecordingPolicy)
+    assert [call.phase for call in policy.calls] == [NetworkPolicyPhase.PRE_RESOLUTION]
+    assert resolver.calls == []
     assert transport.calls == []
 
 
@@ -451,6 +507,60 @@ async def test_redirect_repeats_admission_resolution_and_pinned_transport() -> N
         "8.8.8.8",
         "1.1.1.1",
     ]
+
+
+@pytest.mark.asyncio
+async def test_redirect_to_wireserver_is_denied_before_second_transport() -> None:
+    resolver = RecordingResolver(
+        {
+            "example.test": resolution("example.test", "8.8.8.8"),
+            "metadata.test": resolution("metadata.test", "168.63.129.16"),
+        }
+    )
+    transport = RecordingTransport(
+        (
+            transport_response(
+                302,
+                headers=(HttpHeader("Location", "http://metadata.test/metadata"),),
+                body=b"",
+            ),
+        )
+    )
+    subject, _, _, _ = gateway(resolver=resolver, transport=transport)
+
+    with pytest.raises(OutboundHttpDenied):
+        await subject.send(request(), context())
+
+    assert [call[0] for call in resolver.calls] == ["example.test", "metadata.test"]
+    assert len(transport.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_same_host_redirect_rechecks_dns_and_denies_wireserver_rebinding() -> None:
+    resolver = SequencedResolver(
+        {
+            "example.test": [
+                resolution("example.test", "8.8.8.8"),
+                resolution("example.test", "168.63.129.16"),
+            ]
+        }
+    )
+    transport = RecordingTransport(
+        (
+            transport_response(
+                302,
+                headers=(HttpHeader("Location", "/metadata"),),
+                body=b"",
+            ),
+        )
+    )
+    subject, _, _, _ = gateway(resolver=resolver, transport=transport)
+
+    with pytest.raises(OutboundHttpDenied):
+        await subject.send(request(), context())
+
+    assert [call[0] for call in resolver.calls] == ["example.test", "example.test"]
+    assert len(transport.calls) == 1
 
 
 @pytest.mark.asyncio
