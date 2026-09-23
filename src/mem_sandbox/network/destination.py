@@ -105,6 +105,7 @@ class ResolvedHttpAddress:
         value = cast(object, self.value)
         if not isinstance(value, str):
             raise TypeError("resolved address must be a string")
+        value = str.__str__(value)
         if "%" in value:
             raise ValueError("resolved address must not contain a scope identifier")
         try:
@@ -496,6 +497,7 @@ def classify_ip_address(address: IPv4Address | IPv6Address) -> IpAddressClass:
 def _normalize_hostname(hostname: object) -> str:
     if not isinstance(hostname, str):
         raise TypeError("hostname must be a string")
+    hostname = str.__str__(hostname)
     if not hostname or "%" in hostname or any(char.isspace() for char in hostname):
         raise OutboundHttpRequestInvalid("HTTP hostname is invalid")
     parsed = _try_ip_address(hostname)

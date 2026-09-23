@@ -93,16 +93,17 @@ every redirect:
    above the byte limit, malformed header controls, and controlled or sensitive request
    headers;
 2. evaluate the selected focused policy before DNS;
-3. classify an IP literal directly or invoke the injected resolver, require an
-   explicitly allowed final canonical hostname when one is reported, and classify every
-   unique final address;
+3. classify an IP literal directly or invoke the injected resolver, reconstruct its
+   hostname and address values into gateway-owned models, require an explicitly allowed
+   final canonical hostname when one is reported, and recompute the classification of
+   every unique final address;
 4. deny the whole answer if any address is loopback, private, link-local, unspecified,
    multicast, reserved/non-global, deprecated site-local, transition/translation/mapped
    (including IETF protocol-assignment, AS112/AMT service, documentation, deprecated
    6bone, 6to4 relay anycast, standard NAT64, and both ISATAP interface-identifier
    ranges), or known metadata space including Azure WireServer;
-5. evaluate post-resolution facts, then pass exactly the first admitted numeric address
-   and the original hostname to the transport;
+5. evaluate a detached copy of the post-resolution facts, then pass exactly the first
+   gateway-owned admitted numeric address and the original hostname to the transport;
 6. enforce attempt, redirect, encoded-body, decompressed-body, transferred-wire-byte,
    header, cancellation, and deadline limits before publishing a complete response.
 
@@ -161,8 +162,11 @@ internet.
   hostnames, resolved addresses, credential routes, or grant details.
 - Pre-resolution denial performs no DNS request. A prohibited or mixed resolution
   performs no transport access.
-- Resolver output cannot change the peer after admission; the transport receives one
-  numeric address and uses the original hostname only for HTTP/TLS identity.
+- Resolver output is rebuilt from exact plain hostname/address strings, so stored
+  classifications or parsed-address objects cannot forge admission. Policy receives
+  detached address facts and cannot mutate the gateway-owned peer after admission; the
+  transport receives one numeric address and uses the original hostname only for
+  HTTP/TLS identity.
 - Ambient proxy variables, cookies, caches, client authentication, insecure TLS, and
   implicit retry are absent by construction.
 - Every redirect repeats the full destination pipeline and remains within the original
@@ -170,9 +174,10 @@ internet.
 - `HttpTransferUsage` reports encoded response-body bytes separately from exact consumed
   response-wire bytes; transferred limits use request-body plus response-wire usage.
 - A public response always has a final status from 200 through 599.
-- The gateway reconstructs and revalidates transport response shape, nested header
-  name/value invariants, final status, and wire-byte invariants instead of trusting
-  collaborator object construction.
+- The gateway reconstructs and revalidates exact transport response primitives, nested
+  header name/value invariants, final status, and wire-byte invariants instead of
+  trusting collaborator object construction. Header strings are snapshotted as exact
+  built-in `str` values before behavior such as filtering or encoding.
 - Gateway and protected-input failures retain no provider exception context, cause, or
   raw settlement note at the session boundary.
 - Collaborator-supplied cancellation values are accepted only while the operation's

@@ -74,10 +74,14 @@ class HttpHeader:
     def __post_init__(self) -> None:
         name = cast(object, self.name)
         value = cast(object, self.value)
-        if not isinstance(name, str) or _HEADER_NAME.fullmatch(name) is None:
+        if not isinstance(name, str):
             raise OutboundHttpRequestInvalid("HTTP header name is invalid")
         if not isinstance(value, str):
             raise TypeError("HTTP header value must be a string")
+        name = str.__str__(name)
+        value = str.__str__(value)
+        if _HEADER_NAME.fullmatch(name) is None:
+            raise OutboundHttpRequestInvalid("HTTP header name is invalid")
         if any(
             (ord(character) < 32 and character != "\t") or ord(character) == 127
             for character in value
@@ -91,6 +95,8 @@ class HttpHeader:
             raise OutboundHttpRequestInvalid("HTTP header value must be valid UTF-8")
         if size > _MAX_HEADER_VALUE_BYTES:
             raise OutboundHttpLimitExceeded("HTTP header value exceeds its byte limit")
+        object.__setattr__(self, "name", name)
+        object.__setattr__(self, "value", value)
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}(name={self.name!r}, value=<redacted>)"

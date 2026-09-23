@@ -376,6 +376,10 @@ The first implementation defines and tests:
   canonical hosts require explicit rule authority. Every final A and AAAA result is
   classified; a hostname is not admitted because only one of several returned addresses
   is acceptable.
+- Resolver results are reconstructed from exact plain hostname/address strings and every
+  classification is recomputed. Collaborator-stored classifications and parsed-address
+  objects are never admission authority. Post-resolution policy receives detached
+  address facts, so it cannot mutate the gateway-owned peer selected for transport.
 - Loopback, unspecified, link-local, private, multicast, reserved, transition,
   translation, mapped, and cloud metadata destinations are denied by default for both
   IPv4 and IPv6. Explicit checks include Azure WireServer, IETF protocol-assignment and
@@ -406,9 +410,10 @@ The first implementation defines and tests:
   content-length whitespace is limited to HTTP SP/HTAB and its decimal representation
   is bounded before integer conversion. Provisional responses never cross the
   transport, gateway, grant, or session boundary as final results.
-- The gateway reconstructs and revalidates injected transport response shape,
+- The gateway reconstructs and revalidates exact injected transport response primitives,
   nested header name/value invariants, final status, and wire-byte invariants before
-  accounting or publication.
+  accounting or publication. Header fields are snapshotted as exact built-in strings
+  before filtering, sizing, redirect handling, or publication.
 - Content encoding cannot bypass the decompressed-response limit.
 - HEAD and status-defined bodyless responses do not decode representation metadata.
 - Failed/cancelled attempts abort stream shutdown immediately; successful graceful

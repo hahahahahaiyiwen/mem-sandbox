@@ -2,6 +2,7 @@ import asyncio
 import gzip
 import inspect
 from collections.abc import Callable, Coroutine
+from ipaddress import ip_address
 from typing import Any, cast
 from uuid import UUID
 
@@ -15,6 +16,7 @@ from mem_sandbox.network import (
     HttpMethod,
     HttpScheme,
     HttpTransferLimits,
+    IpAddressClass,
     NetworkOperationContext,
     NetworkPolicyDecision,
     NetworkPolicyId,
@@ -45,6 +47,22 @@ class Cancellation:
 
     def is_set(self) -> bool:
         return self.cancelled
+
+
+class StatusSubclass(int):
+    pass
+
+
+class HeadersTupleSubclass(tuple[HttpHeader, ...]):
+    pass
+
+
+class BodySubclass(bytes):
+    pass
+
+
+class WireBytesSubclass(int):
+    pass
 
 
 class RecordingPolicy:
@@ -363,6 +381,58 @@ async def test_mixed_dns_answer_denies_every_address_before_transport() -> None:
 
 
 @pytest.mark.asyncio
+async def test_forged_resolver_classification_is_recomputed_before_transport() -> None:
+    address = ResolvedHttpAddress("127.0.0.1")
+    resolution_result = NetworkResolution(
+        hostname="example.test",
+        addresses=(address,),
+    )
+    object.__setattr__(address, "classification", IpAddressClass.GLOBAL)
+    resolver = RecordingResolver({"example.test": resolution_result})
+    subject, _, _, transport = gateway(resolver=resolver)
+
+    with pytest.raises(OutboundHttpDenied):
+        await subject.send(request(), context())
+
+    assert transport.calls == []
+
+
+@pytest.mark.asyncio
+async def test_forged_resolver_ip_storage_is_rebuilt_from_address_value() -> None:
+    address = ResolvedHttpAddress("8.8.8.8")
+    resolution_result = NetworkResolution(
+        hostname="example.test",
+        addresses=(address,),
+    )
+    object.__setattr__(address, "_ip", ip_address("127.0.0.1"))
+    resolver = RecordingResolver({"example.test": resolution_result})
+    subject, _, _, transport = gateway(resolver=resolver)
+
+    await subject.send(request(), context())
+
+    admitted = transport.calls[0][0].destination.address
+    assert admitted.value == "8.8.8.8"
+    assert admitted.ip == ip_address("8.8.8.8")
+
+
+@pytest.mark.asyncio
+async def test_malformed_nested_resolver_address_has_stable_failure() -> None:
+    invalid = object.__new__(NetworkResolution)
+    object.__setattr__(invalid, "hostname", "example.test")
+    object.__setattr__(invalid, "addresses", (object(),))
+    object.__setattr__(invalid, "canonical_hostname", None)
+    resolver = RecordingResolver({"example.test": invalid})
+    subject, _, _, transport = gateway(resolver=resolver)
+
+    with pytest.raises(OutboundHttpResolutionFailed) as captured:
+        await subject.send(request(), context())
+
+    assert captured.value.__cause__ is None
+    assert captured.value.__context__ is None
+    assert transport.calls == []
+
+
+@pytest.mark.asyncio
 async def test_wireserver_mixed_dns_answer_denies_whole_answer_before_transport() -> None:
     resolver = RecordingResolver(
         {"example.test": resolution("example.test", "8.8.8.8", "168.63.129.16")}
@@ -492,6 +562,25 @@ async def test_ip_literal_skips_dns_and_transport_receives_only_admitted_peer() 
     attempt = transport.calls[0][0]
     assert attempt.destination.address.value == "8.8.8.8"
     assert attempt.destination.url.hostname == "8.8.8.8"
+
+
+@pytest.mark.asyncio
+async def test_policy_cannot_mutate_the_gateway_owned_admitted_peer() -> None:
+    def mutate_policy_copy(facts: NetworkPolicyRequest) -> NetworkPolicyDecision:
+        if facts.phase is NetworkPolicyPhase.POST_RESOLUTION:
+            address = facts.addresses[0]
+            object.__setattr__(address, "value", "127.0.0.1")
+            object.__setattr__(address, "_ip", ip_address("127.0.0.1"))
+            object.__setattr__(address, "classification", IpAddressClass.GLOBAL)
+        return NetworkPolicyDecision.allow()
+
+    subject, _, _, transport = gateway(policy=RecordingPolicy(mutate_policy_copy))
+
+    await subject.send(request(), context())
+
+    admitted = transport.calls[0][0].destination.address
+    assert admitted.value == "8.8.8.8"
+    assert admitted.ip == ip_address("8.8.8.8")
 
 
 @pytest.mark.asyncio
@@ -1196,6 +1285,19 @@ async def test_gateway_rejects_negative_wire_bytes_from_injected_transport() -> 
     assert captured.value.__context__ is None
 
 
+@pytest.mark.asyncio
+async def test_gateway_rejects_incomplete_transport_response_without_context() -> None:
+    invalid = object.__new__(HttpTransportResponse)
+    object.__setattr__(invalid, "status_code", 200)
+    subject, _, _, _ = gateway(transport=RecordingTransport((invalid,)))
+
+    with pytest.raises(OutboundHttpResponseInvalid) as captured:
+        await subject.send(request(), context())
+
+    assert captured.value.__cause__ is None
+    assert captured.value.__context__ is None
+
+
 @pytest.mark.parametrize(
     ("name", "value"),
     [
@@ -1225,6 +1327,72 @@ async def test_gateway_rejects_invalid_nested_header_from_injected_transport(
 
     assert captured.value.__cause__ is None
     assert captured.value.__context__ is None
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("status_code", StatusSubclass(200)),
+        ("headers", HeadersTupleSubclass()),
+        ("body", BodySubclass()),
+        ("wire_bytes", WireBytesSubclass(0)),
+    ],
+)
+@pytest.mark.asyncio
+async def test_gateway_rejects_response_scalar_subclasses(
+    field: str,
+    value: object,
+) -> None:
+    invalid = object.__new__(HttpTransportResponse)
+    object.__setattr__(invalid, "status_code", 200)
+    object.__setattr__(invalid, "headers", ())
+    object.__setattr__(invalid, "body", b"")
+    object.__setattr__(invalid, "wire_bytes", 0)
+    object.__setattr__(invalid, field, value)
+    subject, _, _, _ = gateway(transport=RecordingTransport((invalid,)))
+
+    with pytest.raises(OutboundHttpResponseInvalid) as captured:
+        await subject.send(request(), context())
+
+    assert captured.value.__cause__ is None
+    assert captured.value.__context__ is None
+
+
+@pytest.mark.asyncio
+async def test_gateway_canonicalizes_behavior_bearing_header_name() -> None:
+    class MisleadingHeaderName(str):
+        def lower(self) -> str:
+            return "x-public"
+
+    header = object.__new__(HttpHeader)
+    object.__setattr__(header, "name", MisleadingHeaderName("Set-Cookie"))
+    object.__setattr__(header, "value", "secret=value")
+    subject, _, _, _ = gateway(
+        transport=RecordingTransport((transport_response(headers=(header,)),))
+    )
+
+    response = await subject.send(request(), context())
+
+    assert response.headers == ()
+
+
+@pytest.mark.asyncio
+async def test_gateway_canonicalizes_behavior_bearing_header_value() -> None:
+    class ExplodingHeaderValue(str):
+        def encode(self, *args: object, **kwargs: object) -> bytes:
+            raise RuntimeError("provider-controlled encode")
+
+    header = object.__new__(HttpHeader)
+    object.__setattr__(header, "name", "X-Public")
+    object.__setattr__(header, "value", ExplodingHeaderValue("value"))
+    subject, _, _, _ = gateway(
+        transport=RecordingTransport((transport_response(headers=(header,)),))
+    )
+
+    response = await subject.send(request(), context())
+
+    assert response.headers == (HttpHeader("X-Public", "value"),)
+    assert type(response.headers[0].value) is str
 
 
 @pytest.mark.asyncio

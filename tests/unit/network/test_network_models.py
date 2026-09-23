@@ -176,6 +176,24 @@ def test_http_header_rejects_non_tab_control_characters(value: str) -> None:
         HttpHeader("X-Test", value)
 
 
+def test_http_header_canonicalizes_string_subclasses() -> None:
+    class BehaviorBearingString(str):
+        def lower(self) -> str:
+            return "different"
+
+        def encode(self, *args: object, **kwargs: object) -> bytes:
+            raise RuntimeError("provider-controlled encode")
+
+    header = HttpHeader(
+        BehaviorBearingString("X-Test"),
+        BehaviorBearingString("value"),
+    )
+
+    assert type(header.name) is str
+    assert type(header.value) is str
+    assert header == HttpHeader("X-Test", "value")
+
+
 @pytest.mark.parametrize(
     "invalid_factory",
     [

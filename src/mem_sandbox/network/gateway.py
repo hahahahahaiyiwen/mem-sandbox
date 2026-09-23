@@ -302,7 +302,7 @@ class BoundedOutboundHttpGateway:
             hostname=url.hostname,
             port=url.port,
             redirect_depth=redirect_depth,
-            addresses=addresses,
+            addresses=_copy_resolved_addresses(addresses),
             canonical_hostname=canonical_hostname,
         )
         failed = False
@@ -373,14 +373,11 @@ class BoundedOutboundHttpGateway:
             raise OutboundHttpTimeout("controlled destination resolution timed out")
         if stable_failure is OutboundHttpResolutionFailed:
             raise OutboundHttpResolutionFailed("controlled destination resolution failed")
-        if (
-            failed
-            or not isinstance(resolution, NetworkResolution)
-            or resolution.hostname != url.hostname
-        ):
+        validated = None if failed else _validated_resolution(resolution, url.hostname)
+        if validated is None:
             raise OutboundHttpResolutionFailed("controlled destination resolution failed")
         _require_active(context)
-        return resolution
+        return validated
 
     async def _send_attempt(
         self,
@@ -459,19 +456,28 @@ def _require_transport_response(
     response: HttpTransportResponse,
     request: HttpTransportRequest,
 ) -> HttpTransportResponse:
+    if type(response) is not HttpTransportResponse:
+        raise OutboundHttpResponseInvalid("HTTP transport returned an invalid response")
+    invalid = False
+    status: object | None = None
+    headers: object | None = None
+    body: object | None = None
+    wire_bytes: object | None = None
     try:
         status = cast(object, response.status_code)
         headers = cast(object, response.headers)
         body = cast(object, response.body)
         wire_bytes = cast(object, response.wire_bytes)
     except AttributeError:
-        raise OutboundHttpResponseInvalid("HTTP transport returned an invalid response") from None
-    if isinstance(status, bool) or not isinstance(status, int) or not 200 <= status <= 599:
+        invalid = True
+    if invalid:
+        raise OutboundHttpResponseInvalid("HTTP transport returned an invalid response")
+    if type(status) is not int or not 200 <= status <= 599:
         raise OutboundHttpResponseInvalid("HTTP transport returned an invalid response")
     validated_headers = _require_transport_headers(headers)
-    if not isinstance(body, bytes):
+    if type(body) is not bytes:
         raise OutboundHttpResponseInvalid("HTTP transport returned an invalid response")
-    if isinstance(wire_bytes, bool) or not isinstance(wire_bytes, int) or wire_bytes < len(body):
+    if type(wire_bytes) is not int or wire_bytes < len(body):
         raise OutboundHttpResponseInvalid("HTTP transport returned an invalid response")
     validated = HttpTransportResponse(
         status_code=status,
@@ -504,11 +510,11 @@ def _require_transport_response(
 
 
 def _require_transport_headers(headers: object) -> tuple[HttpHeader, ...]:
-    if not isinstance(headers, tuple):
+    if type(headers) is not tuple:
         raise OutboundHttpResponseInvalid("HTTP transport returned an invalid response")
     validated: list[HttpHeader] = []
     for header in cast(tuple[object, ...], headers):
-        if not isinstance(header, HttpHeader):
+        if type(header) is not HttpHeader:
             raise OutboundHttpResponseInvalid("HTTP transport returned an invalid response")
         invalid = False
         name: object | None = None
@@ -530,6 +536,58 @@ def _require_transport_headers(headers: object) -> tuple[HttpHeader, ...]:
             raise OutboundHttpResponseInvalid("HTTP transport returned an invalid response")
         validated.append(validated_header)
     return tuple(validated)
+
+
+def _validated_resolution(
+    resolution: object,
+    expected_hostname: str,
+) -> NetworkResolution | None:
+    if type(resolution) is not NetworkResolution:
+        return None
+    try:
+        hostname = cast(object, resolution.hostname)
+        addresses = cast(object, resolution.addresses)
+        canonical_hostname = cast(object, resolution.canonical_hostname)
+    except AttributeError:
+        return None
+    if not isinstance(hostname, str) or type(addresses) is not tuple:
+        return None
+    hostname = str.__str__(hostname)
+    if canonical_hostname is not None:
+        if not isinstance(canonical_hostname, str):
+            return None
+        canonical_hostname = str.__str__(canonical_hostname)
+    validated_addresses: list[ResolvedHttpAddress] = []
+    for address in cast(tuple[object, ...], addresses):
+        if type(address) is not ResolvedHttpAddress:
+            return None
+        try:
+            value = cast(object, address.value)
+        except AttributeError:
+            return None
+        if not isinstance(value, str):
+            return None
+        try:
+            validated_addresses.append(ResolvedHttpAddress(str.__str__(value)))
+        except (TypeError, ValueError):
+            return None
+    try:
+        validated = NetworkResolution(
+            hostname=hostname,
+            addresses=tuple(validated_addresses),
+            canonical_hostname=canonical_hostname,
+        )
+    except (OutboundHttpRequestInvalid, TypeError, ValueError, UnicodeError):
+        return None
+    if validated.hostname != expected_hostname:
+        return None
+    return validated
+
+
+def _copy_resolved_addresses(
+    addresses: tuple[ResolvedHttpAddress, ...],
+) -> tuple[ResolvedHttpAddress, ...]:
+    return tuple(ResolvedHttpAddress(address.value) for address in addresses)
 
 
 def _redirect_location(response: HttpTransportResponse) -> str | None:

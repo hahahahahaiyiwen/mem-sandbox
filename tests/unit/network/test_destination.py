@@ -16,6 +16,7 @@ from mem_sandbox.network import (
     NetworkPolicyOutcome,
     NetworkPolicyPhase,
     NetworkPolicyRequest,
+    NetworkResolution,
     NormalizedHttpUrl,
     ResolvedHttpAddress,
     StaticNetworkPolicy,
@@ -216,6 +217,31 @@ def test_documentation_prefix_denial_is_independent_of_stdlib_flags(
     monkeypatch.setattr(IPv6Address, "is_reserved", property(is_reserved))
 
     assert classify_ip_address(IPv6Address("3fff::1")) is IpAddressClass.RESERVED
+
+
+def test_resolved_address_canonicalizes_string_subclasses() -> None:
+    class BehaviorBearingAddress(str):
+        def __contains__(self, value: object) -> bool:
+            raise RuntimeError(value)
+
+    class BehaviorBearingHostname(str):
+        def encode(self, encoding: str = "utf-8", errors: str = "strict") -> bytes:
+            raise RuntimeError((encoding, errors))
+
+    address = ResolvedHttpAddress(BehaviorBearingAddress("8.8.8.8"))
+    resolution = NetworkResolution(
+        hostname=BehaviorBearingHostname("example.test"),
+        addresses=(address,),
+        canonical_hostname=BehaviorBearingHostname("canonical.example.test"),
+    )
+
+    assert type(address.value) is str
+    assert address.value == "8.8.8.8"
+    assert address.ip == ip_address("8.8.8.8")
+    assert type(resolution.hostname) is str
+    assert type(resolution.canonical_hostname) is str
+    assert resolution.hostname == "example.test"
+    assert resolution.canonical_hostname == "canonical.example.test"
 
 
 def _policy_request(
