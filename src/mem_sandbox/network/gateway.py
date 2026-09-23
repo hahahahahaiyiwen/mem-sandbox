@@ -199,7 +199,7 @@ class BoundedOutboundHttpGateway:
             raw_response = await self._send_attempt(attempt, context)
             _require_active(context)
             request_count += 1
-            _require_transport_response(raw_response, attempt)
+            raw_response = _require_transport_response(raw_response, attempt)
             encoded_response_bytes += len(raw_response.body)
             response_wire_bytes += raw_response.wire_bytes
             if len(request.body) + response_wire_bytes > limits.max_transferred_bytes:
@@ -458,7 +458,7 @@ def _transport_headers(
 def _require_transport_response(
     response: HttpTransportResponse,
     request: HttpTransportRequest,
-) -> None:
+) -> HttpTransportResponse:
     try:
         status = cast(object, response.status_code)
         headers = cast(object, response.headers)
@@ -468,34 +468,68 @@ def _require_transport_response(
         raise OutboundHttpResponseInvalid("HTTP transport returned an invalid response") from None
     if isinstance(status, bool) or not isinstance(status, int) or not 200 <= status <= 599:
         raise OutboundHttpResponseInvalid("HTTP transport returned an invalid response")
-    if not isinstance(headers, tuple) or any(
-        not isinstance(header, HttpHeader) for header in cast(tuple[object, ...], headers)
-    ):
-        raise OutboundHttpResponseInvalid("HTTP transport returned an invalid response")
+    validated_headers = _require_transport_headers(headers)
     if not isinstance(body, bytes):
         raise OutboundHttpResponseInvalid("HTTP transport returned an invalid response")
     if isinstance(wire_bytes, bool) or not isinstance(wire_bytes, int) or wire_bytes < len(body):
         raise OutboundHttpResponseInvalid("HTTP transport returned an invalid response")
-    if _headers_size(response.headers) > request.max_response_header_bytes:
+    validated = HttpTransportResponse(
+        status_code=status,
+        headers=validated_headers,
+        body=body,
+        wire_bytes=wire_bytes,
+    )
+    if _headers_size(validated.headers) > request.max_response_header_bytes:
         raise OutboundHttpLimitExceeded("HTTP response headers exceed the requested limit")
-    if len(response.body) > request.max_response_body_bytes:
+    if len(validated.body) > request.max_response_body_bytes:
         raise OutboundHttpLimitExceeded("HTTP response body exceeds the requested limit")
-    if response.wire_bytes > request.max_response_wire_bytes:
+    if validated.wire_bytes > request.max_response_wire_bytes:
         raise OutboundHttpLimitExceeded("HTTP response wire bytes exceed the requested limit")
     content_lengths = [
-        header.value for header in response.headers if header.name.lower() == "content-length"
+        header.value for header in validated.headers if header.name.lower() == "content-length"
     ]
     if len(content_lengths) > 1:
         raise OutboundHttpResponseInvalid("HTTP response has ambiguous content length")
     if content_lengths:
         declared = parse_http_content_length(content_lengths[0])
-        body_omitted = _response_omits_body(request.method, response.status_code) or (
-            response.status_code in _REDIRECT_STATUSES and _redirect_location(response) is not None
+        body_omitted = _response_omits_body(request.method, validated.status_code) or (
+            validated.status_code in _REDIRECT_STATUSES
+            and _redirect_location(validated) is not None
         )
-        if not body_omitted and declared != len(response.body):
+        if not body_omitted and declared != len(validated.body):
             raise OutboundHttpResponseInvalid(
                 "HTTP response content length does not match its body"
             )
+    return validated
+
+
+def _require_transport_headers(headers: object) -> tuple[HttpHeader, ...]:
+    if not isinstance(headers, tuple):
+        raise OutboundHttpResponseInvalid("HTTP transport returned an invalid response")
+    validated: list[HttpHeader] = []
+    for header in cast(tuple[object, ...], headers):
+        if not isinstance(header, HttpHeader):
+            raise OutboundHttpResponseInvalid("HTTP transport returned an invalid response")
+        invalid = False
+        name: object | None = None
+        value: object | None = None
+        try:
+            name = cast(object, header.name)
+            value = cast(object, header.value)
+        except AttributeError:
+            invalid = True
+        validated_header: HttpHeader | None = None
+        if not invalid and isinstance(name, str) and isinstance(value, str):
+            try:
+                validated_header = HttpHeader(name, value)
+            except (OutboundHttpLimitExceeded, OutboundHttpRequestInvalid, TypeError):
+                invalid = True
+        else:
+            invalid = True
+        if invalid or validated_header is None:
+            raise OutboundHttpResponseInvalid("HTTP transport returned an invalid response")
+        validated.append(validated_header)
+    return tuple(validated)
 
 
 def _redirect_location(response: HttpTransportResponse) -> str | None:

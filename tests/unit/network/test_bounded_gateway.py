@@ -1196,6 +1196,37 @@ async def test_gateway_rejects_negative_wire_bytes_from_injected_transport() -> 
     assert captured.value.__context__ is None
 
 
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("Bad Header", "value"),
+        (123, "value"),
+        ("X-Test", 123),
+        ("X-Test", "value\r\nInjected: true"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_gateway_rejects_invalid_nested_header_from_injected_transport(
+    name: object,
+    value: object,
+) -> None:
+    header = object.__new__(HttpHeader)
+    object.__setattr__(header, "name", name)
+    object.__setattr__(header, "value", value)
+    invalid = object.__new__(HttpTransportResponse)
+    object.__setattr__(invalid, "status_code", 200)
+    object.__setattr__(invalid, "headers", (header,))
+    object.__setattr__(invalid, "body", b"")
+    object.__setattr__(invalid, "wire_bytes", 0)
+    subject, _, _, _ = gateway(transport=RecordingTransport((invalid,)))
+
+    with pytest.raises(OutboundHttpResponseInvalid) as captured:
+        await subject.send(request(), context())
+
+    assert captured.value.__cause__ is None
+    assert captured.value.__context__ is None
+
+
 @pytest.mark.asyncio
 async def test_sensitive_response_headers_are_not_published_or_reused() -> None:
     transport = RecordingTransport(

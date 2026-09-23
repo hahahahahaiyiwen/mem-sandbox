@@ -170,8 +170,9 @@ internet.
 - `HttpTransferUsage` reports encoded response-body bytes separately from exact consumed
   response-wire bytes; transferred limits use request-body plus response-wire usage.
 - A public response always has a final status from 200 through 599.
-- The gateway revalidates transport response shape, final status, and wire-byte
-  invariants instead of trusting collaborator object construction.
+- The gateway reconstructs and revalidates transport response shape, nested header
+  name/value invariants, final status, and wire-byte invariants instead of trusting
+  collaborator object construction.
 - Gateway and protected-input failures retain no provider exception context, cause, or
   raw settlement note at the session boundary.
 - Collaborator-supplied cancellation values are accepted only while the operation's
