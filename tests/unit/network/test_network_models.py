@@ -109,6 +109,11 @@ def test_transport_response_rejects_provisional_status() -> None:
         HttpTransportResponse(status_code=103, headers=(), body=b"", wire_bytes=0)
 
 
+def test_transport_response_rejects_negative_wire_bytes() -> None:
+    with pytest.raises(ValueError):
+        HttpTransportResponse(status_code=200, headers=(), body=b"", wire_bytes=-1)
+
+
 def test_public_response_and_grant_reject_provisional_status() -> None:
     usage = HttpTransferUsage(
         request_count=1,
@@ -356,6 +361,19 @@ def test_grant_rejects_request_before_gateway_use() -> None:
                 method=HttpMethod.GET,
                 url="https://example.test",
                 limits=limits(max_response_body_bytes=8192),
+            )
+        )
+
+
+def test_grant_rejects_request_count_above_its_limit() -> None:
+    configured = grant(transfer_limits=limits(max_requests=1))
+
+    with pytest.raises(OutboundHttpLimitExceeded):
+        configured.require_request(
+            OutboundHttpRequest(
+                method=HttpMethod.GET,
+                url="https://example.test",
+                limits=limits(max_requests=2),
             )
         )
 

@@ -406,6 +406,8 @@ The first implementation defines and tests:
   content-length whitespace is limited to HTTP SP/HTAB and its decimal representation
   is bounded before integer conversion. Provisional responses never cross the
   transport, gateway, grant, or session boundary as final results.
+- The gateway revalidates injected transport response shape, final status, and
+  wire-byte invariants before accounting or publication.
 - Content encoding cannot bypass the decompressed-response limit.
 - HEAD and status-defined bodyless responses do not decode representation metadata.
 - Failed/cancelled attempts abort stream shutdown immediately; successful graceful

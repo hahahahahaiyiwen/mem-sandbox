@@ -459,8 +459,23 @@ def _require_transport_response(
     response: HttpTransportResponse,
     request: HttpTransportRequest,
 ) -> None:
-    if response.status_code < 200:
-        raise OutboundHttpResponseInvalid("HTTP transport returned a provisional response")
+    try:
+        status = cast(object, response.status_code)
+        headers = cast(object, response.headers)
+        body = cast(object, response.body)
+        wire_bytes = cast(object, response.wire_bytes)
+    except AttributeError:
+        raise OutboundHttpResponseInvalid("HTTP transport returned an invalid response") from None
+    if isinstance(status, bool) or not isinstance(status, int) or not 200 <= status <= 599:
+        raise OutboundHttpResponseInvalid("HTTP transport returned an invalid response")
+    if not isinstance(headers, tuple) or any(
+        not isinstance(header, HttpHeader) for header in cast(tuple[object, ...], headers)
+    ):
+        raise OutboundHttpResponseInvalid("HTTP transport returned an invalid response")
+    if not isinstance(body, bytes):
+        raise OutboundHttpResponseInvalid("HTTP transport returned an invalid response")
+    if isinstance(wire_bytes, bool) or not isinstance(wire_bytes, int) or wire_bytes < len(body):
+        raise OutboundHttpResponseInvalid("HTTP transport returned an invalid response")
     if _headers_size(response.headers) > request.max_response_header_bytes:
         raise OutboundHttpLimitExceeded("HTTP response headers exceed the requested limit")
     if len(response.body) > request.max_response_body_bytes:
