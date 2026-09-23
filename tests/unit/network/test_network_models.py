@@ -106,12 +106,41 @@ def test_http_request_and_response_are_immutable_and_non_revealing() -> None:
 
 def test_transport_response_rejects_provisional_status() -> None:
     with pytest.raises(ValueError):
-        HttpTransportResponse(status_code=103, headers=(), body=b"", wire_bytes=0)
+        HttpTransportResponse(
+            status_code=103,
+            headers=(),
+            body=b"",
+            header_bytes=0,
+            metadata_wire_bytes=17,
+            body_wire_bytes=0,
+            wire_bytes=17,
+        )
 
 
 def test_transport_response_rejects_negative_wire_bytes() -> None:
     with pytest.raises(ValueError):
-        HttpTransportResponse(status_code=200, headers=(), body=b"", wire_bytes=-1)
+        HttpTransportResponse(
+            status_code=200,
+            headers=(),
+            body=b"",
+            header_bytes=0,
+            metadata_wire_bytes=17,
+            body_wire_bytes=0,
+            wire_bytes=-1,
+        )
+
+
+def test_transport_response_requires_structural_wire_accounting() -> None:
+    with pytest.raises(ValueError):
+        HttpTransportResponse(
+            status_code=200,
+            headers=(),
+            body=b"",
+            header_bytes=0,
+            metadata_wire_bytes=17,
+            body_wire_bytes=0,
+            wire_bytes=18,
+        )
 
 
 def test_public_response_and_grant_reject_provisional_status() -> None:

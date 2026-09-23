@@ -359,13 +359,44 @@ def transport_response(
     *,
     headers: tuple[HttpHeader, ...] = (),
     body: bytes = b"value",
+    header_bytes: int | None = None,
+    metadata_wire_bytes: int | None = None,
+    body_wire_bytes: int | None = None,
     wire_bytes: int | None = None,
 ) -> HttpTransportResponse:
+    effective_header_bytes = (
+        sum(
+            len(str.__str__(header.name).encode("ascii"))
+            + 2
+            + len(str.__str__(header.value).encode("utf-8"))
+            + 2
+            for header in headers
+        )
+        if header_bytes is None
+        else header_bytes
+    )
+    effective_metadata_wire_bytes = (
+        17
+        + sum(
+            len(str.__str__(header.name).encode("ascii")) + 2 + len(str.__str__(header.value)) + 2
+            for header in headers
+        )
+        if metadata_wire_bytes is None
+        else metadata_wire_bytes
+    )
+    effective_body_wire_bytes = len(body) if body_wire_bytes is None else body_wire_bytes
     return HttpTransportResponse(
         status_code=status,
         headers=headers,
         body=body,
-        wire_bytes=len(body) if wire_bytes is None else wire_bytes,
+        header_bytes=effective_header_bytes,
+        metadata_wire_bytes=effective_metadata_wire_bytes,
+        body_wire_bytes=effective_body_wire_bytes,
+        wire_bytes=(
+            effective_metadata_wire_bytes + effective_body_wire_bytes
+            if wire_bytes is None
+            else wire_bytes
+        ),
     )
 
 
@@ -958,7 +989,10 @@ async def test_redirect_body_omission_does_not_trust_or_read_declared_length() -
 async def test_invalid_redirect_location_is_stable_before_another_attempt(
     location: str,
 ) -> None:
-    transfer_limits = limits(max_response_header_bytes=20_000)
+    transfer_limits = limits(
+        max_response_header_bytes=20_000,
+        max_transferred_bytes=20_000,
+    )
     transport = RecordingTransport(
         (
             transport_response(
@@ -1154,7 +1188,7 @@ async def test_gateway_narrows_each_attempt_to_the_remaining_encoded_body_budget
     transfer_limits = limits(
         max_response_body_bytes=5,
         max_decompressed_response_bytes=5,
-        max_transferred_bytes=20,
+        max_transferred_bytes=1024,
     )
     transport = RecordingTransport(
         (
@@ -1184,7 +1218,7 @@ async def test_encoded_and_decompressed_limits_are_enforced_before_publication()
     transfer_limits = limits(
         max_response_body_bytes=len(compressed),
         max_decompressed_response_bytes=40,
-        max_transferred_bytes=len(compressed),
+        max_transferred_bytes=1024,
     )
     transport = RecordingTransport(
         (
@@ -1249,6 +1283,44 @@ async def test_malformed_content_encoding_is_a_stable_response_failure() -> None
 
 
 @pytest.mark.asyncio
+async def test_gateway_rejects_impossible_zero_wire_success() -> None:
+    invalid = object.__new__(HttpTransportResponse)
+    object.__setattr__(invalid, "status_code", 200)
+    object.__setattr__(invalid, "headers", ())
+    object.__setattr__(invalid, "body", b"")
+    object.__setattr__(invalid, "header_bytes", 0)
+    object.__setattr__(invalid, "metadata_wire_bytes", 0)
+    object.__setattr__(invalid, "body_wire_bytes", 0)
+    object.__setattr__(invalid, "wire_bytes", 0)
+    subject, _, _, _ = gateway(transport=RecordingTransport((invalid,)))
+
+    with pytest.raises(OutboundHttpResponseInvalid):
+        await subject.send(request(), context())
+
+
+@pytest.mark.asyncio
+async def test_gateway_enforces_reported_hidden_response_metadata() -> None:
+    transfer_limits = limits(max_response_header_bytes=16)
+    subject, _, _, _ = gateway(
+        transport=RecordingTransport(
+            (
+                transport_response(
+                    body=b"",
+                    header_bytes=64,
+                    metadata_wire_bytes=81,
+                ),
+            )
+        )
+    )
+
+    with pytest.raises(OutboundHttpLimitExceeded):
+        await subject.send(
+            request(transfer_limits=transfer_limits),
+            context(transfer_limits),
+        )
+
+
+@pytest.mark.asyncio
 async def test_gateway_rejects_non_decimal_content_length_from_injected_transport() -> None:
     subject, _, _, _ = gateway(
         transport=RecordingTransport(
@@ -1267,7 +1339,10 @@ async def test_gateway_rejects_non_decimal_content_length_from_injected_transpor
 
 @pytest.mark.asyncio
 async def test_gateway_rejects_pathological_content_length_without_exception_leak() -> None:
-    transfer_limits = limits(max_response_header_bytes=10_000)
+    transfer_limits = limits(
+        max_response_header_bytes=10_000,
+        max_transferred_bytes=10_000,
+    )
     subject, _, _, _ = gateway(
         transport=RecordingTransport(
             (
@@ -1291,10 +1366,8 @@ async def test_gateway_rejects_pathological_content_length_without_exception_lea
 
 @pytest.mark.asyncio
 async def test_gateway_enforces_reported_response_wire_bytes() -> None:
-    transfer_limits = limits(max_transferred_bytes=5)
-    subject, _, _, _ = gateway(
-        transport=RecordingTransport((transport_response(body=b"x", wire_bytes=6),))
-    )
+    transfer_limits = limits(max_transferred_bytes=17)
+    subject, _, _, _ = gateway(transport=RecordingTransport((transport_response(body=b"x"),)))
 
     with pytest.raises(OutboundHttpLimitExceeded):
         await subject.send(

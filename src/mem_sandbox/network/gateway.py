@@ -575,11 +575,17 @@ def _require_transport_response(
     status: object | None = None
     headers: object | None = None
     body: object | None = None
+    header_bytes: object | None = None
+    metadata_wire_bytes: object | None = None
+    body_wire_bytes: object | None = None
     wire_bytes: object | None = None
     try:
         status = cast(object, response.status_code)
         headers = cast(object, response.headers)
         body = cast(object, response.body)
+        header_bytes = cast(object, response.header_bytes)
+        metadata_wire_bytes = cast(object, response.metadata_wire_bytes)
+        body_wire_bytes = cast(object, response.body_wire_bytes)
         wire_bytes = cast(object, response.wire_bytes)
     except AttributeError:
         invalid = True
@@ -590,15 +596,27 @@ def _require_transport_response(
     validated_headers = _require_transport_headers(headers)
     if type(body) is not bytes:
         raise OutboundHttpResponseInvalid("HTTP transport returned an invalid response")
-    if type(wire_bytes) is not int or wire_bytes < len(body):
-        raise OutboundHttpResponseInvalid("HTTP transport returned an invalid response")
-    validated = HttpTransportResponse(
-        status_code=status,
-        headers=validated_headers,
-        body=body,
-        wire_bytes=wire_bytes,
+    counters = (
+        header_bytes,
+        metadata_wire_bytes,
+        body_wire_bytes,
+        wire_bytes,
     )
-    if _headers_size(validated.headers) > request.max_response_header_bytes:
+    if any(type(value) is not int for value in counters):
+        raise OutboundHttpResponseInvalid("HTTP transport returned an invalid response")
+    try:
+        validated = HttpTransportResponse(
+            status_code=status,
+            headers=validated_headers,
+            body=body,
+            header_bytes=cast(int, header_bytes),
+            metadata_wire_bytes=cast(int, metadata_wire_bytes),
+            body_wire_bytes=cast(int, body_wire_bytes),
+            wire_bytes=cast(int, wire_bytes),
+        )
+    except (TypeError, ValueError):
+        raise OutboundHttpResponseInvalid("HTTP transport returned an invalid response") from None
+    if validated.header_bytes > request.max_response_header_bytes:
         raise OutboundHttpLimitExceeded("HTTP response headers exceed the requested limit")
     if len(validated.body) > request.max_response_body_bytes:
         raise OutboundHttpLimitExceeded("HTTP response body exceeds the requested limit")

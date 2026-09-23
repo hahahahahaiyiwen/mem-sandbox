@@ -144,8 +144,12 @@ bounded ASCII decimal representation. The gateway supports identity, gzip, and d
 decoding with a separate decompressed limit. Framing and sensitive response headers
 such as `Set-Cookie` and authentication challenges are not published. Provisional
 responses may be consumed internally but cannot cross the transport, gateway, grant, or
-session boundary as a final result. Error, timeout, and cancellation cleanup aborts the
-stream immediately; successful graceful shutdown remains bounded by the operation
+session boundary as a final result. Each transport result separates cumulative
+header-field bytes, response-head/trailer wire bytes, and encoded-body/framing wire
+bytes. The gateway revalidates their exact types, minimum visible structure, total
+equality, and per-attempt limits, including metadata absent from published headers.
+Error, timeout, and cancellation cleanup aborts the stream immediately; successful
+graceful shutdown remains bounded by the operation
 deadline. HEAD and status-defined bodyless responses skip content decoding while
 retaining safe header filtering.
 
@@ -187,9 +191,10 @@ internet.
   response-wire bytes; transferred limits use request-body plus response-wire usage.
 - A public response always has a final status from 200 through 599.
 - The gateway reconstructs and revalidates exact transport response primitives, nested
-  header name/value invariants, final status, and wire-byte invariants instead of
-  trusting collaborator object construction. Header strings are snapshotted as exact
-  built-in `str` values before behavior such as filtering or encoding.
+  header name/value invariants, final status, structural header/metadata/body counters,
+  and total wire-byte equality instead of trusting collaborator object construction.
+  Header strings are snapshotted as exact built-in `str` values before behavior such as
+  filtering or encoding.
 - Gateway and protected-input failures retain no provider exception context, cause, or
   raw settlement note at the session boundary.
 - Collaborator-supplied cancellation values are accepted only while the operation's

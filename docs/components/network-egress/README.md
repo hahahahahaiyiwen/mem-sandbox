@@ -417,14 +417,19 @@ The first implementation defines and tests:
   informational/final response head, encoded body byte, chunk-size line, data
   terminator, zero chunk, and trailer. The transferred-byte limit uses request-body plus
   response-wire usage across all attempts.
+- The single-attempt result reports cumulative header-field bytes, response
+  head/trailer wire bytes, and encoded-body/framing wire bytes separately. The gateway
+  reconstructs exact counters, requires plausible final-response structure and exact
+  total equality, and enforces raw metadata limits even when fields are not published.
 - Response framing uses strict decimal content lengths and hexadecimal chunk sizes;
   content-length whitespace is limited to HTTP SP/HTAB and its decimal representation
   is bounded before integer conversion. Provisional responses never cross the
   transport, gateway, grant, or session boundary as final results.
 - The gateway reconstructs and revalidates exact injected transport response primitives,
-  nested header name/value invariants, final status, and wire-byte invariants before
-  accounting or publication. Header fields are snapshotted as exact built-in strings
-  before filtering, sizing, redirect handling, or publication.
+  nested header name/value invariants, final status, structural metadata/body counters,
+  and total wire-byte equality before accounting or publication. Header fields are
+  snapshotted as exact built-in strings before filtering, sizing, redirect handling, or
+  publication.
 - The session independently reconstructs exact gateway response fields and the actual
   bytes payload before applying the admitted grant. Gateway-owned request/context copies
   are not reused as session authority after provider code has observed them.
