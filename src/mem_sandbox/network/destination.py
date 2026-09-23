@@ -34,7 +34,10 @@ _PRIVATE_V4 = (
     IPv4Network("172.16.0.0/12"),
     IPv4Network("192.168.0.0/16"),
 )
-_PRIVATE_V6 = (IPv6Network("fc00::/7"),)
+_PRIVATE_V6 = (
+    IPv6Network("fc00::/7"),
+    IPv6Network("fec0::/10"),
+)
 _METADATA_NETWORKS = (
     IPv4Network("169.254.169.254/32"),
     IPv4Network("169.254.170.2/32"),
@@ -44,6 +47,7 @@ _METADATA_NETWORKS = (
     IPv6Network("fe80::a9fe:a9fe/128"),
 )
 _TRANSITION_NETWORKS = (
+    IPv4Network("192.88.99.0/24"),
     IPv6Network("64:ff9b::/96"),
     IPv6Network("64:ff9b:1::/48"),
     IPv6Network("2001::/32"),
@@ -470,9 +474,7 @@ def classify_ip_address(address: IPv4Address | IPv6Address) -> IpAddressClass:
         return IpAddressClass.PRIVATE
     if isinstance(address, IPv6Address) and any(address in network for network in _PRIVATE_V6):
         return IpAddressClass.PRIVATE
-    if isinstance(address, IPv6Address) and any(
-        address in network for network in _TRANSITION_NETWORKS
-    ):
+    if any(address in network for network in _TRANSITION_NETWORKS):
         return IpAddressClass.RESERVED
     if isinstance(address, IPv6Address):
         interface_prefix = (int(address) & ((1 << 64) - 1)) >> 32

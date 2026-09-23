@@ -301,7 +301,7 @@ class BoundedOutboundHttpGateway:
             canonical_hostname=canonical_hostname,
         )
         failed = False
-        cancelled = False
+        stable_failure: type[Exception] | None = None
         decision: object = None
         try:
             decision = await self._await_collaborator(
@@ -313,13 +313,19 @@ class BoundedOutboundHttpGateway:
                 raise
             failed = True
         except OutboundHttpCancelled:
-            cancelled = True
+            cancellation = context.cancellation
+            if cancellation is not None and cancellation.is_set():
+                stable_failure = OutboundHttpCancelled
+            else:
+                failed = True
         except OutboundHttpTimeout:
-            raise
+            stable_failure = OutboundHttpTimeout
         except Exception:
             failed = True
-        if cancelled:
+        if stable_failure is OutboundHttpCancelled:
             raise OutboundHttpCancelled("network policy evaluation was cancelled")
+        if stable_failure is OutboundHttpTimeout:
+            raise OutboundHttpTimeout("network policy evaluation timed out")
         if failed or not isinstance(decision, NetworkPolicyDecision):
             raise OutboundHttpDenied("network policy evaluation failed closed")
         if decision.outcome is not NetworkPolicyOutcome.ALLOW:

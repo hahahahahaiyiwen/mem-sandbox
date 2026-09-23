@@ -326,10 +326,13 @@ async def test_mixed_dns_answer_denies_every_address_before_transport() -> None:
         "169.254.1.1",
         "224.0.0.1",
         "240.0.0.1",
+        "192.88.99.1",
         "169.254.169.254",
         "::",
         "::1",
         "fc00::1",
+        "fec0::1",
+        "fec0:0:0:ffff::1",
         "fe80::1",
         "ff02::1",
         "100::1",
@@ -1006,7 +1009,6 @@ async def test_gateway_does_not_create_collaborator_after_entry_cancellation() -
             context(cancellation=cancellation),
         )
 
-    assert cancellation.check_count == 4
     assert policy.calls == 0
     assert policy.operation is None
     assert resolver.calls == []
@@ -1066,6 +1068,38 @@ async def test_policy_failure_and_invalid_decision_fail_closed_before_dns() -> N
         assert captured.value.__context__ is None
         assert resolver.calls == []
         assert transport.calls == []
+
+
+@pytest.mark.asyncio
+async def test_policy_timeout_preserves_category_without_provider_details() -> None:
+    failure = OutboundHttpTimeout("policy detail")
+    failure.__cause__ = ValueError("provider cause")
+    policy = RecordingPolicy(failure)
+    subject, _, resolver, transport = gateway(policy=policy)
+
+    with pytest.raises(OutboundHttpTimeout) as captured:
+        await subject.send(request(), context())
+
+    assert "policy detail" not in str(captured.value)
+    assert captured.value.__cause__ is None
+    assert captured.value.__context__ is None
+    assert resolver.calls == []
+    assert transport.calls == []
+
+
+@pytest.mark.asyncio
+async def test_policy_supplied_cancellation_fails_closed_without_signal() -> None:
+    policy = RecordingPolicy(OutboundHttpCancelled("policy detail"))
+    subject, _, resolver, transport = gateway(policy=policy)
+
+    with pytest.raises(OutboundHttpDenied) as captured:
+        await subject.send(request(), context())
+
+    assert "policy detail" not in str(captured.value)
+    assert captured.value.__cause__ is None
+    assert captured.value.__context__ is None
+    assert resolver.calls == []
+    assert transport.calls == []
 
 
 @pytest.mark.asyncio

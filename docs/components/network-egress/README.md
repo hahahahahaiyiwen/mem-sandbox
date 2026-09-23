@@ -378,8 +378,9 @@ The first implementation defines and tests:
   is acceptable.
 - Loopback, unspecified, link-local, private, multicast, reserved, transition,
   translation, mapped, and cloud metadata destinations are denied by default for both
-  IPv4 and IPv6. Explicit transition checks include standard NAT64 ranges, 6to4, Teredo,
-  and both ISATAP interface-identifier forms.
+  IPv4 and IPv6. Explicit checks include deprecated IPv6 site-local space, 6to4 relay
+  anycast, standard NAT64 ranges, 6to4, Teredo, and both ISATAP
+  interface-identifier forms.
 - The transport connects only to an address that was resolved and admitted for that
   request while preserving the original hostname for TLS verification.
 - Redirect targets repeat URL normalization, policy evaluation, DNS validation, and

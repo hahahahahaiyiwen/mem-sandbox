@@ -97,8 +97,9 @@ every redirect:
    explicitly allowed final canonical hostname when one is reported, and classify every
    unique final address;
 4. deny the whole answer if any address is loopback, private, link-local, unspecified,
-   multicast, reserved/non-global, transition/translation/mapped (including standard
-   NAT64 and both ISATAP interface-identifier forms), or known metadata space;
+   multicast, reserved/non-global, deprecated site-local, transition/translation/mapped
+   (including 6to4 relay anycast, standard NAT64, and both ISATAP
+   interface-identifier forms), or known metadata space;
 5. evaluate post-resolution facts, then pass exactly the first admitted numeric address
    and the original hostname to the transport;
 6. enforce attempt, redirect, encoded-body, decompressed-body, transferred-wire-byte,
