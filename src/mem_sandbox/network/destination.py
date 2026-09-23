@@ -59,6 +59,7 @@ _SPECIAL_PURPOSE_NETWORKS = (
     IPv6Network("2002::/16"),
     IPv6Network("2620:4f:8000::/48"),
     IPv6Network("3ffe::/16"),
+    IPv6Network("3fff::/20"),
 )
 _ISATAP_INTERFACE_PREFIXES = frozenset((0x00005EFE, 0x02005EFE))
 

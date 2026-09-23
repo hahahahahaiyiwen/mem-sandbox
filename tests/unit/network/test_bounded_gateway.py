@@ -379,6 +379,18 @@ async def test_wireserver_mixed_dns_answer_denies_whole_answer_before_transport(
 
 
 @pytest.mark.asyncio
+async def test_documentation_prefix_mixed_dns_answer_denies_whole_answer() -> None:
+    resolver = RecordingResolver({"example.test": resolution("example.test", "8.8.8.8", "3fff::1")})
+    subject, _, _, transport = gateway(resolver=resolver)
+
+    with pytest.raises(OutboundHttpDenied):
+        await subject.send(request(), context())
+
+    assert len(resolver.calls) == 1
+    assert transport.calls == []
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "address",
     [
@@ -406,6 +418,7 @@ async def test_wireserver_mixed_dns_answer_denies_whole_answer_before_transport(
         "100::1",
         "2620:4f:8000::1",
         "3ffe::1",
+        "3fff::1",
         "fd00:ec2::254",
     ],
 )
@@ -448,6 +461,17 @@ async def test_wireserver_literal_is_denied_without_dns_or_transport() -> None:
 
     assert isinstance(policy, RecordingPolicy)
     assert [call.phase for call in policy.calls] == [NetworkPolicyPhase.PRE_RESOLUTION]
+    assert resolver.calls == []
+    assert transport.calls == []
+
+
+@pytest.mark.asyncio
+async def test_documentation_prefix_literal_is_denied_without_dns_or_transport() -> None:
+    subject, _, resolver, transport = gateway()
+
+    with pytest.raises(OutboundHttpDenied):
+        await subject.send(request("https://[3fff::1]/value"), context())
+
     assert resolver.calls == []
     assert transport.calls == []
 
@@ -536,6 +560,32 @@ async def test_redirect_to_wireserver_is_denied_before_second_transport() -> Non
 
 
 @pytest.mark.asyncio
+async def test_redirect_to_documentation_prefix_is_denied_before_second_transport() -> None:
+    resolver = RecordingResolver(
+        {
+            "example.test": resolution("example.test", "8.8.8.8"),
+            "documentation.test": resolution("documentation.test", "3fff::1"),
+        }
+    )
+    transport = RecordingTransport(
+        (
+            transport_response(
+                302,
+                headers=(HttpHeader("Location", "https://documentation.test/value"),),
+                body=b"",
+            ),
+        )
+    )
+    subject, _, _, _ = gateway(resolver=resolver, transport=transport)
+
+    with pytest.raises(OutboundHttpDenied):
+        await subject.send(request(), context())
+
+    assert [call[0] for call in resolver.calls] == ["example.test", "documentation.test"]
+    assert len(transport.calls) == 1
+
+
+@pytest.mark.asyncio
 async def test_same_host_redirect_rechecks_dns_and_denies_wireserver_rebinding() -> None:
     resolver = SequencedResolver(
         {
@@ -550,6 +600,34 @@ async def test_same_host_redirect_rechecks_dns_and_denies_wireserver_rebinding()
             transport_response(
                 302,
                 headers=(HttpHeader("Location", "/metadata"),),
+                body=b"",
+            ),
+        )
+    )
+    subject, _, _, _ = gateway(resolver=resolver, transport=transport)
+
+    with pytest.raises(OutboundHttpDenied):
+        await subject.send(request(), context())
+
+    assert [call[0] for call in resolver.calls] == ["example.test", "example.test"]
+    assert len(transport.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_same_host_redirect_denies_documentation_prefix_rebinding() -> None:
+    resolver = SequencedResolver(
+        {
+            "example.test": [
+                resolution("example.test", "8.8.8.8"),
+                resolution("example.test", "3fff::1"),
+            ]
+        }
+    )
+    transport = RecordingTransport(
+        (
+            transport_response(
+                302,
+                headers=(HttpHeader("Location", "/value"),),
                 body=b"",
             ),
         )

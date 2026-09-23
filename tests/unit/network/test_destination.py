@@ -1,5 +1,5 @@
 from dataclasses import FrozenInstanceError
-from ipaddress import ip_address
+from ipaddress import IPv6Address, IPv6Network, ip_address
 from uuid import UUID
 
 import pytest
@@ -188,10 +188,34 @@ def test_ipv6_transition_and_translation_ranges_are_denied(value: str) -> None:
         "192.175.48.1",
         "2620:4f:8000::1",
         "3ffe::1",
+        "3fff::1",
     ],
 )
 def test_ietf_protocol_assignment_exceptions_are_denied(value: str) -> None:
     assert classify_ip_address(ip_address(value)) is IpAddressClass.RESERVED
+
+
+def test_documentation_prefix_denial_is_independent_of_stdlib_flags(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prefix = IPv6Network("3fff::/20")
+    original_global = IPv6Address.is_global
+    original_reserved = IPv6Address.is_reserved
+
+    def is_global(address: IPv6Address) -> bool:
+        if address in prefix:
+            return True
+        return bool(original_global.__get__(address, IPv6Address))
+
+    def is_reserved(address: IPv6Address) -> bool:
+        if address in prefix:
+            return False
+        return bool(original_reserved.__get__(address, IPv6Address))
+
+    monkeypatch.setattr(IPv6Address, "is_global", property(is_global))
+    monkeypatch.setattr(IPv6Address, "is_reserved", property(is_reserved))
+
+    assert classify_ip_address(IPv6Address("3fff::1")) is IpAddressClass.RESERVED
 
 
 def _policy_request(
