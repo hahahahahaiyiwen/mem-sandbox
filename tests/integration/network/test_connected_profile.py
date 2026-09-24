@@ -31,8 +31,11 @@ from mem_sandbox.network import (
     OutboundHttpLimitExceeded,
     OutboundHttpRequest,
     OutboundHttpRequestInvalid,
+    OutboundHttpResolutionFailed,
     OutboundHttpResponse,
+    OutboundHttpResponseInvalid,
     OutboundHttpTimeout,
+    OutboundHttpTransportFailed,
     OutboundHttpUnavailable,
 )
 from mem_sandbox.network.testing import FakeOutboundHttpGateway
@@ -214,6 +217,34 @@ class CancellationSuppressingGateway(FakeOutboundHttpGateway):
             self.finished.set()
 
 
+class LengthMaskingBody(bytes):
+    def __len__(self) -> int:
+        return 0
+
+    def __bytes__(self) -> bytes:
+        raise RuntimeError("provider-controlled bytes conversion")
+
+
+class InputMutatingGateway(FakeOutboundHttpGateway):
+    def __init__(
+        self,
+        outcome: OutboundHttpResponse,
+        replacement_limits: HttpTransferLimits,
+    ) -> None:
+        super().__init__(())
+        self._outcome = outcome
+        self._replacement_limits = replacement_limits
+
+    async def send(
+        self,
+        request: OutboundHttpRequest,
+        context: NetworkOperationContext,
+    ) -> OutboundHttpResponse:
+        object.__setattr__(request, "limits", self._replacement_limits)
+        object.__setattr__(context.grant, "limits", self._replacement_limits)
+        return self._outcome
+
+
 @dataclass(frozen=True, slots=True)
 class Bundle:
     service: InMemorySandboxService
@@ -261,11 +292,33 @@ def response(body: bytes = b"value") -> OutboundHttpResponse:
             request_count=1,
             request_bytes=0,
             response_bytes=len(body),
+            response_wire_bytes=len(body),
             decompressed_response_bytes=len(body),
             redirect_count=0,
             duration_ms=1,
         ),
     )
+
+
+def provisional_response() -> OutboundHttpResponse:
+    provisional = object.__new__(OutboundHttpResponse)
+    object.__setattr__(provisional, "status_code", 103)
+    object.__setattr__(provisional, "headers", ())
+    object.__setattr__(provisional, "body", b"")
+    object.__setattr__(
+        provisional,
+        "usage",
+        HttpTransferUsage(
+            request_count=1,
+            request_bytes=0,
+            response_bytes=0,
+            response_wire_bytes=0,
+            decompressed_response_bytes=0,
+            redirect_count=0,
+            duration_ms=1,
+        ),
+    )
+    return provisional
 
 
 def http_request(
@@ -379,6 +432,93 @@ async def test_virtual_profile_rejects_before_gateway_and_connected_profile_roun
         SandboxEventType.OPERATION_STARTED,
         SandboxEventType.OPERATION_COMPLETED,
     ]
+    await configured.service.close()
+
+
+@pytest.mark.asyncio
+async def test_connected_profile_rejects_provisional_gateway_response() -> None:
+    configured = bundle((provisional_response(),))
+    connected = await connected_session(configured)
+
+    with pytest.raises(OutboundHttpResponseInvalid) as captured:
+        await connected.send_http(http_request())
+
+    assert captured.value.__cause__ is None
+    assert captured.value.__context__ is None
+    events = await configured.events.query(EventQuery(session_id=connected.session_id))
+    assert [
+        event.event_type for event in events if event.operation_kind is OperationKind.OUTBOUND_HTTP
+    ] == [
+        SandboxEventType.OPERATION_STARTED,
+        SandboxEventType.OPERATION_FAILED,
+    ]
+    await configured.service.close()
+
+
+@pytest.mark.asyncio
+async def test_connected_profile_reconstructs_response_before_limit_validation() -> None:
+    body = LengthMaskingBody(b"x" * 128)
+    invalid = OutboundHttpResponse(
+        status_code=200,
+        headers=(),
+        body=body,
+        usage=HttpTransferUsage(
+            request_count=1,
+            request_bytes=0,
+            response_bytes=0,
+            response_wire_bytes=0,
+            decompressed_response_bytes=0,
+            redirect_count=0,
+            duration_ms=1,
+        ),
+    )
+    effective_limits = transfer_limits(
+        max_response_body_bytes=16,
+        max_decompressed_response_bytes=16,
+        max_transferred_bytes=16,
+    )
+    effective_grant = grant(limits=effective_limits)
+    configured = bundle((invalid,), ceiling=effective_grant)
+    connected = await connected_session(configured, requested=effective_grant)
+
+    with pytest.raises(OutboundHttpLimitExceeded) as captured:
+        await connected.send_http(http_request(limits=effective_limits))
+
+    assert captured.value.__cause__ is None
+    assert captured.value.__context__ is None
+    await configured.service.close()
+
+
+@pytest.mark.asyncio
+async def test_connected_profile_retains_authority_outside_gateway_inputs() -> None:
+    original_limits = transfer_limits(
+        max_response_body_bytes=16,
+        max_decompressed_response_bytes=16,
+        max_transferred_bytes=16,
+    )
+    replacement_limits = transfer_limits(
+        max_response_body_bytes=256,
+        max_decompressed_response_bytes=256,
+        max_transferred_bytes=256,
+    )
+    original_grant = grant(limits=original_limits)
+    gateway = InputMutatingGateway(
+        response(b"x" * 128),
+        replacement_limits,
+    )
+    configured = bundle(
+        (),
+        ceiling=original_grant,
+        gateway_override=gateway,
+    )
+    connected = await connected_session(configured, requested=original_grant)
+
+    with pytest.raises(OutboundHttpLimitExceeded) as captured:
+        await connected.send_http(http_request(limits=original_limits))
+
+    assert original_grant.limits == original_limits
+    assert captured.value.__cause__ is None
+    assert captured.value.__context__ is None
     await configured.service.close()
 
 
@@ -565,7 +705,10 @@ async def test_gateway_domain_cancellation_has_no_false_secondary_failure() -> N
         (OutboundHttpDenied("provider secret"), OutboundHttpDenied),
         (OutboundHttpLimitExceeded("provider secret"), OutboundHttpLimitExceeded),
         (OutboundHttpRequestInvalid("provider secret"), OutboundHttpRequestInvalid),
+        (OutboundHttpResolutionFailed("provider secret"), OutboundHttpResolutionFailed),
+        (OutboundHttpResponseInvalid("provider secret"), OutboundHttpResponseInvalid),
         (OutboundHttpTimeout("provider secret"), OutboundHttpTimeout),
+        (OutboundHttpTransportFailed("provider secret"), OutboundHttpTransportFailed),
         (OutboundHttpGatewayFailed("provider secret"), OutboundHttpGatewayFailed),
     ],
 )

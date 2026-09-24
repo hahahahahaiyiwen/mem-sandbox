@@ -14,6 +14,7 @@ from mem_sandbox.network.errors import (
     OutboundHttpDenied,
     OutboundHttpLimitExceeded,
     OutboundHttpRequestInvalid,
+    OutboundHttpResponseInvalid,
 )
 
 if TYPE_CHECKING:
@@ -48,7 +49,12 @@ class NetworkPolicyId:
     value: str
 
     def __post_init__(self) -> None:
-        _require_identifier("network policy identifier", self.value)
+        value = cast(object, self.value)
+        if not isinstance(value, str):
+            raise TypeError("network policy identifier must be a string")
+        value = str.__str__(value)
+        _require_identifier("network policy identifier", value)
+        object.__setattr__(self, "value", value)
 
     def __str__(self) -> str:
         return self.value
@@ -59,7 +65,12 @@ class CredentialRouteId:
     value: str
 
     def __post_init__(self) -> None:
-        _require_identifier("credential route identifier", self.value)
+        value = cast(object, self.value)
+        if not isinstance(value, str):
+            raise TypeError("credential route identifier must be a string")
+        value = str.__str__(value)
+        _require_identifier("credential route identifier", value)
+        object.__setattr__(self, "value", value)
 
     def __str__(self) -> str:
         return self.value
@@ -73,12 +84,19 @@ class HttpHeader:
     def __post_init__(self) -> None:
         name = cast(object, self.name)
         value = cast(object, self.value)
-        if not isinstance(name, str) or _HEADER_NAME.fullmatch(name) is None:
+        if not isinstance(name, str):
             raise OutboundHttpRequestInvalid("HTTP header name is invalid")
         if not isinstance(value, str):
             raise TypeError("HTTP header value must be a string")
-        if "\r" in value or "\n" in value:
-            raise OutboundHttpRequestInvalid("HTTP header value contains a line break")
+        name = str.__str__(name)
+        value = str.__str__(value)
+        if _HEADER_NAME.fullmatch(name) is None:
+            raise OutboundHttpRequestInvalid("HTTP header name is invalid")
+        if any(
+            (ord(character) < 32 and character != "\t") or ord(character) == 127
+            for character in value
+        ):
+            raise OutboundHttpRequestInvalid("HTTP header value contains a control character")
         try:
             size = len(value.encode("utf-8"))
         except UnicodeEncodeError:
@@ -87,6 +105,8 @@ class HttpHeader:
             raise OutboundHttpRequestInvalid("HTTP header value must be valid UTF-8")
         if size > _MAX_HEADER_VALUE_BYTES:
             raise OutboundHttpLimitExceeded("HTTP header value exceeds its byte limit")
+        object.__setattr__(self, "name", name)
+        object.__setattr__(self, "value", value)
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}(name={self.name!r}, value=<redacted>)"
@@ -105,7 +125,14 @@ class HttpTransferLimits:
     max_transferred_bytes: int = 1024 * 1024
 
     def __post_init__(self) -> None:
-        _require_positive_finite("timeout_seconds", self.timeout_seconds)
+        timeout = cast(object, self.timeout_seconds)
+        if isinstance(timeout, bool) or not isinstance(timeout, int | float):
+            raise TypeError("timeout_seconds must be a number")
+        canonical_timeout = (
+            float(timeout) if type(timeout) is int else float.__float__(cast(float, timeout))
+        )
+        object.__setattr__(self, "timeout_seconds", canonical_timeout)
+        _require_positive_finite("timeout_seconds", canonical_timeout)
         for name in (
             "max_request_header_bytes",
             "max_request_body_bytes",
@@ -115,8 +142,18 @@ class HttpTransferLimits:
             "max_redirects",
             "max_transferred_bytes",
         ):
-            _require_non_negative_integer(name, getattr(self, name))
-        _require_positive_integer("max_requests", self.max_requests)
+            value = cast(object, getattr(self, name))
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise TypeError(f"{name} must be an integer")
+            canonical = int.__int__(value)
+            object.__setattr__(self, name, canonical)
+            _require_non_negative_integer(name, canonical)
+        max_requests = cast(object, self.max_requests)
+        if isinstance(max_requests, bool) or not isinstance(max_requests, int):
+            raise TypeError("max_requests must be an integer")
+        canonical_requests = int.__int__(max_requests)
+        object.__setattr__(self, "max_requests", canonical_requests)
+        _require_positive_integer("max_requests", canonical_requests)
         if self.max_decompressed_response_bytes < self.max_response_body_bytes:
             raise ValueError(
                 "max_decompressed_response_bytes must not be less than max_response_body_bytes"
@@ -223,11 +260,15 @@ class OutboundHttpGrant:
         self.require_request(request)
         if not isinstance(cast(object, response), OutboundHttpResponse):
             raise TypeError("response must be OutboundHttpResponse")
+        if response.status_code < 200:
+            raise OutboundHttpResponseInvalid("outbound HTTP response must be a final response")
         limits = request.limits
         if _headers_size(response.headers) > limits.max_response_header_bytes:
             raise OutboundHttpLimitExceeded("HTTP response headers exceed the requested limit")
-        if len(response.body) > limits.max_response_body_bytes:
-            raise OutboundHttpLimitExceeded("HTTP response body exceeds the requested limit")
+        if len(response.body) > limits.max_decompressed_response_bytes:
+            raise OutboundHttpLimitExceeded(
+                "HTTP decompressed response body exceeds the requested limit"
+            )
         usage = response.usage
         if usage.request_count > limits.max_requests:
             raise OutboundHttpLimitExceeded("HTTP request count exceeds the requested limit")
@@ -235,9 +276,13 @@ class OutboundHttpGrant:
             raise OutboundHttpLimitExceeded("HTTP response usage exceeds the requested limit")
         if usage.decompressed_response_bytes > limits.max_decompressed_response_bytes:
             raise OutboundHttpLimitExceeded("HTTP decompressed usage exceeds the requested limit")
+        if usage.decompressed_response_bytes != len(response.body):
+            raise OutboundHttpLimitExceeded(
+                "HTTP decompressed usage does not match the published response body"
+            )
         if usage.redirect_count > limits.max_redirects:
             raise OutboundHttpLimitExceeded("HTTP redirect count exceeds the requested limit")
-        if usage.request_bytes + usage.response_bytes > limits.max_transferred_bytes:
+        if usage.request_bytes + usage.response_wire_bytes > limits.max_transferred_bytes:
             raise OutboundHttpLimitExceeded("HTTP transferred bytes exceed the requested limit")
         if usage.duration_ms > limits.timeout_seconds * 1000:
             raise OutboundHttpLimitExceeded("HTTP duration exceeds the requested limit")
@@ -327,6 +372,7 @@ class HttpTransferUsage:
     request_count: int
     request_bytes: int
     response_bytes: int
+    response_wire_bytes: int
     decompressed_response_bytes: int
     redirect_count: int
     duration_ms: float
@@ -336,12 +382,15 @@ class HttpTransferUsage:
             "request_count",
             "request_bytes",
             "response_bytes",
+            "response_wire_bytes",
             "decompressed_response_bytes",
             "redirect_count",
         ):
             _require_non_negative_integer(name, getattr(self, name))
         if self.request_count == 0:
             raise ValueError("request_count must be positive")
+        if self.response_wire_bytes < self.response_bytes:
+            raise ValueError("response_wire_bytes must include response_bytes")
         _require_non_negative_finite("duration_ms", self.duration_ms)
 
 
@@ -356,8 +405,8 @@ class OutboundHttpResponse:
         status = cast(object, self.status_code)
         if isinstance(status, bool) or not isinstance(status, int):
             raise TypeError("status_code must be an integer")
-        if status < 100 or status > 599:
-            raise ValueError("status_code must be between 100 and 599")
+        if status < 200 or status > 599:
+            raise ValueError("status_code must be between 200 and 599")
         headers = cast(object, self.headers)
         if not isinstance(headers, tuple):
             raise TypeError("headers must be a tuple")
