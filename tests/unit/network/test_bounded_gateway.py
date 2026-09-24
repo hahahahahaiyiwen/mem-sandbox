@@ -364,7 +364,17 @@ def transport_response(
     metadata_wire_bytes: int | None = None,
     body_wire_bytes: int | None = None,
     wire_bytes: int | None = None,
+    body_omitted: bool | None = None,
 ) -> HttpTransportResponse:
+    effective_body_omitted = (
+        status in (204, 205, 304)
+        or (
+            status in (301, 302, 303, 307, 308)
+            and any(header.name.lower() == "location" for header in headers)
+        )
+        if body_omitted is None
+        else body_omitted
+    )
     effective_header_bytes = (
         sum(
             len(str.__str__(header.name).encode("ascii"))
@@ -376,17 +386,31 @@ def transport_response(
         if header_bytes is None
         else header_bytes
     )
+    raw_header_wire_bytes = sum(
+        len(str.__str__(header.name).encode("ascii"))
+        + 2
+        + len(str.__str__(header.value).encode("latin-1"))
+        + 2
+        for header in headers
+    )
     effective_metadata_wire_bytes = (
         17
-        + sum(
-            len(str.__str__(header.name).encode("ascii")) + 2 + len(str.__str__(header.value)) + 2
-            for header in headers
+        + raw_header_wire_bytes
+        + (
+            2
+            if not effective_body_omitted
+            and any(
+                header.name.lower() == "transfer-encoding"
+                and header.value.strip().lower() == "chunked"
+                for header in headers
+            )
+            else 0
         )
         if metadata_wire_bytes is None
         else metadata_wire_bytes
     )
     effective_header_wire_bytes = (
-        effective_metadata_wire_bytes - 17 if header_wire_bytes is None else header_wire_bytes
+        raw_header_wire_bytes if header_wire_bytes is None else header_wire_bytes
     )
     effective_body_wire_bytes = len(body) if body_wire_bytes is None else body_wire_bytes
     return HttpTransportResponse(
@@ -402,6 +426,7 @@ def transport_response(
             if wire_bytes is None
             else wire_bytes
         ),
+        body_omitted=effective_body_omitted,
     )
 
 
@@ -900,7 +925,7 @@ async def test_head_redirect_preserves_method_without_publishing_a_body() -> Non
                 headers=(HttpHeader("Location", "https://redirect.test/final"),),
                 body=b"",
             ),
-            transport_response(200, body=b""),
+            transport_response(200, body=b"", body_omitted=True),
         )
     )
     subject, _, _, _ = gateway(resolver=resolver, transport=transport)
@@ -1189,7 +1214,7 @@ async def test_gateway_enforces_redirect_and_request_count_without_extra_attempt
 
 
 @pytest.mark.asyncio
-async def test_gateway_narrows_each_attempt_to_the_remaining_encoded_body_budget() -> None:
+async def test_omitted_redirect_body_does_not_narrow_the_final_body_budget() -> None:
     transfer_limits = limits(
         max_response_body_bytes=5,
         max_decompressed_response_bytes=5,
@@ -1200,21 +1225,21 @@ async def test_gateway_narrows_each_attempt_to_the_remaining_encoded_body_budget
             transport_response(
                 302,
                 headers=(HttpHeader("Location", "/final"),),
-                body=b"1234",
+                body=b"",
             ),
-            transport_response(body=b"12"),
+            transport_response(body=b"12345"),
         )
     )
     subject, _, _, _ = gateway(transport=transport)
 
-    with pytest.raises(OutboundHttpLimitExceeded):
-        await subject.send(
-            request(transfer_limits=transfer_limits),
-            context(transfer_limits),
-        )
+    response = await subject.send(
+        request(transfer_limits=transfer_limits),
+        context(transfer_limits),
+    )
 
     assert len(transport.calls) == 2
-    assert transport.calls[1][0].max_response_body_bytes == 1
+    assert transport.calls[1][0].max_response_body_bytes == 5
+    assert response.body == b"12345"
 
 
 @pytest.mark.asyncio
@@ -1374,6 +1399,25 @@ async def test_gateway_rejects_impossible_structural_accounting(
 
 
 @pytest.mark.asyncio
+async def test_gateway_rejects_chunked_metadata_without_trailer_terminator() -> None:
+    response = transport_response(
+        headers=(HttpHeader("Transfer-Encoding", "chunked"),),
+        body=b"",
+        body_wire_bytes=3,
+    )
+    object.__setattr__(response, "metadata_wire_bytes", response.metadata_wire_bytes - 2)
+    object.__setattr__(
+        response,
+        "wire_bytes",
+        response.metadata_wire_bytes + response.body_wire_bytes,
+    )
+    subject, _, _, _ = gateway(transport=RecordingTransport((response,)))
+
+    with pytest.raises(OutboundHttpResponseInvalid):
+        await subject.send(request(), context())
+
+
+@pytest.mark.asyncio
 async def test_gateway_rejects_non_decimal_content_length_from_injected_transport() -> None:
     subject, _, _, _ = gateway(
         transport=RecordingTransport(
@@ -1453,6 +1497,7 @@ async def test_bodyless_response_skips_content_decoding(
                         HttpHeader("Content-Length", "100"),
                     ),
                     body=b"",
+                    body_omitted=True,
                 ),
             )
         )
@@ -1464,6 +1509,40 @@ async def test_bodyless_response_skips_content_decoding(
     assert response.headers == ()
     assert response.body == b""
     assert response.usage.decompressed_response_bytes == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("method", "response"),
+    [
+        (
+            HttpMethod.GET,
+            transport_response(body=b"", body_omitted=True),
+        ),
+        (
+            HttpMethod.HEAD,
+            transport_response(body=b"", body_omitted=False),
+        ),
+        (
+            HttpMethod.GET,
+            transport_response(
+                302,
+                headers=(HttpHeader("Location", "/next"),),
+                body=b"",
+                body_omitted=False,
+            ),
+        ),
+    ],
+    ids=["ordinary-response", "head-response", "redirect-response"],
+)
+async def test_gateway_rejects_inconsistent_body_omission_evidence(
+    method: HttpMethod,
+    response: HttpTransportResponse,
+) -> None:
+    subject, _, _, _ = gateway(transport=RecordingTransport((response,)))
+
+    with pytest.raises(OutboundHttpResponseInvalid):
+        await subject.send(request(method=method), context())
 
 
 @pytest.mark.asyncio
@@ -1871,6 +1950,58 @@ async def test_policy_failure_and_invalid_decision_fail_closed_before_dns() -> N
         assert captured.value.__context__ is None
         assert resolver.calls == []
         assert transport.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("collaborator", "grouped", "expected"),
+    [
+        ("policy", False, OutboundHttpDenied),
+        ("policy", True, OutboundHttpDenied),
+        ("resolver", False, OutboundHttpResolutionFailed),
+        ("resolver", True, OutboundHttpResolutionFailed),
+        ("transport", False, OutboundHttpTransportFailed),
+        ("transport", True, OutboundHttpTransportFailed),
+    ],
+    ids=[
+        "policy-fatal",
+        "policy-fatal-group",
+        "resolver-fatal",
+        "resolver-fatal-group",
+        "transport-fatal",
+        "transport-fatal-group",
+    ],
+)
+async def test_fatal_collaborator_failures_are_contained(
+    collaborator: str,
+    grouped: bool,
+    expected: type[Exception],
+) -> None:
+    canary = f"{collaborator} fatal provider detail"
+    failure: BaseException = GeneratorExit(canary)
+    if grouped:
+        failure = BaseExceptionGroup("fatal provider group", (failure,))
+    policy: object | None = None
+    resolver: RecordingResolver | None = None
+    transport: RecordingTransport | None = None
+    if collaborator == "policy":
+        policy = RecordingPolicy(failure)
+    elif collaborator == "resolver":
+        resolver = RecordingResolver({"example.test": failure})
+    else:
+        transport = RecordingTransport((failure,))
+    subject, _, _, _ = gateway(
+        policy=policy,
+        resolver=resolver,
+        transport=transport,
+    )
+
+    with pytest.raises(expected) as captured:
+        await subject.send(request(), context())
+
+    assert canary not in str(captured.value)
+    assert captured.value.__cause__ is None
+    assert captured.value.__context__ is None
 
 
 @pytest.mark.asyncio

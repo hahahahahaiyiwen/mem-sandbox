@@ -88,6 +88,10 @@ _SENSITIVE_RESPONSE_HEADERS = frozenset(
 )
 
 
+class _CollaboratorFailed(Exception):
+    pass
+
+
 @dataclass(frozen=True, slots=True)
 class _CancellationView:
     source: NetworkCancellationSignal
@@ -269,7 +273,16 @@ class BoundedOutboundHttpGateway:
         remaining = context.deadline_monotonic - asyncio.get_running_loop().time()
         if remaining <= 0:
             raise OutboundHttpTimeout("outbound HTTP operation exceeded its deadline")
-        coroutine = operation()
+        try:
+            coroutine = operation()
+        except Exception:
+            raise
+        except asyncio.CancelledError:
+            raise
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except BaseException:
+            raise _CollaboratorFailed from None
         try:
             task = asyncio.create_task(coroutine)
         except BaseException:
@@ -285,7 +298,20 @@ class BoundedOutboundHttpGateway:
             task.cancel()
             self._retain_settling_task(task)
             raise OutboundHttpTimeout("outbound HTTP operation exceeded its deadline")
-        result = task.result()
+        try:
+            result = task.result()
+        except Exception:
+            raise
+        except asyncio.CancelledError:
+            raise
+        except GeneratorExit as error:
+            if _task_exception_is(task, error):
+                raise _CollaboratorFailed from None
+            raise
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except BaseException:
+            raise _CollaboratorFailed from None
         _require_active(context)
         return result
 
@@ -580,6 +606,7 @@ def _require_transport_response(
     metadata_wire_bytes: object | None = None
     body_wire_bytes: object | None = None
     wire_bytes: object | None = None
+    body_omitted: object | None = None
     try:
         status = cast(object, response.status_code)
         headers = cast(object, response.headers)
@@ -589,6 +616,7 @@ def _require_transport_response(
         metadata_wire_bytes = cast(object, response.metadata_wire_bytes)
         body_wire_bytes = cast(object, response.body_wire_bytes)
         wire_bytes = cast(object, response.wire_bytes)
+        body_omitted = cast(object, response.body_omitted)
     except AttributeError:
         invalid = True
     if invalid:
@@ -597,6 +625,8 @@ def _require_transport_response(
         raise OutboundHttpResponseInvalid("HTTP transport returned an invalid response")
     validated_headers = _require_transport_headers(headers)
     if type(body) is not bytes:
+        raise OutboundHttpResponseInvalid("HTTP transport returned an invalid response")
+    if type(body_omitted) is not bool:
         raise OutboundHttpResponseInvalid("HTTP transport returned an invalid response")
     counters = (
         header_bytes,
@@ -617,6 +647,7 @@ def _require_transport_response(
             metadata_wire_bytes=cast(int, metadata_wire_bytes),
             body_wire_bytes=cast(int, body_wire_bytes),
             wire_bytes=cast(int, wire_bytes),
+            body_omitted=body_omitted,
         )
     except (TypeError, ValueError):
         raise OutboundHttpResponseInvalid("HTTP transport returned an invalid response") from None
@@ -626,6 +657,11 @@ def _require_transport_response(
         raise OutboundHttpLimitExceeded("HTTP response body exceeds the requested limit")
     if validated.wire_bytes > request.max_response_wire_bytes:
         raise OutboundHttpLimitExceeded("HTTP response wire bytes exceed the requested limit")
+    expected_body_omitted = _response_omits_body(request.method, validated.status_code) or (
+        validated.status_code in _REDIRECT_STATUSES and _redirect_location(validated) is not None
+    )
+    if validated.body_omitted is not expected_body_omitted:
+        raise OutboundHttpResponseInvalid("HTTP transport returned inconsistent body evidence")
     content_lengths = [
         header.value for header in validated.headers if header.name.lower() == "content-length"
     ]
@@ -633,15 +669,21 @@ def _require_transport_response(
         raise OutboundHttpResponseInvalid("HTTP response has ambiguous content length")
     if content_lengths:
         declared = parse_http_content_length(content_lengths[0])
-        body_omitted = _response_omits_body(request.method, validated.status_code) or (
-            validated.status_code in _REDIRECT_STATUSES
-            and _redirect_location(validated) is not None
-        )
-        if not body_omitted and declared != len(validated.body):
+        if not validated.body_omitted and declared != len(validated.body):
             raise OutboundHttpResponseInvalid(
                 "HTTP response content length does not match its body"
             )
     return validated
+
+
+def _task_exception_is[ResultT](
+    task: asyncio.Task[ResultT],
+    error: BaseException,
+) -> bool:
+    try:
+        return task.exception() is error
+    except asyncio.CancelledError:
+        return False
 
 
 def _require_transport_headers(headers: object) -> tuple[HttpHeader, ...]:

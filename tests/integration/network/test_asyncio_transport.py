@@ -73,6 +73,7 @@ def context(
 def transport_request(
     port: int,
     *,
+    method: HttpMethod = HttpMethod.GET,
     maximum_body: int = 1024,
     maximum_headers: int = 1024,
     maximum_wire: int = 2048,
@@ -81,7 +82,7 @@ def transport_request(
 ) -> HttpTransportRequest:
     url = normalize_http_url(f"{scheme.value}://{hostname}:{port}/source?q=1")
     return HttpTransportRequest(
-        method=HttpMethod.GET,
+        method=method,
         destination=AdmittedHttpDestination(
             url=url,
             address=ResolvedHttpAddress("127.0.0.1"),
@@ -425,6 +426,89 @@ async def test_transport_accepts_minimal_chunk_framing(
         HttpHeader("Transfer-Encoding", "chunked"),
         HttpHeader("Connection", "close"),
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("method", "status", "extra_headers"),
+    [
+        (HttpMethod.HEAD, 200, b""),
+        (HttpMethod.GET, 304, b""),
+        (HttpMethod.GET, 302, b"Location: /next\r\n"),
+    ],
+    ids=["head", "not-modified", "redirect"],
+)
+async def test_transport_accepts_chunked_responses_whose_body_is_omitted(
+    method: HttpMethod,
+    status: int,
+    extra_headers: bytes,
+) -> None:
+    response_bytes = (
+        f"HTTP/1.1 {status} Result\r\n".encode("ascii")
+        + extra_headers
+        + b"Transfer-Encoding: chunked\r\nConnection: close\r\n\r\n"
+    )
+
+    async def handler(
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+    ) -> None:
+        try:
+            await reader.readuntil(b"\r\n\r\n")
+            writer.write(response_bytes)
+            await writer.drain()
+        finally:
+            writer.close()
+            await writer.wait_closed()
+
+    server, port = await run_server(handler)
+    try:
+        response = await AsyncioHttpTransport().send(
+            transport_request(port, method=method),
+            context(),
+        )
+    finally:
+        server.close()
+        await server.wait_closed()
+
+    assert response.status_code == status
+    assert response.body == b""
+    assert response.body_wire_bytes == 0
+    assert response.metadata_wire_bytes == len(response_bytes)
+    assert response.wire_bytes == len(response_bytes)
+
+
+@pytest.mark.asyncio
+async def test_transport_applies_logical_header_budget_to_non_ascii_trailers() -> None:
+    response_bytes = (
+        b"HTTP/1.1 200 OK\r\n"
+        b"Transfer-Encoding: chunked\r\n\r\n"
+        b"0\r\n"
+        b"X: " + (b"\xe9" * 15) + b"\r\n\r\n"
+    )
+
+    async def handler(
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+    ) -> None:
+        try:
+            await reader.readuntil(b"\r\n\r\n")
+            writer.write(response_bytes)
+            await writer.drain()
+        finally:
+            writer.close()
+            await writer.wait_closed()
+
+    server, port = await run_server(handler)
+    try:
+        with pytest.raises(OutboundHttpLimitExceeded):
+            await AsyncioHttpTransport().send(
+                transport_request(port, maximum_headers=60),
+                context(),
+            )
+    finally:
+        server.close()
+        await server.wait_closed()
 
 
 @pytest.mark.asyncio

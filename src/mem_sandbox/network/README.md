@@ -149,11 +149,17 @@ such as `Set-Cookie` and authentication challenges are not published. Provisiona
 responses may be consumed internally but cannot cross the transport, gateway, grant, or
 session boundary as a final result. Each transport result separates cumulative
 logical header-budget bytes, raw header-field wire bytes, response-head/trailer wire
-bytes, and encoded-body/framing wire bytes. The gateway revalidates their exact types,
-cross-counter relationships, supported framing, minimum visible structure, total
-equality, and per-attempt limits, including metadata absent from published headers.
-For chunked bodies, the zero-chunk line belongs to body/framing wire usage while the
-terminating trailer-section CRLF belongs to metadata wire usage.
+bytes, encoded-body/framing wire bytes, and whether protocol or redirect handling
+intentionally omitted body consumption. The gateway revalidates their exact types,
+cross-counter relationships, omission state, supported framing, minimum visible
+structure, total equality, and per-attempt limits, including metadata absent from
+published headers. For consumed chunked bodies, the zero-chunk line belongs to
+body/framing wire usage while trailer fields and the mandatory terminating
+trailer-section CRLF belong to metadata wire usage. Trailer fields contribute the
+greater of their raw Latin-1 wire size and normalized UTF-8 logical size to the header
+budget. HEAD, 204/205/304, and redirect responses with a location may omit body
+consumption; their transport evidence must declare that omission and report no body or
+body-framing bytes.
 Error, timeout, and cancellation cleanup aborts the stream immediately; successful
 graceful shutdown remains bounded by the operation
 deadline. HEAD and status-defined bodyless responses skip content decoding while
@@ -209,6 +215,10 @@ internet.
 - Provider failures, including a task-raised `GeneratorExit` and nested exception groups,
   become context-free `OutboundHttpGatewayFailed` values. During cancellation settlement,
   provider-task failures remain protected secondary failures.
+- Policy, resolver, and transport child-task fatal failures are contained at the gateway
+  collaborator boundary and fail in the phase-appropriate stable category. Bare
+  `KeyboardInterrupt` and `SystemExit` remain process-control signals rather than
+  collaborator failures.
 - `GeneratorExit` delivered directly into a session-owned coroutine, plus bare
   `KeyboardInterrupt` and `SystemExit`, pass through unchanged. If one escapes after
   operation start, the session does not manufacture a terminal event.

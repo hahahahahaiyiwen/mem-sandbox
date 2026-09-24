@@ -422,12 +422,18 @@ The first implementation defines and tests:
   response-wire usage across all attempts.
 - The single-attempt result reports cumulative logical header-budget bytes, raw
   header-field wire bytes, response head/trailer wire bytes, and encoded-body/framing
-  wire bytes separately. The gateway reconstructs exact counters, requires consistent
-  cross-counter relationships, supported unambiguous framing, plausible final-response
-  structure, and exact total equality, and enforces raw metadata limits even when fields
-  are not published.
-  Chunked accounting assigns the zero-chunk line to body/framing usage and the final
-  trailer-section CRLF to metadata usage.
+  wire bytes separately, plus an exact boolean recording whether protocol or redirect
+  handling intentionally omitted body consumption. The gateway reconstructs this
+  evidence, requires consistent omission state, cross-counter relationships, supported
+  unambiguous framing, plausible final-response structure, and exact total equality, and
+  enforces raw metadata limits even when fields are not published. For consumed chunked
+  responses, accounting assigns the zero-chunk line to body/framing usage and assigns
+  trailer fields plus the mandatory final trailer-section CRLF to metadata usage.
+  Trailer fields consume the greater of their raw Latin-1 wire size and normalized
+  UTF-8 logical size from the header budget. HEAD, 204/205/304, and redirects with a
+  location may carry framing headers while body consumption is omitted; those attempts
+  report zero body/framing bytes and cannot use omission evidence on an ordinary
+  body-bearing response.
 - Response framing uses strict decimal content lengths and hexadecimal chunk sizes;
   content-length whitespace is limited to HTTP SP/HTAB and its decimal representation
   is bounded before integer conversion. Provisional responses never cross the
@@ -605,7 +611,10 @@ Stable failures should distinguish:
 - required terminal audit failed after a possible remote side effect.
 
 Raw resolver, socket, TLS, HTTP-client, proxy, and credential-provider exceptions never
-cross the boundary or appear in model-visible errors.
+cross the boundary or appear in model-visible errors. Fatal failures raised by policy,
+resolver, or transport child tasks are translated into the phase-appropriate stable
+failure without retaining their exception graphs. Bare `KeyboardInterrupt` and
+`SystemExit` remain process-control signals.
 
 ## Lifecycle
 

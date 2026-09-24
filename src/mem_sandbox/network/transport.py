@@ -95,6 +95,7 @@ class HttpTransportResponse:
     metadata_wire_bytes: int
     body_wire_bytes: int
     wire_bytes: int
+    body_omitted: bool = False
 
     def __post_init__(self) -> None:
         status = cast(object, self.status_code)
@@ -109,6 +110,8 @@ class HttpTransportResponse:
             raise TypeError("headers must contain HttpHeader values")
         if not isinstance(cast(object, self.body), bytes):
             raise TypeError("body must be bytes")
+        if type(self.body_omitted) is not bool:
+            raise TypeError("body_omitted must be a boolean")
         for name in (
             "header_bytes",
             "header_wire_bytes",
@@ -131,10 +134,15 @@ class HttpTransportResponse:
             raise ValueError("metadata_wire_bytes must include the final response head")
         if self.body_wire_bytes < len(self.body):
             raise ValueError("body_wire_bytes must include the encoded body")
+        if self.body_omitted and (self.body or self.body_wire_bytes):
+            raise ValueError("omitted response bodies must not include body bytes")
         _require_supported_response_framing(
             self.headers,
             len(self.body),
             self.body_wire_bytes,
+            self.metadata_wire_bytes,
+            self.header_wire_bytes,
+            self.body_omitted,
         )
         if self.wire_bytes != self.metadata_wire_bytes + self.body_wire_bytes:
             raise ValueError("wire_bytes must equal metadata and body wire bytes")
@@ -147,7 +155,8 @@ class HttpTransportResponse:
             f"header_wire_bytes={self.header_wire_bytes!r}, "
             f"metadata_wire_bytes={self.metadata_wire_bytes!r}, "
             f"body_wire_bytes={self.body_wire_bytes!r}, "
-            f"wire_bytes={self.wire_bytes!r})"
+            f"wire_bytes={self.wire_bytes!r}, "
+            f"body_omitted={self.body_omitted!r})"
         )
 
 
@@ -246,7 +255,9 @@ class AsyncioHttpTransport:
                 body,
                 response_body_wire_bytes,
                 trailer_header_bytes,
+                trailer_header_wire_bytes,
                 trailer_wire_bytes,
+                body_omitted,
             ) = await _read_response_body(
                 reader,
                 request,
@@ -261,12 +272,13 @@ class AsyncioHttpTransport:
                 headers=headers,
                 body=body,
                 header_bytes=response_header_bytes + trailer_header_bytes,
-                header_wire_bytes=response_header_wire_bytes + trailer_header_bytes,
+                header_wire_bytes=response_header_wire_bytes + trailer_header_wire_bytes,
                 metadata_wire_bytes=response_head_wire_bytes + trailer_wire_bytes,
                 body_wire_bytes=response_body_wire_bytes,
                 wire_bytes=(
                     response_head_wire_bytes + trailer_wire_bytes + response_body_wire_bytes
                 ),
+                body_omitted=body_omitted,
             )
         finally:
             active_error = sys.exception()
@@ -406,23 +418,37 @@ async def _read_response_body(
     headers: tuple[HttpHeader, ...],
     remaining_header_bytes: int,
     remaining_wire_bytes: int,
-) -> tuple[bytes, int, int, int]:
+) -> tuple[bytes, int, int, int, int, bool]:
     transfer_encoding = _single_header(headers, "transfer-encoding")
     content_length = _single_header(headers, "content-length")
     if transfer_encoding is not None and content_length is not None:
         raise OutboundHttpResponseInvalid("HTTP response contains conflicting body framing")
     if request.method is HttpMethod.HEAD or status in (204, 205, 304):
-        return b"", 0, 0, 0
+        return b"", 0, 0, 0, 0, True
     if status in (301, 302, 303, 307, 308) and _single_header(headers, "location"):
-        return b"", 0, 0, 0
+        return b"", 0, 0, 0, 0, True
     if transfer_encoding is not None:
         if [token.strip().lower() for token in transfer_encoding.split(",")] != ["chunked"]:
             raise OutboundHttpResponseInvalid("HTTP response transfer encoding is unsupported")
-        return await _read_chunked_body(
+        (
+            body,
+            body_wire_bytes,
+            trailer_header_bytes,
+            trailer_header_wire_bytes,
+            trailer_wire_bytes,
+        ) = await _read_chunked_body(
             reader,
             request.max_response_body_bytes,
             remaining_header_bytes,
             remaining_wire_bytes,
+        )
+        return (
+            body,
+            body_wire_bytes,
+            trailer_header_bytes,
+            trailer_header_wire_bytes,
+            trailer_wire_bytes,
+            False,
         )
     if content_length is not None:
         length = parse_http_content_length(content_length)
@@ -430,13 +456,13 @@ async def _read_response_body(
             raise OutboundHttpLimitExceeded("HTTP response body exceeds the requested limit")
         if length > remaining_wire_bytes:
             raise OutboundHttpLimitExceeded("HTTP response wire bytes exceed the requested limit")
-        return await _read_exactly(reader, length), length, 0, 0
+        return await _read_exactly(reader, length), length, 0, 0, 0, False
     body, body_wire_bytes = await _read_to_eof(
         reader,
         request.max_response_body_bytes,
         remaining_wire_bytes,
     )
-    return body, body_wire_bytes, 0, 0
+    return body, body_wire_bytes, 0, 0, 0, False
 
 
 async def _read_chunked_body(
@@ -444,7 +470,7 @@ async def _read_chunked_body(
     maximum_body_bytes: int,
     maximum_trailer_bytes: int,
     maximum_wire_bytes: int,
-) -> tuple[bytes, int, int, int]:
+) -> tuple[bytes, int, int, int, int]:
     body = bytearray()
     wire_bytes = 0
     while True:
@@ -462,12 +488,22 @@ async def _read_chunked_body(
             raise OutboundHttpLimitExceeded("HTTP response body exceeds the requested limit")
         size = int(significant_size, 16)
         if size == 0:
-            trailer_header_bytes, trailer_wire_bytes = await _read_trailers(
+            (
+                trailer_header_bytes,
+                trailer_header_wire_bytes,
+                trailer_wire_bytes,
+            ) = await _read_trailers(
                 reader,
                 maximum_trailer_bytes,
                 maximum_wire_bytes - wire_bytes,
             )
-            return bytes(body), wire_bytes, trailer_header_bytes, trailer_wire_bytes
+            return (
+                bytes(body),
+                wire_bytes,
+                trailer_header_bytes,
+                trailer_header_wire_bytes,
+                trailer_wire_bytes,
+            )
         if size > maximum_body_bytes - len(body):
             raise OutboundHttpLimitExceeded("HTTP response body exceeds the requested limit")
         if size + 2 > maximum_wire_bytes - wire_bytes:
@@ -483,8 +519,9 @@ async def _read_trailers(
     reader: asyncio.StreamReader,
     maximum_bytes: int,
     maximum_wire_bytes: int,
-) -> tuple[int, int]:
-    consumed = 0
+) -> tuple[int, int, int]:
+    logical_header_bytes = 0
+    header_wire_bytes = 0
     wire_bytes = 0
     while True:
         line = await _read_line(reader, maximum_bytes + 2)
@@ -492,13 +529,14 @@ async def _read_trailers(
         if wire_bytes > maximum_wire_bytes:
             raise OutboundHttpLimitExceeded("HTTP response wire bytes exceed the requested limit")
         if not line:
-            return consumed, wire_bytes
-        consumed += len(line) + 2
-        if consumed > maximum_bytes:
+            return max(logical_header_bytes, header_wire_bytes), header_wire_bytes, wire_bytes
+        parsed = _parse_header_lines([line])
+        logical_header_bytes += _headers_size(parsed)
+        header_wire_bytes += len(line) + 2
+        if max(logical_header_bytes, header_wire_bytes) > maximum_bytes:
             raise OutboundHttpLimitExceeded(
                 "HTTP response trailers exceed the requested header limit"
             )
-        _parse_header_lines([line])
 
 
 async def _read_line(reader: asyncio.StreamReader, maximum: int) -> bytes:
@@ -604,6 +642,9 @@ def _require_supported_response_framing(
     headers: tuple[HttpHeader, ...],
     body_bytes: int,
     body_wire_bytes: int,
+    metadata_wire_bytes: int,
+    header_wire_bytes: int,
+    body_omitted: bool,
 ) -> None:
     transfer_encoding = _single_header(headers, "transfer-encoding")
     content_length = _single_header(headers, "content-length")
@@ -613,9 +654,13 @@ def _require_supported_response_framing(
         return
     if [token.strip().lower() for token in transfer_encoding.split(",")] != ["chunked"]:
         raise ValueError("response transfer encoding must be supported")
+    if body_omitted:
+        return
     minimum = 3 if body_bytes == 0 else body_bytes + len(f"{body_bytes:x}") + 7
     if body_wire_bytes < minimum:
         raise ValueError("body_wire_bytes must include chunk framing")
+    if metadata_wire_bytes < header_wire_bytes + _MINIMUM_STATUS_FRAMING_BYTES + 2:
+        raise ValueError("metadata_wire_bytes must include the trailer terminator")
 
 
 def _create_system_ssl_context() -> ssl.SSLContext:
