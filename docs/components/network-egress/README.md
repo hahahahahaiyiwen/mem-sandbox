@@ -426,6 +426,8 @@ The first implementation defines and tests:
   cross-counter relationships, supported unambiguous framing, plausible final-response
   structure, and exact total equality, and enforces raw metadata limits even when fields
   are not published.
+  Chunked accounting assigns the zero-chunk line to body/framing usage and the final
+  trailer-section CRLF to metadata usage.
 - Response framing uses strict decimal content lengths and hexadecimal chunk sizes;
   content-length whitespace is limited to HTTP SP/HTAB and its decimal representation
   is bounded before integer conversion. Provisional responses never cross the

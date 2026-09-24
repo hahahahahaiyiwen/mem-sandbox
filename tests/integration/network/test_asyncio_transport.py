@@ -377,6 +377,57 @@ async def test_transport_decodes_chunk_framing_without_publishing_trailers() -> 
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("body", "trailers"),
+    [
+        (b"", b""),
+        (b"", b"X-Trailer: empty\r\n"),
+        (b"hello", b""),
+        (b"hello", b"X-Trailer: single\r\n"),
+    ],
+    ids=["empty", "empty-with-trailer", "single", "single-with-trailer"],
+)
+async def test_transport_accepts_minimal_chunk_framing(
+    body: bytes,
+    trailers: bytes,
+) -> None:
+    response_head = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n"
+    body_wire = b"0\r\n" if not body else f"{len(body):x}\r\n".encode("ascii") + body + b"\r\n0\r\n"
+    response_bytes = response_head + body_wire + trailers + b"\r\n"
+
+    async def handler(
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+    ) -> None:
+        try:
+            await reader.readuntil(b"\r\n\r\n")
+            writer.write(response_bytes)
+            await writer.drain()
+        finally:
+            writer.close()
+            await writer.wait_closed()
+
+    server, port = await run_server(handler)
+    try:
+        response = await AsyncioHttpTransport().send(
+            transport_request(port),
+            context(),
+        )
+    finally:
+        server.close()
+        await server.wait_closed()
+
+    assert response.body == body
+    assert response.body_wire_bytes == len(body_wire)
+    assert response.metadata_wire_bytes == len(response_head) + len(trailers) + 2
+    assert response.wire_bytes == len(response_bytes)
+    assert response.headers == (
+        HttpHeader("Transfer-Encoding", "chunked"),
+        HttpHeader("Connection", "close"),
+    )
+
+
+@pytest.mark.asyncio
 async def test_transport_bounds_raw_and_informational_response_header_bytes() -> None:
     async def handler(
         reader: asyncio.StreamReader,

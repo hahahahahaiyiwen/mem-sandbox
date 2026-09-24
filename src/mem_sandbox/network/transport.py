@@ -613,7 +613,7 @@ def _require_supported_response_framing(
         return
     if [token.strip().lower() for token in transfer_encoding.split(",")] != ["chunked"]:
         raise ValueError("response transfer encoding must be supported")
-    minimum = 5 if body_bytes == 0 else body_bytes + len(f"{body_bytes:x}") + 9
+    minimum = 3 if body_bytes == 0 else body_bytes + len(f"{body_bytes:x}") + 7
     if body_wire_bytes < minimum:
         raise ValueError("body_wire_bytes must include chunk framing")
 

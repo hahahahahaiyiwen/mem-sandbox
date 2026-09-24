@@ -152,6 +152,8 @@ logical header-budget bytes, raw header-field wire bytes, response-head/trailer 
 bytes, and encoded-body/framing wire bytes. The gateway revalidates their exact types,
 cross-counter relationships, supported framing, minimum visible structure, total
 equality, and per-attempt limits, including metadata absent from published headers.
+For chunked bodies, the zero-chunk line belongs to body/framing wire usage while the
+terminating trailer-section CRLF belongs to metadata wire usage.
 Error, timeout, and cancellation cleanup aborts the stream immediately; successful
 graceful shutdown remains bounded by the operation
 deadline. HEAD and status-defined bodyless responses skip content decoding while
