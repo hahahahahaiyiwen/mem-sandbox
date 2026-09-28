@@ -784,6 +784,7 @@ async def test_transport_deadline_does_not_wait_for_graceful_stream_shutdown(
 @pytest.mark.asyncio
 async def test_transport_timeout_closes_one_attempt_with_stable_error() -> None:
     accepted = 0
+    accepted_once = asyncio.Event()
     release = asyncio.Event()
 
     async def handler(
@@ -792,6 +793,7 @@ async def test_transport_timeout_closes_one_attempt_with_stable_error() -> None:
     ) -> None:
         nonlocal accepted
         accepted += 1
+        accepted_once.set()
         try:
             await reader.readuntil(b"\r\n\r\n")
             await release.wait()
@@ -800,14 +802,28 @@ async def test_transport_timeout_closes_one_attempt_with_stable_error() -> None:
             await writer.wait_closed()
 
     server, port = await run_server(handler)
-    deadline = asyncio.get_running_loop().time() + 0.02
+    deadline = asyncio.get_running_loop().time() + 1
+    sending = asyncio.create_task(
+        AsyncioHttpTransport().send(
+            transport_request(port),
+            context(deadline=deadline),
+        )
+    )
+    waiting_for_accept = asyncio.create_task(accepted_once.wait())
     try:
+        completed, _pending = await asyncio.wait(
+            (sending, waiting_for_accept),
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        assert waiting_for_accept in completed
         with pytest.raises(OutboundHttpTimeout) as captured:
-            await AsyncioHttpTransport().send(
-                transport_request(port),
-                context(deadline=deadline),
-            )
+            await sending
     finally:
+        waiting_for_accept.cancel()
+        await asyncio.gather(waiting_for_accept, return_exceptions=True)
+        if not sending.done():
+            sending.cancel()
+        await asyncio.gather(sending, return_exceptions=True)
         release.set()
         server.close()
         await server.wait_closed()
