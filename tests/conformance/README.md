@@ -124,8 +124,10 @@ workspace, cwd, and approved environment from backward-compatible provider state
 `tests/conformance/network/test_gateway.py` exercises the reusable
 `OutboundHttpGatewayConformanceDriver` against the deterministic fake. It verifies exact
 request/context round trips, stable domain failures, and cooperative cancellation without
-opening a network connection. A later real transport must pass the same public driver in
-addition to its destination and security tests.
+opening a network connection. The destination-safe gateway preserves that public
+boundary and is covered with fake policy/resolver/transport collaborators; its concrete
+asyncio transport is additionally exercised against controlled loopback HTTP/TLS
+servers, never the public internet.
 
 ## Behavior-first coverage
 

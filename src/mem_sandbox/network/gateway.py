@@ -1,0 +1,921 @@
+"""Destination-safe bounded outbound HTTP gateway orchestration."""
+
+from __future__ import annotations
+
+import asyncio
+import zlib
+from collections.abc import Callable, Coroutine
+from dataclasses import dataclass, replace
+from typing import Any, cast
+from urllib.parse import urljoin
+
+from mem_sandbox.network.destination import (
+    HttpRequestClass,
+    IpAddressClass,
+    NetworkPolicyDecision,
+    NetworkPolicyOutcome,
+    NetworkPolicyPhase,
+    NetworkPolicyReason,
+    NetworkPolicyRequest,
+    NetworkResolution,
+    NormalizedHttpUrl,
+    ResolvedHttpAddress,
+    normalize_http_url,
+)
+from mem_sandbox.network.errors import (
+    OutboundHttpCancelled,
+    OutboundHttpDenied,
+    OutboundHttpLimitExceeded,
+    OutboundHttpRequestInvalid,
+    OutboundHttpResolutionFailed,
+    OutboundHttpResponseInvalid,
+    OutboundHttpTimeout,
+    OutboundHttpTransportFailed,
+)
+from mem_sandbox.network.models import (
+    CredentialRouteId,
+    HttpHeader,
+    HttpMethod,
+    HttpTransferLimits,
+    HttpTransferUsage,
+    NetworkOperationContext,
+    OutboundHttpRequest,
+    OutboundHttpResponse,
+)
+from mem_sandbox.network.ports import (
+    HttpTransport,
+    NetworkCancellationSignal,
+    NetworkPolicyEngine,
+    NetworkResolver,
+)
+from mem_sandbox.network.transport import (
+    AdmittedHttpDestination,
+    HttpTransportRequest,
+    HttpTransportResponse,
+    parse_http_content_length,
+)
+
+_REDIRECT_STATUSES = frozenset((301, 302, 303, 307, 308))
+_CONTROLLED_REQUEST_HEADERS = frozenset(
+    (
+        "accept-encoding",
+        "authorization",
+        "connection",
+        "content-length",
+        "cookie",
+        "expect",
+        "host",
+        "proxy-authorization",
+        "proxy-connection",
+        "te",
+        "trailer",
+        "transfer-encoding",
+        "upgrade",
+    )
+)
+_FRAMING_RESPONSE_HEADERS = frozenset(
+    ("connection", "content-encoding", "content-length", "transfer-encoding")
+)
+_SENSITIVE_RESPONSE_HEADERS = frozenset(
+    (
+        "authentication-info",
+        "proxy-authenticate",
+        "proxy-authentication-info",
+        "set-cookie",
+        "set-cookie2",
+        "www-authenticate",
+    )
+)
+
+
+class _CollaboratorFailed(Exception):
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class _CancellationView:
+    source: NetworkCancellationSignal
+
+    def is_set(self) -> bool:
+        return self.source.is_set()
+
+
+class BoundedOutboundHttpGateway:
+    """Apply destination admission and limits around one-attempt transports."""
+
+    def __init__(
+        self,
+        *,
+        policy: NetworkPolicyEngine,
+        resolver: NetworkResolver,
+        transport: HttpTransport,
+    ) -> None:
+        if not callable(getattr(cast(object, policy), "evaluate", None)):
+            raise TypeError("policy must provide async evaluate()")
+        if not callable(getattr(cast(object, resolver), "resolve", None)):
+            raise TypeError("resolver must provide async resolve()")
+        if not callable(getattr(cast(object, transport), "send", None)):
+            raise TypeError("transport must provide async send()")
+        self._policy = policy
+        self._resolver = resolver
+        self._transport = transport
+        self._settling_tasks: set[asyncio.Task[object]] = set()
+
+    async def send(
+        self,
+        request: OutboundHttpRequest,
+        context: NetworkOperationContext,
+    ) -> OutboundHttpResponse:
+        if type(request) is not OutboundHttpRequest:
+            raise TypeError("request must be OutboundHttpRequest")
+        if type(context) is not NetworkOperationContext:
+            raise TypeError("context must be NetworkOperationContext")
+        request = _snapshot_request(request)
+        authority = _copy_operation_context(context)
+        authority.grant.require_request(request)
+        _require_supported_request(request)
+        _require_active(authority)
+        loop = asyncio.get_running_loop()
+        deadline = min(
+            authority.deadline_monotonic,
+            loop.time() + request.limits.timeout_seconds,
+        )
+        effective_context = replace(authority, deadline_monotonic=deadline)
+        _require_active(effective_context)
+        started = loop.time()
+        return await self._send_bounded(request, effective_context, started)
+
+    async def _send_bounded(
+        self,
+        request: OutboundHttpRequest,
+        context: NetworkOperationContext,
+        started: float,
+    ) -> OutboundHttpResponse:
+        limits = request.limits
+        current = normalize_http_url(request.url)
+        method = request.method
+        request_count = 0
+        redirect_count = 0
+        encoded_response_bytes = 0
+        response_wire_bytes = 0
+        while True:
+            _require_active(context)
+            if request_count >= limits.max_requests:
+                raise OutboundHttpLimitExceeded("HTTP request count exceeds the requested limit")
+            if current.scheme not in context.grant.schemes:
+                raise OutboundHttpDenied("redirect scheme is outside the effective grant")
+            await self._require_policy(
+                current,
+                method,
+                redirect_count,
+                (),
+                None,
+                NetworkPolicyPhase.PRE_RESOLUTION,
+                context,
+            )
+            _require_active(context)
+            resolution = await self._resolve(current, context)
+            _require_active(context)
+            if not resolution.addresses:
+                raise OutboundHttpResolutionFailed("controlled resolution returned no addresses")
+            if any(
+                address.classification is not IpAddressClass.GLOBAL
+                for address in resolution.addresses
+            ):
+                raise OutboundHttpDenied("resolved destination contains a prohibited address")
+            await self._require_policy(
+                current,
+                method,
+                redirect_count,
+                resolution.addresses,
+                resolution.canonical_hostname,
+                NetworkPolicyPhase.POST_RESOLUTION,
+                context,
+            )
+            _require_active(context)
+            remaining_transfer = (
+                limits.max_transferred_bytes - len(request.body) - response_wire_bytes
+            )
+            if remaining_transfer < 0:
+                raise OutboundHttpLimitExceeded("HTTP transferred bytes exceed the requested limit")
+            remaining_response = limits.max_response_body_bytes - encoded_response_bytes
+            if remaining_response < 0:
+                raise OutboundHttpLimitExceeded("HTTP response body exceeds the requested limit")
+            headers = _transport_headers(current, request.headers)
+            if _headers_size(headers) > limits.max_request_header_bytes:
+                raise OutboundHttpLimitExceeded("HTTP request headers exceed the requested limit")
+            attempt = HttpTransportRequest(
+                method=method,
+                destination=AdmittedHttpDestination(
+                    url=current,
+                    address=resolution.addresses[0],
+                ),
+                headers=headers,
+                max_response_header_bytes=limits.max_response_header_bytes,
+                max_response_body_bytes=min(
+                    remaining_response,
+                    remaining_transfer,
+                ),
+                max_response_wire_bytes=remaining_transfer,
+            )
+            raw_response = await self._send_attempt(attempt, context)
+            _require_active(context)
+            request_count += 1
+            raw_response = _require_transport_response(raw_response, attempt)
+            encoded_response_bytes += len(raw_response.body)
+            response_wire_bytes += raw_response.wire_bytes
+            if len(request.body) + response_wire_bytes > limits.max_transferred_bytes:
+                raise OutboundHttpLimitExceeded("HTTP transferred bytes exceed the requested limit")
+            location = _redirect_location(raw_response)
+            if raw_response.status_code in _REDIRECT_STATUSES and location is not None:
+                if redirect_count >= limits.max_redirects:
+                    raise OutboundHttpLimitExceeded(
+                        "HTTP redirect count exceeds the requested limit"
+                    )
+                redirect_count += 1
+                current = _normalize_redirect(current, location)
+                continue
+            if _response_omits_body(method, raw_response.status_code):
+                if raw_response.body:
+                    raise OutboundHttpResponseInvalid("bodyless transport response contains a body")
+                body = b""
+                headers = _published_headers(raw_response.headers)
+            else:
+                body, headers = _decode_response(
+                    raw_response,
+                    limits.max_decompressed_response_bytes,
+                )
+            _require_active(context)
+            duration_ms = (asyncio.get_running_loop().time() - started) * 1000
+            response = OutboundHttpResponse(
+                status_code=raw_response.status_code,
+                headers=headers,
+                body=body,
+                usage=HttpTransferUsage(
+                    request_count=request_count,
+                    request_bytes=len(request.body),
+                    response_bytes=encoded_response_bytes,
+                    response_wire_bytes=response_wire_bytes,
+                    decompressed_response_bytes=len(body),
+                    redirect_count=redirect_count,
+                    duration_ms=duration_ms,
+                ),
+            )
+            context.grant.require_response(request, response)
+            return response
+
+    async def _await_collaborator[ResultT](
+        self,
+        operation: Callable[[], Coroutine[Any, Any, ResultT]],
+        context: NetworkOperationContext,
+    ) -> ResultT:
+        _require_active(context)
+        remaining = context.deadline_monotonic - asyncio.get_running_loop().time()
+        if remaining <= 0:
+            raise OutboundHttpTimeout("outbound HTTP operation exceeded its deadline")
+        try:
+            coroutine = operation()
+        except Exception:
+            raise
+        except asyncio.CancelledError:
+            raise
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except BaseException:
+            raise _CollaboratorFailed from None
+        try:
+            task = asyncio.create_task(coroutine)
+        except BaseException:
+            coroutine.close()
+            raise
+        try:
+            done, _pending = await asyncio.wait((task,), timeout=remaining)
+        except asyncio.CancelledError:
+            task.cancel()
+            self._retain_settling_task(task)
+            raise
+        if task not in done or asyncio.get_running_loop().time() >= context.deadline_monotonic:
+            task.cancel()
+            self._retain_settling_task(task)
+            raise OutboundHttpTimeout("outbound HTTP operation exceeded its deadline")
+        try:
+            result = task.result()
+        except Exception:
+            raise
+        except asyncio.CancelledError:
+            raise
+        except GeneratorExit as error:
+            if _task_exception_is(task, error):
+                raise _CollaboratorFailed from None
+            raise
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except BaseException:
+            raise _CollaboratorFailed from None
+        _require_active(context)
+        return result
+
+    def _retain_settling_task[ResultT](self, task: asyncio.Task[ResultT]) -> None:
+        retained = cast(asyncio.Task[object], task)
+        self._settling_tasks.add(retained)
+        retained.add_done_callback(self._settling_task_done)
+
+    def _settling_task_done(self, task: asyncio.Task[object]) -> None:
+        self._settling_tasks.discard(task)
+        if not task.cancelled():
+            task.exception()
+
+    async def _require_policy(
+        self,
+        url: NormalizedHttpUrl,
+        method: HttpMethod,
+        redirect_depth: int,
+        addresses: tuple[ResolvedHttpAddress, ...],
+        canonical_hostname: str | None,
+        phase: NetworkPolicyPhase,
+        context: NetworkOperationContext,
+    ) -> None:
+        facts = NetworkPolicyRequest(
+            policy_id=replace(context.grant.policy_id),
+            session_id=replace(context.session_id),
+            operation_id=replace(context.operation_id),
+            phase=phase,
+            method=method,
+            request_class=HttpRequestClass.BASELINE,
+            scheme=url.scheme,
+            hostname=url.hostname,
+            port=url.port,
+            redirect_depth=redirect_depth,
+            addresses=_copy_resolved_addresses(addresses),
+            canonical_hostname=canonical_hostname,
+        )
+        failed = False
+        stable_failure: type[Exception] | None = None
+        decision: object = None
+        try:
+            decision = await self._await_collaborator(
+                lambda: self._policy.evaluate(facts),
+                context,
+            )
+        except asyncio.CancelledError:
+            if _caller_is_cancelling():
+                raise
+            failed = True
+        except OutboundHttpCancelled:
+            if _cancellation_is_active(context):
+                stable_failure = OutboundHttpCancelled
+            else:
+                failed = True
+        except OutboundHttpTimeout:
+            stable_failure = OutboundHttpTimeout
+        except Exception:
+            failed = True
+        if stable_failure is OutboundHttpCancelled:
+            raise OutboundHttpCancelled("network policy evaluation was cancelled")
+        if stable_failure is OutboundHttpTimeout:
+            raise OutboundHttpTimeout("network policy evaluation timed out")
+        validated = None if failed else _validated_policy_decision(decision)
+        if validated is None:
+            raise OutboundHttpDenied("network policy evaluation failed closed")
+        if validated.outcome is not NetworkPolicyOutcome.ALLOW:
+            raise OutboundHttpDenied("network policy denied the destination")
+        _require_active(context)
+
+    async def _resolve(
+        self,
+        url: NormalizedHttpUrl,
+        context: NetworkOperationContext,
+    ) -> NetworkResolution:
+        literal = url.ip_literal
+        if literal is not None:
+            return NetworkResolution(hostname=url.hostname, addresses=(literal,))
+        failed = False
+        stable_failure: type[Exception] | None = None
+        resolution: object = None
+        try:
+            resolution = await self._await_collaborator(
+                lambda: self._resolver.resolve(
+                    url.hostname,
+                    url.port,
+                    _copy_operation_context(context),
+                ),
+                context,
+            )
+        except asyncio.CancelledError:
+            if _caller_is_cancelling():
+                raise
+            failed = True
+        except OutboundHttpCancelled:
+            if _cancellation_is_active(context):
+                stable_failure = OutboundHttpCancelled
+            else:
+                failed = True
+        except OutboundHttpTimeout:
+            stable_failure = OutboundHttpTimeout
+        except OutboundHttpResolutionFailed:
+            stable_failure = OutboundHttpResolutionFailed
+        except Exception:
+            failed = True
+        if stable_failure is OutboundHttpCancelled:
+            raise OutboundHttpCancelled("controlled destination resolution was cancelled")
+        if stable_failure is OutboundHttpTimeout:
+            raise OutboundHttpTimeout("controlled destination resolution timed out")
+        if stable_failure is OutboundHttpResolutionFailed:
+            raise OutboundHttpResolutionFailed("controlled destination resolution failed")
+        validated = None if failed else _validated_resolution(resolution, url.hostname)
+        if validated is None:
+            raise OutboundHttpResolutionFailed("controlled destination resolution failed")
+        _require_active(context)
+        return validated
+
+    async def _send_attempt(
+        self,
+        request: HttpTransportRequest,
+        context: NetworkOperationContext,
+    ) -> HttpTransportResponse:
+        failed = False
+        stable_failure: type[Exception] | None = None
+        response: object = None
+        try:
+            response = await self._await_collaborator(
+                lambda: self._transport.send(
+                    _copy_transport_request(request),
+                    _copy_operation_context(context),
+                ),
+                context,
+            )
+        except asyncio.CancelledError:
+            if _caller_is_cancelling():
+                raise
+            failed = True
+        except OutboundHttpCancelled:
+            if _cancellation_is_active(context):
+                stable_failure = OutboundHttpCancelled
+            else:
+                failed = True
+        except OutboundHttpTimeout:
+            stable_failure = OutboundHttpTimeout
+        except OutboundHttpLimitExceeded:
+            stable_failure = OutboundHttpLimitExceeded
+        except OutboundHttpResponseInvalid:
+            stable_failure = OutboundHttpResponseInvalid
+        except Exception:
+            failed = True
+        if stable_failure is OutboundHttpCancelled:
+            raise OutboundHttpCancelled("outbound HTTP transport was cancelled")
+        if stable_failure is OutboundHttpTimeout:
+            raise OutboundHttpTimeout("outbound HTTP transport timed out")
+        if stable_failure is OutboundHttpLimitExceeded:
+            raise OutboundHttpLimitExceeded("outbound HTTP transport exceeded a limit")
+        if stable_failure is OutboundHttpResponseInvalid:
+            raise OutboundHttpResponseInvalid("outbound HTTP response is invalid")
+        if failed:
+            raise OutboundHttpTransportFailed("outbound HTTP transport attempt failed")
+        if not isinstance(response, HttpTransportResponse):
+            raise OutboundHttpResponseInvalid(
+                "outbound HTTP transport returned an invalid response"
+            )
+        _require_active(context)
+        return response
+
+
+def _require_supported_request(request: OutboundHttpRequest) -> None:
+    if request.credential_route is not None:
+        raise OutboundHttpDenied("credential routing is not available in this transport")
+    seen: set[str] = set()
+    for header in request.headers:
+        name = header.name.lower()
+        if name in seen:
+            raise OutboundHttpDenied("duplicate HTTP request headers are not supported")
+        seen.add(name)
+        if name in _CONTROLLED_REQUEST_HEADERS or name.startswith("proxy-"):
+            raise OutboundHttpDenied("HTTP request header is controlled by the gateway")
+
+
+def _snapshot_request(request: OutboundHttpRequest) -> OutboundHttpRequest:
+    invalid = False
+    method: object | None = None
+    url: object | None = None
+    limits: object | None = None
+    headers: object | None = None
+    body: object | None = None
+    credential_route: object | None = None
+    try:
+        method = cast(object, request.method)
+        url = cast(object, request.url)
+        limits = cast(object, request.limits)
+        headers = cast(object, request.headers)
+        body = cast(object, request.body)
+        credential_route = cast(object, request.credential_route)
+    except AttributeError:
+        invalid = True
+    if (
+        invalid
+        or not isinstance(method, HttpMethod)
+        or not isinstance(url, str)
+        or type(limits) is not HttpTransferLimits
+        or type(headers) is not tuple
+        or not isinstance(body, bytes)
+    ):
+        raise OutboundHttpRequestInvalid("outbound HTTP request is invalid")
+    validated_headers = _snapshot_request_headers(cast(tuple[object, ...], headers))
+    if validated_headers is None:
+        raise OutboundHttpRequestInvalid("outbound HTTP request is invalid")
+    validated_route = None
+    if credential_route is not None:
+        if type(credential_route) is not CredentialRouteId:
+            raise OutboundHttpRequestInvalid("outbound HTTP request is invalid")
+        validated_route = replace(credential_route)
+    return OutboundHttpRequest(
+        method=method,
+        url=str.__str__(url),
+        limits=replace(limits),
+        headers=validated_headers,
+        body=bytes.__bytes__(body),
+        credential_route=validated_route,
+    )
+
+
+def _snapshot_request_headers(headers: tuple[object, ...]) -> tuple[HttpHeader, ...] | None:
+    validated: list[HttpHeader] = []
+    for header in headers:
+        if type(header) is not HttpHeader:
+            return None
+        try:
+            name = cast(object, header.name)
+            value = cast(object, header.value)
+        except AttributeError:
+            return None
+        if not isinstance(name, str) or not isinstance(value, str):
+            return None
+        try:
+            validated.append(HttpHeader(str.__str__(name), str.__str__(value)))
+        except (OutboundHttpLimitExceeded, OutboundHttpRequestInvalid, TypeError):
+            return None
+    return tuple(validated)
+
+
+def _copy_transport_request(request: HttpTransportRequest) -> HttpTransportRequest:
+    url = request.destination.url
+    return HttpTransportRequest(
+        method=request.method,
+        destination=AdmittedHttpDestination(
+            url=NormalizedHttpUrl(
+                scheme=url.scheme,
+                hostname=str.__str__(url.hostname),
+                port=int(url.port),
+                target=str.__str__(url.target),
+                canonical_url=str.__str__(url.canonical_url),
+            ),
+            address=ResolvedHttpAddress(request.destination.address.value),
+        ),
+        headers=tuple(
+            HttpHeader(str.__str__(header.name), str.__str__(header.value))
+            for header in request.headers
+        ),
+        max_response_header_bytes=int(request.max_response_header_bytes),
+        max_response_body_bytes=int(request.max_response_body_bytes),
+        max_response_wire_bytes=int(request.max_response_wire_bytes),
+    )
+
+
+def _transport_headers(
+    url: NormalizedHttpUrl,
+    request_headers: tuple[HttpHeader, ...],
+) -> tuple[HttpHeader, ...]:
+    return (
+        HttpHeader("Host", url.authority),
+        HttpHeader("Connection", "close"),
+        HttpHeader("Accept-Encoding", "gzip, deflate"),
+        *request_headers,
+    )
+
+
+def _require_transport_response(
+    response: HttpTransportResponse,
+    request: HttpTransportRequest,
+) -> HttpTransportResponse:
+    if type(response) is not HttpTransportResponse:
+        raise OutboundHttpResponseInvalid("HTTP transport returned an invalid response")
+    invalid = False
+    status: object | None = None
+    headers: object | None = None
+    body: object | None = None
+    header_bytes: object | None = None
+    header_wire_bytes: object | None = None
+    metadata_wire_bytes: object | None = None
+    body_wire_bytes: object | None = None
+    wire_bytes: object | None = None
+    body_omitted: object | None = None
+    try:
+        status = cast(object, response.status_code)
+        headers = cast(object, response.headers)
+        body = cast(object, response.body)
+        header_bytes = cast(object, response.header_bytes)
+        header_wire_bytes = cast(object, response.header_wire_bytes)
+        metadata_wire_bytes = cast(object, response.metadata_wire_bytes)
+        body_wire_bytes = cast(object, response.body_wire_bytes)
+        wire_bytes = cast(object, response.wire_bytes)
+        body_omitted = cast(object, response.body_omitted)
+    except AttributeError:
+        invalid = True
+    if invalid:
+        raise OutboundHttpResponseInvalid("HTTP transport returned an invalid response")
+    if type(status) is not int or not 200 <= status <= 599:
+        raise OutboundHttpResponseInvalid("HTTP transport returned an invalid response")
+    validated_headers = _require_transport_headers(headers)
+    if type(body) is not bytes:
+        raise OutboundHttpResponseInvalid("HTTP transport returned an invalid response")
+    if type(body_omitted) is not bool:
+        raise OutboundHttpResponseInvalid("HTTP transport returned an invalid response")
+    counters = (
+        header_bytes,
+        header_wire_bytes,
+        metadata_wire_bytes,
+        body_wire_bytes,
+        wire_bytes,
+    )
+    if any(type(value) is not int for value in counters):
+        raise OutboundHttpResponseInvalid("HTTP transport returned an invalid response")
+    try:
+        validated = HttpTransportResponse(
+            status_code=status,
+            headers=validated_headers,
+            body=body,
+            header_bytes=cast(int, header_bytes),
+            header_wire_bytes=cast(int, header_wire_bytes),
+            metadata_wire_bytes=cast(int, metadata_wire_bytes),
+            body_wire_bytes=cast(int, body_wire_bytes),
+            wire_bytes=cast(int, wire_bytes),
+            body_omitted=body_omitted,
+        )
+    except (TypeError, ValueError):
+        raise OutboundHttpResponseInvalid("HTTP transport returned an invalid response") from None
+    if validated.header_bytes > request.max_response_header_bytes:
+        raise OutboundHttpLimitExceeded("HTTP response headers exceed the requested limit")
+    if len(validated.body) > request.max_response_body_bytes:
+        raise OutboundHttpLimitExceeded("HTTP response body exceeds the requested limit")
+    if validated.wire_bytes > request.max_response_wire_bytes:
+        raise OutboundHttpLimitExceeded("HTTP response wire bytes exceed the requested limit")
+    expected_body_omitted = _response_omits_body(request.method, validated.status_code) or (
+        validated.status_code in _REDIRECT_STATUSES and _redirect_location(validated) is not None
+    )
+    if validated.body_omitted is not expected_body_omitted:
+        raise OutboundHttpResponseInvalid("HTTP transport returned inconsistent body evidence")
+    content_lengths = [
+        header.value for header in validated.headers if header.name.lower() == "content-length"
+    ]
+    if len(content_lengths) > 1:
+        raise OutboundHttpResponseInvalid("HTTP response has ambiguous content length")
+    if content_lengths:
+        declared = parse_http_content_length(content_lengths[0])
+        if not validated.body_omitted and declared != len(validated.body):
+            raise OutboundHttpResponseInvalid(
+                "HTTP response content length does not match its body"
+            )
+    return validated
+
+
+def _task_exception_is[ResultT](
+    task: asyncio.Task[ResultT],
+    error: BaseException,
+) -> bool:
+    try:
+        return task.exception() is error
+    except asyncio.CancelledError:
+        return False
+
+
+def _require_transport_headers(headers: object) -> tuple[HttpHeader, ...]:
+    if type(headers) is not tuple:
+        raise OutboundHttpResponseInvalid("HTTP transport returned an invalid response")
+    validated: list[HttpHeader] = []
+    for header in cast(tuple[object, ...], headers):
+        if type(header) is not HttpHeader:
+            raise OutboundHttpResponseInvalid("HTTP transport returned an invalid response")
+        invalid = False
+        name: object | None = None
+        value: object | None = None
+        try:
+            name = cast(object, header.name)
+            value = cast(object, header.value)
+        except AttributeError:
+            invalid = True
+        validated_header: HttpHeader | None = None
+        if not invalid and isinstance(name, str) and isinstance(value, str):
+            try:
+                validated_header = HttpHeader(name, value)
+            except (OutboundHttpLimitExceeded, OutboundHttpRequestInvalid, TypeError):
+                invalid = True
+        else:
+            invalid = True
+        if invalid or validated_header is None:
+            raise OutboundHttpResponseInvalid("HTTP transport returned an invalid response")
+        validated.append(validated_header)
+    return tuple(validated)
+
+
+def _validated_resolution(
+    resolution: object,
+    expected_hostname: str,
+) -> NetworkResolution | None:
+    if type(resolution) is not NetworkResolution:
+        return None
+    try:
+        hostname = cast(object, resolution.hostname)
+        addresses = cast(object, resolution.addresses)
+        canonical_hostname = cast(object, resolution.canonical_hostname)
+    except AttributeError:
+        return None
+    if not isinstance(hostname, str) or type(addresses) is not tuple:
+        return None
+    hostname = str.__str__(hostname)
+    if canonical_hostname is not None:
+        if not isinstance(canonical_hostname, str):
+            return None
+        canonical_hostname = str.__str__(canonical_hostname)
+    validated_addresses: list[ResolvedHttpAddress] = []
+    for address in cast(tuple[object, ...], addresses):
+        if type(address) is not ResolvedHttpAddress:
+            return None
+        try:
+            value = cast(object, address.value)
+        except AttributeError:
+            return None
+        if not isinstance(value, str):
+            return None
+        try:
+            validated_addresses.append(ResolvedHttpAddress(str.__str__(value)))
+        except (TypeError, ValueError):
+            return None
+    try:
+        validated = NetworkResolution(
+            hostname=hostname,
+            addresses=tuple(validated_addresses),
+            canonical_hostname=canonical_hostname,
+        )
+    except (OutboundHttpRequestInvalid, TypeError, ValueError, UnicodeError):
+        return None
+    if validated.hostname != expected_hostname:
+        return None
+    return validated
+
+
+def _validated_policy_decision(decision: object) -> NetworkPolicyDecision | None:
+    if type(decision) is not NetworkPolicyDecision:
+        return None
+    try:
+        outcome = cast(object, decision.outcome)
+        reason = cast(object, decision.reason)
+    except AttributeError:
+        return None
+    try:
+        return NetworkPolicyDecision(
+            outcome=cast(NetworkPolicyOutcome, outcome),
+            reason=cast(NetworkPolicyReason, reason),
+        )
+    except (TypeError, ValueError):
+        return None
+
+
+def _copy_resolved_addresses(
+    addresses: tuple[ResolvedHttpAddress, ...],
+) -> tuple[ResolvedHttpAddress, ...]:
+    return tuple(ResolvedHttpAddress(address.value) for address in addresses)
+
+
+def _copy_operation_context(context: NetworkOperationContext) -> NetworkOperationContext:
+    cancellation = None if context.cancellation is None else _CancellationView(context.cancellation)
+    return NetworkOperationContext(
+        session_id=replace(context.session_id),
+        operation_id=replace(context.operation_id),
+        grant=replace(
+            context.grant,
+            policy_id=replace(context.grant.policy_id),
+            methods=tuple(context.grant.methods),
+            schemes=tuple(context.grant.schemes),
+            limits=replace(context.grant.limits),
+            credential_routes=tuple(replace(route) for route in context.grant.credential_routes),
+        ),
+        deadline_monotonic=float(context.deadline_monotonic),
+        cancellation=cancellation,
+    )
+
+
+def _redirect_location(response: HttpTransportResponse) -> str | None:
+    values = [header.value for header in response.headers if header.name.lower() == "location"]
+    if len(values) > 1:
+        raise OutboundHttpResponseInvalid("HTTP redirect has multiple locations")
+    if not values:
+        return None
+    if not values[0]:
+        raise OutboundHttpResponseInvalid("HTTP redirect location is empty")
+    return values[0]
+
+
+def _normalize_redirect(
+    current: NormalizedHttpUrl,
+    location: str,
+) -> NormalizedHttpUrl:
+    invalid = False
+    normalized: NormalizedHttpUrl | None = None
+    try:
+        redirected = urljoin(current.canonical_url, location)
+        normalized = normalize_http_url(redirected)
+    except (OutboundHttpRequestInvalid, UnicodeError, ValueError):
+        invalid = True
+    if invalid or normalized is None:
+        raise OutboundHttpResponseInvalid("HTTP redirect location is invalid")
+    return normalized
+
+
+def _response_omits_body(method: HttpMethod, status_code: int) -> bool:
+    return method is HttpMethod.HEAD or status_code in (204, 205, 304)
+
+
+def _decode_response(
+    response: HttpTransportResponse,
+    maximum: int,
+) -> tuple[bytes, tuple[HttpHeader, ...]]:
+    encodings = [
+        header.value.strip().lower()
+        for header in response.headers
+        if header.name.lower() == "content-encoding"
+    ]
+    if len(encodings) > 1:
+        raise OutboundHttpResponseInvalid("HTTP response has multiple content encodings")
+    encoding = encodings[0] if encodings else "identity"
+    if "," in encoding:
+        raise OutboundHttpResponseInvalid("HTTP response content encoding is unsupported")
+    if encoding in ("", "identity"):
+        body = response.body
+    elif encoding == "gzip":
+        body = _decompress(response.body, maximum, (zlib.MAX_WBITS | 16,))
+    elif encoding == "deflate":
+        body = _decompress(response.body, maximum, (zlib.MAX_WBITS, -zlib.MAX_WBITS))
+    else:
+        raise OutboundHttpResponseInvalid("HTTP response content encoding is unsupported")
+    if len(body) > maximum:
+        raise OutboundHttpLimitExceeded(
+            "HTTP decompressed response body exceeds the requested limit"
+        )
+    return body, _published_headers(response.headers)
+
+
+def _published_headers(headers: tuple[HttpHeader, ...]) -> tuple[HttpHeader, ...]:
+    return tuple(
+        header
+        for header in headers
+        if header.name.lower() not in _FRAMING_RESPONSE_HEADERS | _SENSITIVE_RESPONSE_HEADERS
+    )
+
+
+def _decompress(data: bytes, maximum: int, window_bits: tuple[int, ...]) -> bytes:
+    for bits in window_bits:
+        invalid = False
+        exceeded = False
+        output = b""
+        try:
+            decompressor = zlib.decompressobj(bits)
+            output = decompressor.decompress(data, maximum + 1)
+            if len(output) > maximum or decompressor.unconsumed_tail:
+                exceeded = True
+            else:
+                output += decompressor.flush(maximum - len(output) + 1)
+                if len(output) > maximum:
+                    exceeded = True
+                elif not decompressor.eof or decompressor.unused_data:
+                    invalid = True
+        except zlib.error:
+            invalid = True
+        if exceeded:
+            raise OutboundHttpLimitExceeded(
+                "HTTP decompressed response body exceeds the requested limit"
+            )
+        if not invalid:
+            return output
+    raise OutboundHttpResponseInvalid("HTTP response content encoding is malformed")
+
+
+def _headers_size(headers: tuple[HttpHeader, ...]) -> int:
+    return sum(
+        len(header.name.encode("ascii")) + 2 + len(header.value.encode("utf-8")) + 2
+        for header in headers
+    )
+
+
+def _require_active(context: NetworkOperationContext) -> None:
+    if _cancellation_is_active(context):
+        raise OutboundHttpCancelled("outbound HTTP operation was cancelled")
+    if asyncio.get_running_loop().time() >= context.deadline_monotonic:
+        raise OutboundHttpTimeout("outbound HTTP operation exceeded its deadline")
+
+
+def _cancellation_is_active(context: NetworkOperationContext) -> bool:
+    cancellation = context.cancellation
+    return cancellation is not None and cancellation.is_set()
+
+
+def _caller_is_cancelling() -> bool:
+    task = asyncio.current_task()
+    return task is not None and task.cancelling() > 0

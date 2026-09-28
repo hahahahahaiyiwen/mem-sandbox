@@ -12,6 +12,7 @@ from mem_sandbox.network import (
     HttpScheme,
     HttpTransferLimits,
     HttpTransferUsage,
+    HttpTransportResponse,
     NetworkOperationContext,
     NetworkPolicyId,
     OutboundHttpBinding,
@@ -21,6 +22,7 @@ from mem_sandbox.network import (
     OutboundHttpRequest,
     OutboundHttpRequestInvalid,
     OutboundHttpResponse,
+    OutboundHttpResponseInvalid,
 )
 
 
@@ -80,6 +82,7 @@ def test_http_request_and_response_are_immutable_and_non_revealing() -> None:
         request_count=1,
         request_bytes=20,
         response_bytes=5,
+        response_wire_bytes=5,
         decompressed_response_bytes=5,
         redirect_count=0,
         duration_ms=1.5,
@@ -99,6 +102,115 @@ def test_http_request_and_response_are_immutable_and_non_revealing() -> None:
     assert "value" not in repr(response)
     with pytest.raises(FrozenInstanceError):
         request.url = "https://other.test"  # type: ignore[misc]
+
+
+def test_transport_response_rejects_provisional_status() -> None:
+    with pytest.raises(ValueError):
+        HttpTransportResponse(
+            status_code=103,
+            headers=(),
+            body=b"",
+            header_bytes=0,
+            header_wire_bytes=0,
+            metadata_wire_bytes=17,
+            body_wire_bytes=0,
+            wire_bytes=17,
+        )
+
+
+def test_transport_response_rejects_negative_wire_bytes() -> None:
+    with pytest.raises(ValueError):
+        HttpTransportResponse(
+            status_code=200,
+            headers=(),
+            body=b"",
+            header_bytes=0,
+            header_wire_bytes=0,
+            metadata_wire_bytes=17,
+            body_wire_bytes=0,
+            wire_bytes=-1,
+        )
+
+
+def test_transport_response_requires_structural_wire_accounting() -> None:
+    with pytest.raises(ValueError):
+        HttpTransportResponse(
+            status_code=200,
+            headers=(),
+            body=b"",
+            header_bytes=0,
+            header_wire_bytes=0,
+            metadata_wire_bytes=17,
+            body_wire_bytes=0,
+            wire_bytes=18,
+        )
+
+
+def test_transfer_limits_canonicalize_behavior_bearing_numbers() -> None:
+    class LiarInt(int):
+        def __le__(self, other: object) -> bool:
+            return True
+
+    class LiarFloat(float):
+        def __le__(self, other: object) -> bool:
+            return True
+
+    requested = HttpTransferLimits(
+        timeout_seconds=LiarFloat(1000),
+        max_response_header_bytes=LiarInt(1_000_000),
+    )
+    ceiling = HttpTransferLimits(
+        timeout_seconds=1,
+        max_response_header_bytes=1024,
+    )
+
+    assert type(requested.timeout_seconds) is float
+    assert type(requested.max_response_header_bytes) is int
+    assert not requested.is_within(ceiling)
+
+
+def test_authority_identifiers_canonicalize_behavior_bearing_strings() -> None:
+    class PolicyAlias(str):
+        def __eq__(self, other: object) -> bool:
+            return True
+
+        def __hash__(self) -> int:
+            return hash("broad")
+
+    policy_id = NetworkPolicyId(PolicyAlias("restricted"))
+    route_id = CredentialRouteId(PolicyAlias("route"))
+
+    assert type(policy_id.value) is str
+    assert policy_id == NetworkPolicyId("restricted")
+    assert hash(policy_id) != hash(NetworkPolicyId("broad"))
+    assert type(route_id.value) is str
+
+
+def test_public_response_and_grant_reject_provisional_status() -> None:
+    usage = HttpTransferUsage(
+        request_count=1,
+        request_bytes=0,
+        response_bytes=0,
+        response_wire_bytes=0,
+        decompressed_response_bytes=0,
+        redirect_count=0,
+        duration_ms=1,
+    )
+    with pytest.raises(ValueError):
+        OutboundHttpResponse(status_code=103, headers=(), body=b"", usage=usage)
+
+    provisional = object.__new__(OutboundHttpResponse)
+    object.__setattr__(provisional, "status_code", 103)
+    object.__setattr__(provisional, "headers", ())
+    object.__setattr__(provisional, "body", b"")
+    object.__setattr__(provisional, "usage", usage)
+    outbound_request = OutboundHttpRequest(
+        method=HttpMethod.GET,
+        url="https://example.test",
+        limits=limits(),
+    )
+    with pytest.raises(OutboundHttpResponseInvalid):
+        grant().require_response(outbound_request, provisional)
 
 
 @pytest.mark.parametrize(
@@ -128,6 +240,30 @@ def test_http_request_rejects_unsupported_or_over_limit_input(
 ) -> None:
     with pytest.raises((OutboundHttpRequestInvalid, OutboundHttpLimitExceeded)):
         request_factory()  # type: ignore[operator]
+
+
+@pytest.mark.parametrize("value", ["before\x00after", "before\x1fafter", "before\x7fafter"])
+def test_http_header_rejects_non_tab_control_characters(value: str) -> None:
+    with pytest.raises(OutboundHttpRequestInvalid):
+        HttpHeader("X-Test", value)
+
+
+def test_http_header_canonicalizes_string_subclasses() -> None:
+    class BehaviorBearingString(str):
+        def lower(self) -> str:
+            return "different"
+
+        def encode(self, *args: object, **kwargs: object) -> bytes:
+            raise RuntimeError("provider-controlled encode")
+
+    header = HttpHeader(
+        BehaviorBearingString("X-Test"),
+        BehaviorBearingString("value"),
+    )
+
+    assert type(header.name) is str
+    assert type(header.value) is str
+    assert header == HttpHeader("X-Test", "value")
 
 
 @pytest.mark.parametrize(
@@ -212,6 +348,7 @@ def test_request_and_response_accept_exact_limits_and_reject_one_over() -> None:
             request_count=1,
             request_bytes=0,
             response_bytes=4,
+            response_wire_bytes=4,
             decompressed_response_bytes=4,
             redirect_count=0,
             duration_ms=1000,
@@ -238,6 +375,7 @@ def test_request_and_response_accept_exact_limits_and_reject_one_over() -> None:
                     request_count=1,
                     request_bytes=0,
                     response_bytes=5,
+                    response_wire_bytes=5,
                     decompressed_response_bytes=5,
                     redirect_count=0,
                     duration_ms=1000,
@@ -313,6 +451,19 @@ def test_grant_rejects_request_before_gateway_use() -> None:
                 method=HttpMethod.GET,
                 url="https://example.test",
                 limits=limits(max_response_body_bytes=8192),
+            )
+        )
+
+
+def test_grant_rejects_request_count_above_its_limit() -> None:
+    configured = grant(transfer_limits=limits(max_requests=1))
+
+    with pytest.raises(OutboundHttpLimitExceeded):
+        configured.require_request(
+            OutboundHttpRequest(
+                method=HttpMethod.GET,
+                url="https://example.test",
+                limits=limits(max_requests=2),
             )
         )
 

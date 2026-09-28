@@ -1481,7 +1481,9 @@ workflow evidence; it need not precede network-disabled Milestone 10 execution.
 satisfies workflow-blocker review trigger 3 and selects this milestone for bounded child
 implementation. Networking remains absent from the current/default profile, and no
 checklist item is complete merely because the milestone is selected. Issue #104
-subsequently completed the gateway/profile/fake seam without adding a real transport.
+subsequently completed the gateway/profile/fake seam. Issue #107 adds the
+destination-safe bounded gateway, controlled resolver, and one direct transport while
+leaving credentials, cumulative accounting/audit, and adapters to later children.
 
 Detailed design:
 [Controlled Network Egress](./components/network-egress/README.md).
@@ -1517,22 +1519,22 @@ audit behavior.
 
 #### 9.2 Destination policy and SSRF controls
 
-- [ ] **9.2.1** Canonicalize scheme, hostname, effective port, and URL structure in the
+- [x] **9.2.1** Canonicalize scheme, hostname, effective port, and URL structure in the
   network boundary. Reject URL user information and unsupported forms.
-- [ ] **9.2.2** Apply fail-closed scheme, hostname, port, method, and request-class
+- [x] **9.2.2** Apply fail-closed scheme, hostname, port, method, and request-class
   policy before DNS so denied names cannot become a resolver-based exfiltration channel.
-- [ ] **9.2.3** Resolve through a controlled CNAME policy and classify every final IPv4
+- [x] **9.2.3** Resolve through a controlled CNAME policy and classify every final IPv4
   and IPv6 result. Block loopback, private, link-local, multicast, reserved, unspecified,
   and cloud metadata destinations by default.
-- [ ] **9.2.4** Bind connections to admitted resolution results while preserving normal
+- [x] **9.2.4** Bind connections to admitted resolution results while preserving normal
   TLS hostname validation. Define and test DNS-rebinding behavior.
-- [ ] **9.2.5** Re-run normalization, admission, resolution, resource reservation, and
-  credential selection for every redirect. Define exact redirect method and credential
-  forwarding behavior.
-- [ ] **9.2.6** Enforce host-controlled schemes, destinations, ports, methods, header
+- [x] **9.2.5** Re-run normalization, admission, resolution, and attempt-limit
+  enforcement for every redirect. GET and HEAD retain their method; credentials remain
+  unavailable until destination-bound selection is integrated in 9.3.
+- [x] **9.2.6** Enforce host-controlled schemes, destinations, ports, methods, header
   classes, TLS, and proxy behavior. Missing facts or unsupported obligations deny before
   transport access.
-- [ ] **9.2.7** Perform no implicit transport retry. Admit, reserve, credential, and
+- [x] **9.2.7** Perform no implicit transport retry. Admit, reserve, credential, and
   audit every future retry independently, and require an approved idempotency contract
   before retrying a state-changing method.
 
@@ -2022,7 +2024,7 @@ their referenced checklist task begins.
 | Repository ingestion and export | Defer the designed host-controlled bounded archive/tree import and revision/hash-bound export until the artifact-exchange review trigger is met | `8.4` | Deferred |
 | Git repository retrieval | Planned input source; initiating actor, transport, credentials, ref resolution, refresh/merge semantics, and local-edit preservation require design approval | `8.4.6`-`8.4.8` | Open |
 | First optional external capability | Select controlled HTTP from the linked [current-source verification evidence](./product-validation/current-source-verification-evidence.md); network-disabled execution remains separately evidence-gated | `7.3.4` / `9` / `10` | Selected |
-| Network egress | Default-deny HTTP/HTTPS through one host-owned gateway with destination policy, SSRF controls, destination-bound credentials, cumulative budgets, and audit | `9` | Selected, not implemented |
+| Network egress | Default-deny HTTP/HTTPS through one host-owned gateway with destination policy, SSRF controls, destination-bound credentials, cumulative budgets, and audit | `9` | Gateway/profile and destination-safe transport implemented; credentials, accounting/audit, adapters, and closure conformance remain |
 | First network command | Prefer `fetch` or `http`; use `curl` only for a documented compatible subset; never invoke a host executable | `9.4` | Open |
 | External execution | Run agent-supplied code only through a host-selected external backend with explicit security classification and atomic workspace publication | `10` | Planned |
 | First external runtime | Immutable bounded Python workspace-script profile with package installation and networking disabled initially | `10.4` | Planned |

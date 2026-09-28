@@ -2,8 +2,9 @@
 
 **Status:** Selected by
 [current-source verification evidence](../../product-validation/current-source-verification-evidence.md).
-The Milestone 9A gateway/profile/fake seam is implemented; real transport, destination
-admission, credentials, accounting, adapters, and full security conformance are not.
+The Milestone 9A gateway/profile/fake seam and Milestone 9B destination-safe bounded
+transport are implemented. Credentials, cumulative accounting/audit, adapters, and
+full security conformance remain later slices.
 
 ## Purpose
 
@@ -15,7 +16,7 @@ The network boundary is framework-neutral. A trusted virtual command and a typed
 tool may present different user interfaces, but both delegate to the same host-selected
 gateway and policy. Network access remains absent from the default virtual profile.
 
-## Implemented Milestone 9A boundary
+## Implemented Milestone 9A and 9B boundary
 
 `mem_sandbox.network` now provides immutable HTTP/HTTPS `GET`/`HEAD` request, response,
 limit, usage, grant, context, binding, stable-error, gateway, fake, and conformance
@@ -44,11 +45,24 @@ cancellation settlement, provider-task failures remain protected secondary failu
 `KeyboardInterrupt` and `SystemExit`, pass through unchanged; if one escapes after
 `operation.started`, the session does not manufacture a terminal event.
 
-The only gateway implementation is deterministic and fake. It opens no network
-connection. Basic scheme recognition and grant checks are implemented, but URL
-canonicalization, hostname/IP admission, DNS, TLS, redirect handling, ambient-proxy
-isolation, credential attachment, cumulative accounting, network-specific events,
-commands, and agent tools remain later Milestone 9 work.
+`BoundedOutboundHttpGateway` now composes focused policy, resolver, and one-attempt
+transport ports. It strictly normalizes URL and IDNA host forms, denies a hostname
+before DNS unless policy admits it, classifies every final IPv4/IPv6 address, rejects a
+mixed or prohibited answer, and pins one admitted numeric peer while retaining the
+original hostname for HTTP and TLS identity.
+
+`SystemNetworkResolver` exposes the platform's final canonical hostname when available.
+The static destination policy requires a changed canonical hostname to be explicitly
+listed. `AsyncioHttpTransport` uses direct numeric asyncio streams, normal certificate
+and hostname verification, explicit HTTP/1.1 framing, and one closed connection per
+attempt. Redirects are gateway-owned and repeat the entire destination pipeline. GET and
+HEAD remain unchanged across supported redirect statuses; no failure triggers address
+fallback or retry.
+
+Ambient proxies, cookies, caches, auth retries, model-selected TLS settings, credential
+attachment, cumulative accounting, network-specific events, commands, and agent tools
+are absent. Credential-route requests fail before policy or DNS until issue #103 adds
+destination-bound leases.
 
 ## Decision summary
 
@@ -259,6 +273,7 @@ class HttpTransferUsage:
     request_count: int
     request_bytes: int
     response_bytes: int
+    response_wire_bytes: int
     decompressed_response_bytes: int
     redirect_count: int
     duration_ms: float
@@ -303,6 +318,23 @@ Admission has three layers:
 3. After controlled resolution, the gateway performs post-resolution admission over
    every resolved address immediately before connection or credential access.
 
+Each asynchronous policy, resolver, and transport collaboration is independently raced
+against the absolute gateway deadline. Its coroutine is created only after current
+cancellation and deadline admission, and cancellation observed before or after either
+policy phase retains the cancellation category rather than becoming a policy denial. A
+collaborator that suppresses cancellation is retained and observed after timeout, but
+cannot resume the pipeline, trigger a later side effect, or publish a response.
+The session and gateway each retain their own authoritative snapshots. The configured
+gateway receives detached request/context values; policy, resolver, and transport
+collaborators receive separately reconstructed identifiers, grants, limits, facts, and
+attempt requests. Collaborator mutation therefore cannot widen the original grant,
+change redirect authority, or weaken later validation. Returned policy decisions,
+transport responses, and public gateway responses are reconstructed as complete exact
+models before they influence control flow, accounting, or publication.
+Authority identifiers and all numeric transfer limits are canonicalized to exact
+built-in primitives before comparisons, dictionary lookup, deadline arithmetic, or
+transport construction.
+
 The network module should own a focused policy contract such as:
 
 ```python
@@ -335,43 +367,99 @@ HTTP request, and the gateway owns its normalization.
 
 ## Destination and transport controls
 
-The first implementation must define and test:
+The first implementation defines and tests:
 
 - Only `http` and `https` schemes are recognized. HTTPS should be the normal production
   default.
 - URL user information and embedded credentials are rejected.
-- Hostnames use one canonical comparison form. Internationalized names require explicit
-  IDNA handling rather than display-string comparison.
+- Hostnames use one canonical comparison form. A non-ASCII label must round-trip through
+  built-in IDNA from its NFC/lowercase source form; compatibility or deletion mappings
+  that could collapse distinct exact-host authorities are rejected. Explicit ASCII
+  A-labels remain exact authorities. Legacy numeric forms, including mixed dotted
+  hexadecimal forms, over-limit raw/canonical URL representations, and control-bearing
+  header values are rejected.
 - Scheme, hostname, port, method, and request class pass a fail-closed pre-resolution
   policy before any DNS query, preventing arbitrary denied names from becoming a DNS
   exfiltration channel.
 - IP literals are classified directly.
-- A controlled resolver follows an explicit CNAME policy. Every final A and AAAA result
-  is classified. A hostname is not admitted because only one of several returned
-  addresses is acceptable.
-- Loopback, unspecified, link-local, private, multicast, reserved, and cloud metadata
-  destinations are denied by default for both IPv4 and IPv6.
+- A controlled resolver reports its final canonical hostname when available. Changed
+  canonical hosts require explicit rule authority. Every final A and AAAA result is
+  classified; a hostname is not admitted because only one of several returned addresses
+  is acceptable.
+- Resolver results are reconstructed from exact plain hostname/address strings and every
+  classification is recomputed. Collaborator-stored classifications and parsed-address
+  objects are never admission authority. Post-resolution policy receives detached
+  address facts, so it cannot mutate the gateway-owned peer selected for transport.
+- Loopback, unspecified, link-local, private, multicast, reserved, transition,
+  translation, mapped, and cloud metadata destinations are denied by default for both
+  IPv4 and IPv6. Explicit checks include Azure WireServer, IETF protocol-assignment and
+  AS112/AMT service prefixes, IPv6 documentation space, deprecated IPv6 site-local and
+  6bone space, 6to4 relay anycast, standard NAT64 ranges, 6to4, Teredo, and both ISATAP
+  interface-identifier forms.
 - The transport connects only to an address that was resolved and admitted for that
   request while preserving the original hostname for TLS verification.
-- Redirect targets repeat URL normalization, policy evaluation, DNS validation, budget
-  reservation, and credential selection. Credentials are never forwarded merely
-  because a client library followed a redirect.
-- Redirect count and method-rewrite behavior are explicit.
+- Request header names and values are snapshotted as exact built-in strings before
+  controlled-header filtering. The transport receives a detached attempt request, while
+  response checks continue to use the unexposed gateway-owned attempt and its original
+  limits.
+- Redirect targets repeat URL normalization, policy evaluation, DNS validation, and
+  attempt-limit enforcement. Credentials are currently unavailable rather than
+  forwarded. GET and HEAD retain their method.
 - The gateway performs no implicit transport retry. A future retry policy must admit,
   reserve, credential, and audit every attempt independently and must not retry a
   state-changing method without an approved idempotency contract.
 - TLS certificate validation cannot be disabled by model input.
+- The transport owns its TLS context, uses only system/compiled trust sources without
+  ambient CA-file/directory overrides, accepts mutable or immutable Windows trust-purpose
+  collections, enables strict/partial-chain verification when supported, and exposes no
+  custom trust-root or client-certificate injection.
 - Proxy behavior is host-controlled. Ambient `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`,
   and `NO_PROXY` values are not consumed implicitly.
-- Request and response headers have count and byte limits.
+- Request and response headers have count and byte limits. `response_bytes` counts
+  encoded response bodies, while `response_wire_bytes` counts every consumed
+  informational/final response head, encoded body byte, chunk-size line, data
+  terminator, zero chunk, and trailer. The transferred-byte limit uses request-body plus
+  response-wire usage across all attempts.
+- The single-attempt result reports cumulative logical header-budget bytes, raw
+  header-field wire bytes, response head/trailer wire bytes, and encoded-body/framing
+  wire bytes separately, plus an exact boolean recording whether protocol or redirect
+  handling intentionally omitted body consumption. The gateway reconstructs this
+  evidence, requires consistent omission state, cross-counter relationships, supported
+  unambiguous framing, plausible final-response structure, and exact total equality, and
+  enforces raw metadata limits even when fields are not published. For consumed chunked
+  responses, accounting assigns the zero-chunk line to body/framing usage and assigns
+  trailer fields plus the mandatory final trailer-section CRLF to metadata usage.
+  Trailer fields consume the greater of their raw Latin-1 wire size and normalized
+  UTF-8 logical size from the header budget. HEAD, 204/205/304, and redirects with a
+  location may carry framing headers while body consumption is omitted; those attempts
+  report zero body/framing bytes and cannot use omission evidence on an ordinary
+  body-bearing response.
+- Response framing uses strict decimal content lengths and hexadecimal chunk sizes;
+  content-length whitespace is limited to HTTP SP/HTAB and its decimal representation
+  is bounded before integer conversion. Provisional responses never cross the
+  transport, gateway, grant, or session boundary as final results.
+- The gateway reconstructs and revalidates exact injected transport response primitives,
+  nested header name/value invariants, final status, structural metadata/body counters,
+  and total wire-byte equality before accounting or publication. Header fields are
+  snapshotted as exact built-in strings before filtering, sizing, redirect handling, or
+  publication.
+- The session independently reconstructs exact gateway response fields and the actual
+  bytes payload before applying the admitted grant. Gateway-owned request/context copies
+  are not reused as session authority after provider code has observed them.
 - Content encoding cannot bypass the decompressed-response limit.
+- HEAD and status-defined bodyless responses do not decode representation metadata.
+- Failed/cancelled attempts abort stream shutdown immediately; successful graceful
+  shutdown is bounded by the same operation deadline.
+- A provider-supplied cancellation value is treated as cancellation only while the
+  operation's cooperative cancellation signal is active; otherwise policy, resolution,
+  and transport fail closed in their own stable categories.
 - No implicit cookie jar, cache, authentication retry, or connection to a model-supplied
   Unix socket exists.
 
-Destination allowlists should support exact hosts and explicit subdomain rules rather
-than ambiguous suffix matching. Port and scheme remain part of the rule. A production
-design must also state how DNS changes between admission and connection are prevented
-from changing the approved address.
+Destination allowlists support exact hosts and explicit subdomain rules rather than
+ambiguous suffix matching. Port, scheme, and method remain part of the rule. DNS changes
+after admission cannot replace the peer because the transport receives only the
+selected numeric address and opens it with `AI_NUMERICHOST`.
 
 ## Secrets and credentials
 
@@ -484,7 +572,7 @@ Candidate bounded attributes include:
 - method;
 - redirect depth;
 - response status;
-- request, response, and decompressed byte counts;
+- request, encoded-response, response-wire, and decompressed byte counts;
 - duration;
 - budget outcome;
 - credential-route identifier or secret-reference name, never its value.
@@ -523,7 +611,10 @@ Stable failures should distinguish:
 - required terminal audit failed after a possible remote side effect.
 
 Raw resolver, socket, TLS, HTTP-client, proxy, and credential-provider exceptions never
-cross the boundary or appear in model-visible errors.
+cross the boundary or appear in model-visible errors. Fatal failures raised by policy,
+resolver, or transport child tasks are translated into the phase-appropriate stable
+failure without retaining their exception graphs. Bare `KeyboardInterrupt` and
+`SystemExit` remain process-control signals.
 
 ## Lifecycle
 
@@ -561,19 +652,21 @@ resource owner, not an individual command.
 
 ## Delivery sequence
 
-Completed in Milestone 9A:
+Completed in Milestones 9A and 9B:
 
 1. Define immutable network grants, request/result/context contracts, and stable errors.
 2. Implement a fake gateway and conformance driver without a real transport.
 3. Integrate explicit virtual/connected service profiles and one typed session operation.
+4. Implement one bounded HTTP transport with controlled DNS/canonical-host policy,
+   peer pinning, explicit redirects, ambient-proxy isolation, normal TLS verification,
+   strict framing/decoding, and no implicit retry.
 
 Remaining:
 
-1. Implement one bounded HTTP transport with controlled DNS, redirect, proxy, and TLS
-   behavior.
-2. Add destination-bound credential routing, accounting, events, and secret-canary
+1. Add destination-bound credential routing, accounting, events, and secret-canary
    coverage.
-3. Add one typed tool and one virtual command over the same gateway.
+2. Add one typed tool and one virtual command over the same gateway.
+3. Complete adversarial security conformance and closure evidence.
 4. Compile the same grant into an external execution backend only after its system-level
    egress enforcement is proven.
 

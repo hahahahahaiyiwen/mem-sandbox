@@ -30,18 +30,29 @@ session-owned admission and workspace-owned publication. The
 documents the conditional grants, event facts, and settlement paths that any future
 session facade must preserve.
 
-Milestone 9A implements only the HTTP grant/gateway seam. Session close cooperatively
-cancels an active HTTP operation but never closes the borrowed host-scoped gateway.
-Snapshots carry no network authority; service resume supplies the current host profile.
+Milestones 9A and 9B implement the HTTP grant/gateway seam and an optional
+destination-safe bounded gateway/transport behind that seam. Session close
+cooperatively cancels an active HTTP operation but never closes the borrowed
+host-scoped gateway. Snapshots carry no network authority; service resume supplies the
+current host profile.
 The gateway call runs in a child task so provider self-cancellation is translated as a
 stable gateway failure rather than impersonating caller cancellation. Cancellation
 settlement tracks the collaborator before its bounded wait; repeated native
 cancellation therefore cannot bypass fail-closed retention, and close can re-signal an
 unfinished collaborator without waiting indefinitely.
+The session retains gateway-independent request and grant authority: it reconstructs
+the request and operation context before use, passes separate detached copies to the
+configured gateway, and never validates against provider-exposed objects. A returned
+response is reconstructed into exact session-owned headers, bytes, usage counters, and
+primitive fields before grant validation or publication, so behavior-bearing subclasses
+and provider mutations cannot hide limit violations.
 
 Provider failures, including a task-raised `GeneratorExit` and nested exception groups,
 become context-free `OutboundHttpGatewayFailed` values. During cancellation settlement,
 provider-task failures remain protected secondary failures.
+Safe gateway categories for denial, limits, request validity, resolution, response
+validity, timeout, and transport failure retain their stable type while their provider
+messages and exception graphs are replaced.
 `GeneratorExit` delivered directly into a session-owned coroutine, plus bare
 `KeyboardInterrupt` and `SystemExit`, pass through unchanged; if one escapes after
 operation start, the session does not manufacture a terminal event.

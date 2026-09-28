@@ -62,6 +62,7 @@ def response() -> OutboundHttpResponse:
             request_count=1,
             request_bytes=0,
             response_bytes=5,
+            response_wire_bytes=5,
             decompressed_response_bytes=5,
             redirect_count=0,
             duration_ms=1,
